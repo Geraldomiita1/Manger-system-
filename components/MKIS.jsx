@@ -173,13 +173,24 @@ async function verifyPassword(plain, stored) {
 // ─── ACCOUNTS (two roles: teacher + admin) ────────────────────────────────────
 // mkis_accounts is a shared object keyed by lowercase username:
 //   { [usernameLower]: { username, passwordHash, role: "teacher"|"admin" } }
-// The teacher account is the everyday login everyone already knows; the admin
-// account is a separate, more privileged login. Defaults match the school's
-// requested credentials and are only used the very first time the app runs
-// (i.e. when no accounts have been saved to shared storage yet).
+// Each teacher has their own individual, distinctive login (no shared
+// "Teacher" account); the admin account is a separate, more privileged
+// login. Defaults match the school's requested credentials and are only
+// used the very first time the app runs (i.e. when no accounts have been
+// saved to shared storage yet).
 const DEFAULT_ACCOUNTS_PLAIN = {
-  teacher: { username: "Teacher", password: "Teacher123", role: "teacher" },
   "gerald": { username: "Gerald", password: "GOODTOGO11", role: "admin" },
+  "omiita01": { username: "OMIITA01", password: "OMIITA01172", role: "teacher" },
+  "emuron10": { username: "EMURON10", password: "EMURON10172", role: "teacher" },
+  "ijang11": { username: "IJANG11", password: "IJANG11172", role: "teacher" },
+  "odoi31": { username: "ODOI31", password: "ODOI31172", role: "teacher" },
+  "immaculate71": { username: "IMMACULATE71", password: "IMMACULATE71172", role: "teacher" },
+  "akoth33": { username: "AKOTH33", password: "AKOTH33172", role: "teacher" },
+  "maryg0001": { username: "MARYG0001", password: "MARYG0001172", role: "teacher" },
+  "anyango45": { username: "ANYANGO45", password: "ANYANGO45172", role: "teacher" },
+  "igari89": { username: "IGARI89", password: "IGARI89172", role: "teacher" },
+  "jakisa23": { username: "JAKISA23", password: "JAKISA23172", role: "teacher" },
+  "nyachwo": { username: "NYACHWO", password: "NYACHWO172", role: "teacher" },
 };
 async function buildDefaultAccounts() {
   const out = {};
@@ -833,8 +844,8 @@ export default function App() {
       ]);
       if (!mounted) return;
       setStudents(s); setTermMarks(tm); setMonthlyMarks(mm);
-      // First run ever: no accounts saved yet, so seed the two default
-      // logins (Teacher / admin) and persist them.
+      // First run ever: no accounts saved yet, so seed the default admin
+      // login and each teacher's individual login, then persist them.
       let finalAccounts = acc;
       if (!finalAccounts || Object.keys(finalAccounts).length === 0) {
         finalAccounts = await buildDefaultAccounts();
@@ -2953,6 +2964,47 @@ function ManageRequests({ changeRequests, approveChangeRequest, rejectChangeRequ
   );
 }
 // ─── SETTINGS ────────────────────────────────────────────────────────────────
+// Lets the admin set a new password for any teacher account directly --
+// no need to know that teacher's current password. Admin-only; rendered
+// inside Settings, which is already gated to role === "admin".
+function ManageTeacherPasswords({ accounts, setAccounts }) {
+  const [pwByKey, setPwByKey] = useState({});
+  const [msgByKey, setMsgByKey] = useState({});
+  const teacherKeys = Object.keys(accounts)
+    .filter(k => accounts[k]?.role === "teacher")
+    .sort((a, b) => (accounts[a].username || "").localeCompare(accounts[b].username || ""));
+  const handleUpdate = (key) => {
+    const val = (pwByKey[key] || "").trim();
+    if (!val) { setMsgByKey(prev => ({ ...prev, [key]: "Enter a new password." })); return; }
+    hashPassword(val).then(hashed => {
+      setAccounts(prev => ({ ...prev, [key]: { ...prev[key], passwordHash: hashed } }));
+      setPwByKey(prev => ({ ...prev, [key]: "" }));
+      setMsgByKey(prev => ({ ...prev, [key]: "✅ Updated" }));
+      setTimeout(() => setMsgByKey(prev => ({ ...prev, [key]: "" })), 3000);
+    });
+  };
+  if (teacherKeys.length === 0) {
+    return <div style={{ fontSize: 13, color: "#6b7280" }}>No teacher accounts found.</div>;
+  }
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      {teacherKeys.map(key => (
+        <div key={key} style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap", borderBottom: "1px solid #f1f5f9", paddingBottom: 10 }}>
+          <div style={{ minWidth: 150 }}>
+            <label style={lbl}>Username</label>
+            <div style={{ ...inp, background: "#f8fafc", display: "flex", alignItems: "center", fontWeight: 700, color: "#1e3a6e" }}>{accounts[key].username}</div>
+          </div>
+          <div>
+            <label style={lbl}>New Password</label>
+            <input type="password" value={pwByKey[key] || ""} onChange={e => setPwByKey(prev => ({ ...prev, [key]: e.target.value }))} style={inp} placeholder="New password" />
+          </div>
+          <button onClick={() => handleUpdate(key)} style={btnPrimary}>Set Password</button>
+          {msgByKey[key] && <div style={{ fontSize: 12, color: msgByKey[key].startsWith("✅") ? "#16a34a" : "#dc2626" }}>{msgByKey[key]}</div>}
+        </div>
+      ))}
+    </div>
+  );
+}
 function Settings({ school, setSchool, bands, setBands, divisions, setDivisions, accounts, setAccounts, role, currentUser, students, setStudents, setTermMarks, setMonthlyMarks, initials, setInitials }) {
   const [curPw, setCurPw] = useState("");
   const [newPw, setNewPw] = useState("");
@@ -3056,6 +3108,11 @@ function Settings({ school, setSchool, bands, setBands, divisions, setDivisions,
           <button onClick={handlePwChange} style={btnPrimary}>Update Password</button>
         </div>
         {pwMsg&&<div style={{marginTop:8,fontSize:13,color:pwMsg.startsWith("✅")?"#16a34a":"#dc2626"}}>{pwMsg}</div>}
+      </div>
+      <div style={{background:"white",borderRadius:12,padding:20,border:"1px solid #e5e7eb"}}>
+        <h3 style={{margin:"0 0 16px",color:"#1e3a6e",fontSize:15,fontWeight:700}}>👩‍🏫 Manage Teacher Passwords</h3>
+        <div style={{fontSize:12,color:"#6b7280",marginBottom:14}}>As the administrator, you can set a new password for any teacher account directly here — no need to know their current password.</div>
+        <ManageTeacherPasswords accounts={accounts} setAccounts={setAccounts} />
       </div>
       <div style={{background:"white",borderRadius:12,padding:20,border:"1px solid #e5e7eb"}}>
         <h3 style={{margin:"0 0 16px",color:"#1e3a6e",fontSize:15,fontWeight:700}}>🎯 Grade Bands</h3>
@@ -3724,4 +3781,4 @@ function AuditLog() {
       )}
     </div>
   );
-}
+  }
