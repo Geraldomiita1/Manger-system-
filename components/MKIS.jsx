@@ -1648,4 +1648,2243 @@ function MarkEntry({ students, termMarks, setTermMarks, updateTermMark, requestO
       const subjectCols = {};
       curSubjects.forEach(sub => {
         if (isLower) {
-          const idx = headers.fin
+          const idx = headers.findIndex(h=>h===sub||h===sub.replace(" ","_"));
+          if (idx !== -1) subjectCols[sub] = { markIdx: idx };
+        } else {
+          const caIdx = headers.findIndex(h=>h===`${sub}_CA`||h===`${sub} CA`||h===`${sub}CA`);
+          const exIdx = headers.findIndex(h=>h===`${sub}_EXAM`||h===`${sub} EXAM`||h===`${sub}EXAM`||h===`${sub}_EX`||h===`${sub} EX`);
+          if (caIdx !== -1 || exIdx !== -1) subjectCols[sub] = { caIdx, examIdx: exIdx };
+        }
+      });
+      const rows = lines.slice(1).map((line, i) => {
+        const cells = line.split(",").map(c=>c.trim());
+        const rawName = toUpper(cells[nameIdx] || "");
+        const matched = students.find(s =>
+          s.className === cls && (
+            s.name === rawName ||
+            s.name.toLowerCase().includes(rawName.toLowerCase().split(" ")[0]) ||
+            rawName.toLowerCase().includes(s.name.toLowerCase().split(" ")[0])
+          )
+        );
+        const marks = {};
+        curSubjects.forEach(sub => {
+          const col = subjectCols[sub];
+          if (!col) return;
+          if (isLower) {
+            const v = cells[col.markIdx];
+            marks[sub] = { mk: v !== undefined && v !== "" ? Number(v) : null };
+          } else {
+            const ca = col.caIdx !== undefined && col.caIdx !== -1 && cells[col.caIdx] !== "" ? Number(cells[col.caIdx]) : null;
+            const exam = col.examIdx !== undefined && col.examIdx !== -1 && cells[col.examIdx] !== "" ? Number(cells[col.examIdx]) : null;
+            marks[sub] = { ca, exam };
+          }
+        });
+        return { id:`bmr_${i}`, rawName, studentId: matched?.id || null, include: true, marks };
+      }).filter(r => r.rawName);
+      if (rows.length === 0) { setBulkMarkError("No data rows found in the file."); return; }
+      setBulkMarkPreview({ rows, subjectCols, headers });
+    } catch(err) {
+      setBulkMarkError("Could not read file: " + err.message);
+    }
+    if (bulkMarkFileRef.current) bulkMarkFileRef.current.value = "";
+  };
+  const confirmBulkMarks = () => {
+    if (!bulkMarkPreview) return;
+    const curSubjects = isLower ? LOWER_SUBJECTS : UPPER_SUBJECTS;
+    bulkMarkPreview.rows.forEach(row => {
+      if (!row.include || !row.studentId) return;
+      const studentName = students.find(s=>s.id===row.studentId)?.name || row.rawName;
+      curSubjects.forEach(sub => {
+        const m = row.marks[sub];
+        if (!m) return;
+        const existing = termMarks[row.studentId]?.[tk]?.[sub] || {};
+        if (isLower) {
+          if (m.mk !== null && m.mk !== undefined) requestOrApplyTermMark(row.studentId, studentName, tk, sub, "exam", clampMark(m.mk, lowerSubjectMax(sub)), existing.exam);
+        } else {
+          if (m.ca !== null && m.ca !== undefined) requestOrApplyTermMark(row.studentId, studentName, tk, sub, "ca", clampMark(m.ca), existing.ca);
+          if (m.exam !== null && m.exam !== undefined) requestOrApplyTermMark(row.studentId, studentName, tk, sub, "exam", clampMark(m.exam), existing.exam);
+        }
+      });
+    });
+    setBulkMarkPreview(null);
+    setShowBulkMark(false);
+  };
+  // Generate a template CSV download
+  const downloadMarkTemplate = () => {
+    const curSubjects = isLower ? LOWER_SUBJECTS : UPPER_SUBJECTS;
+    let header = "NAME";
+    curSubjects.forEach(sub => {
+      if (isLower) header += `,${sub}`;
+      else header += `,${sub}_CA,${sub}_EXAM`;
+    });
+    const rows = classStudents.map(s => {
+      let row = s.name;
+      curSubjects.forEach(() => { if (isLower) row += ","; else row += ",,"; });
+      return row;
+    });
+    const csv = [header, ...rows].join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    triggerBlobDownload(blob, `${cls}_${term.replace(" ","_")}_${year}_mark_template.csv`);
+  };
+  return (
+    <div>
+      {pendingToast && (
+        <div style={{position:"fixed",top:16,right:16,zIndex:3000,background:"#1e3a6e",color:"white",padding:"12px 18px",borderRadius:10,fontSize:13,fontWeight:600,boxShadow:"0 8px 24px rgba(0,0,0,0.25)",maxWidth:320}}>
+          ⏳ {pendingToast}
+        </div>
+      )}
+      <div className="no-print" style={{display:"flex",gap:10,marginBottom:16,flexWrap:"wrap",alignItems:"flex-end",justifyContent:"space-between"}}>
+        <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"flex-end"}}>
+          <Sel label="Class" value={cls} onChange={setCls} opts={ALL_CLASSES}/>
+          <Sel label="Term" value={term} onChange={setTerm} opts={TERMS}/>
+          <div><label style={lbl}>Year</label><input type="number" value={year} onChange={e=>setYear(e.target.value)} style={{...inp,width:90}}/></div>
+        </div>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
+          <span style={{background:"#dbeafe",color:"#1e40af",borderRadius:20,padding:"4px 12px",fontSize:12,fontWeight:700}}>
+            {classStudents.length} students - {isLower?"Lower":"Upper"} Primary
+          </span>
+          {isLocked && (
+            <span style={{background:"#fee2e2",color:"#991b1b",borderRadius:20,padding:"4px 12px",fontSize:12,fontWeight:700,display:"flex",alignItems:"center",gap:4}}>
+              🔒 Saved &amp; Locked
+            </span>
+          )}
+          {isLocked
+            ? (role==="admin"
+                ? <button onClick={handleUnlock} style={btnWarning}>🔓 Unlock for Editing</button>
+                : unlockRequestPending
+                  ? <span style={{background:"#fef3c7",color:"#92400e",borderRadius:20,padding:"4px 12px",fontSize:12,fontWeight:700}}>⏳ Unlock Requested</span>
+                  : <button onClick={handleRequestUnlock} style={btnWarning}>🔓 Request Unlock</button>)
+            : <button onClick={handleSave} style={btnSuccess}>💾 Save &amp; Lock</button>
+          }
+          <button onClick={()=>setSortByPos(v=>!v)} style={sortByPos?btnPrimary:btnGhost} title="Toggle ordering between alphabetical and highest-to-lowest by total marks">
+            {sortByPos ? "🔤 Show A–Z" : "📊 Sort Highest → Lowest"}
+          </button>
+          <button onClick={()=>setShowBulkMark(v=>!v)} style={btnWarning}>📋 Bulk Mark Sheet</button>
+          <button onClick={()=>window.print()} style={btnPrimary}>🖨️ Print</button>
+        </div>
+      </div>
+      {/* Bulk Mark Sheet Upload Panel */}
+      {showBulkMark && (
+        <div style={{background:"#fff7ed",border:"2px solid #f59e0b",borderRadius:12,padding:20,marginBottom:16}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+            <h3 style={{margin:0,color:"#92400e",fontSize:14}}>📋 Bulk Mark Sheet Upload - {cls} - {term} {year}</h3>
+            <button onClick={()=>{setShowBulkMark(false);setBulkMarkPreview(null);setBulkMarkError("");}} style={{...btnGhost,padding:"4px 10px",fontSize:12}}>✕ Close</button>
+          </div>
+          <div style={{fontSize:12,color:"#78350f",marginBottom:12,lineHeight:1.6}}>
+            Upload a CSV file with marks for <b>{cls}</b>. The first row must be a header.{" "}
+            {isLower
+              ? <><b>Columns:</b> NAME, {LOWER_SUBJECTS.join(", ")}</>
+              : <><b>Columns:</b> NAME, then for each subject: <b>SUBJECT_CA</b> and <b>SUBJECT_EXAM</b> (e.g. ENG_CA, ENG_EXAM, MATH_CA, MATH_EXAM)</>
+            }
+          </div>
+          <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"center",marginBottom:12}}>
+            <button onClick={downloadMarkTemplate} style={{...btnGhost,fontSize:12,padding:"6px 12px"}}>⬇️ Download Template CSV</button>
+            <div style={{display:"flex",alignItems:"center",gap:8}}>
+              <label style={{...lbl,margin:0}}>Upload CSV:</label>
+              <input ref={bulkMarkFileRef} type="file" accept=".csv,.txt" onChange={handleBulkMarkFile}
+                style={{padding:"6px",border:"1.5px solid #d1d5db",borderRadius:7,fontSize:13,background:"white"}}/>
+            </div>
+          </div>
+          {bulkMarkError && <div style={{background:"#fef2f2",border:"1px solid #fca5a5",borderRadius:8,padding:10,marginBottom:12,color:"#dc2626",fontSize:13}}>{bulkMarkError}</div>}
+          {bulkMarkPreview && (() => {
+            const curSubjects = isLower ? LOWER_SUBJECTS : UPPER_SUBJECTS;
+            const detected = curSubjects.filter(sub => bulkMarkPreview.subjectCols[sub]);
+            return (
+              <>
+                <div style={{fontSize:12,color:"#065f46",background:"#f0fdf4",borderRadius:8,padding:"8px 12px",marginBottom:10}}>
+                  ✅ Detected <b>{bulkMarkPreview.rows.length} rows</b>. Subjects found: <b>{detected.join(", ") || "none"}</b>.
+                  {curSubjects.filter(s=>!bulkMarkPreview.subjectCols[s]).length > 0 && <span style={{color:"#b45309"}}> Missing: {curSubjects.filter(s=>!bulkMarkPreview.subjectCols[s]).join(", ")}.</span>}
+                </div>
+                <div style={{maxHeight:320,overflowY:"auto",marginBottom:12,border:"1px solid #fde68a",borderRadius:8}}>
+                  <table style={{width:"100%",fontSize:11,minWidth:500}}>
+                    <thead>
+                      <tr style={{background:"#fef3c7"}}>
+                        <th style={th}>✓</th>
+                        <th style={{...th,textAlign:"left"}}>CSV NAME</th>
+                        <th style={{...th,textAlign:"left"}}>MATCHED PUPIL</th>
+                        {detected.map(sub => isLower
+                          ? <th key={sub} style={th}>{sub}</th>
+                          : <React.Fragment key={sub}><th style={th}>{sub} CA</th><th style={th}>{sub} EX</th></React.Fragment>
+                        )}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {bulkMarkPreview.rows.map((row, ri) => (
+                        <tr key={row.id} style={{background:ri%2===0?"white":"#fffbeb",opacity:row.include?1:0.4}}>
+                          <td style={td}><input type="checkbox" checked={row.include} onChange={()=>setBulkMarkPreview(prev=>({...prev,rows:prev.rows.map((r,i)=>i===ri?{...r,include:!r.include}:r)}))}/></td>
+                          <td style={{...td,textAlign:"left",fontWeight:600}}>{row.rawName}</td>
+                          <td style={{...td,textAlign:"left"}}>
+                            <select value={row.studentId||""}
+                              onChange={e=>setBulkMarkPreview(prev=>({...prev,rows:prev.rows.map((r,i)=>i===ri?{...r,studentId:e.target.value||null}:r)}))}
+                              style={{...inp,padding:"2px 4px",fontSize:11,minWidth:0,width:150,
+                                borderColor:row.studentId?"#22c55e":"#f59e0b",
+                                background:row.studentId?"#f0fdf4":"#fefce8"}}>
+                              <option value="">- not matched -</option>
+                              {classStudents.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}
+                            </select>
+                          </td>
+                          {detected.map(sub => {
+                            const m = row.marks[sub] || {};
+                            const subMax = isLower ? lowerSubjectMax(sub) : 100;
+                            return isLower
+                              ? <td key={sub} style={td}>{m.mk!=null ? clampMark(m.mk, subMax) : "-"}</td>
+                              : <React.Fragment key={sub}><td style={td}>{m.ca!=null ? clampMark(m.ca, subMax) : "-"}</td><td style={td}>{m.exam!=null ? clampMark(m.exam, subMax) : "-"}</td></React.Fragment>;
+                          })}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div style={{display:"flex",gap:10,alignItems:"center"}}>
+                  <button onClick={confirmBulkMarks}
+                    disabled={!bulkMarkPreview.rows.some(r=>r.include&&r.studentId)}
+                    style={{...btnPrimary,opacity:bulkMarkPreview.rows.some(r=>r.include&&r.studentId)?1:0.5}}>
+                    💾 Save Marks for {bulkMarkPreview.rows.filter(r=>r.include&&r.studentId).length} Pupils
+                  </button>
+                  <button onClick={()=>setBulkMarkPreview(null)} style={btnGhost}>Clear</button>
+                  <span style={{fontSize:11,color:"#6b7280"}}>Unmatched rows will not be saved.</span>
+                </div>
+              </>
+            );
+          })()}
+        </div>
+      )}
+      <div style={{overflowX:"auto"}}>
+        <table style={{width:"100%",fontSize:12,minWidth:900}}>
+          <thead>
+            <tr style={{background:"#1e3a6e",color:"white"}}>
+              <th style={th} rowSpan={2}>S/N</th>
+              <th style={{...th,textAlign:"left",minWidth:160}} rowSpan={2}>NAME OF PUPIL</th>
+              {isLower
+                ? subjects.map(s=><th key={s} style={th} rowSpan={2}>{s}{lowerSubjectMax(s)!==100?` /${lowerSubjectMax(s)}`:""}</th>)
+                : subjects.map(s=><th key={s} style={th} colSpan={4}>{s}</th>)
+              }
+              <th style={th} rowSpan={2}>TOT MK</th>
+              {!isLower && <>
+                <th style={th} rowSpan={2}>TOT AGG</th>
+                <th style={th} rowSpan={2}>DIV</th>
+              </>}
+              <th style={th} rowSpan={2}>POS</th>
+            </tr>
+            {!isLower && (
+              <tr style={{background:"#1e40af",color:"white"}}>
+                {subjects.map(s=>(
+                  <React.Fragment key={s}>
+                    <th style={{...th,background:"#fef9c3",color:"#713f12"}}>CA</th>
+                    <th style={{...th,background:"#dcfce7",color:"#14532d"}}>EXAM</th>
+                    <th style={{...th,background:"#dbeafe",color:"#1e3a6e"}}>AV</th>
+                    <th style={{...th,background:"#fed7aa",color:"#7c2d12"}}>AGG</th>
+                  </React.Fragment>
+                ))}
+              </tr>
+            )}
+          </thead>
+          <tbody>
+            {(sortByPos ? sortedRows : indexedRows).map((r,i)=>(
+              <tr key={r.s.id} style={{background:i%2===0?"white":"#f8fafc"}}>
+                <td style={td}>{i+1}</td>
+                <td style={{...td,fontWeight:600,textAlign:"left"}}>{r.s.name}</td>
+                {isLower
+                  ? r.perSub.map(p=>(
+                      <td key={p.sub} style={td}>
+                        <MarkInput value={p.av} existingVal={p.exam} max={lowerSubjectMax(p.sub)} style={markInput}
+                          locked={isLocked}
+                          onCommit={(newVal, existingVal)=>handleMarkChange(r.s.id,r.s.name,tk,p.sub,"exam",newVal,existingVal)} />
+                      </td>
+                    ))
+                  : r.perSub.map(p=>(
+                      <React.Fragment key={p.sub}>
+                        <td style={{...td,background:"#fefce8"}}><MarkInput value={p.ca} existingVal={p.ca} max={100} style={markInput}
+                          locked={isLocked}
+                          onCommit={(newVal, existingVal)=>handleMarkChange(r.s.id,r.s.name,tk,p.sub,"ca",newVal,existingVal)} /></td>
+                        <td style={{...td,background:"#f0fdf4"}}><MarkInput value={p.exam} existingVal={p.exam} max={100} style={markInput}
+                          locked={isLocked}
+                          onCommit={(newVal, existingVal)=>handleMarkChange(r.s.id,r.s.name,tk,p.sub,"exam",newVal,existingVal)} /></td>
+                        <td style={{...td,background:"#eff6ff",fontWeight:600}}>{p.isX?"X":p.av??"-"}</td>
+                        <td style={{...td,background:"#fff7ed",fontWeight:600}}>{p.isX?"X":p.av!==undefined?p.agg:"-"}</td>
+                      </React.Fragment>
+                    ))
+                }
+                <td style={{...td,fontWeight:700,background:"#ede9fe"}}>{r.totMk||"-"}</td>
+                {!isLower && <>
+                  <td style={{...td,background:"#ede9fe",color:r.hasX?"#dc2626":"inherit",fontWeight:r.hasX?700:400}}>{r.hasX?"X":r.totAgg||"-"}</td>
+                  <td style={{...td,fontWeight:700,color:r.hasX?"#dc2626":"#1e40af"}}>{r.hasX?"X":r.totMk?r.div:"-"}</td>
+                </>}
+                <td style={{...td}}>{r.pos!=="-"?<PositionBadge pos={r.pos} size={13}/>:"-"}</td>
+              </tr>
+            ))}
+            {classStudents.length===0&&<tr><td colSpan={30} style={{padding:24,textAlign:"center",color:"#9ca3af"}}>No students in {cls}.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+// ─── MONTHLY EXAMS ───────────────────────────────────────────────────────────
+function MonthlyExams({ students, monthlyMarks, updateMonthlyMark, requestOrApplyMonthlyMark, role, bands, divisions, school, lockedMonthly, lockMonthlyEntry, unlockMonthlyEntry, changeRequests, requestUnlockMonthly }) {
+  const [cls, setCls] = useState("P4");
+  const [term, setTerm] = useState("Term I");
+  const [year, setYear] = useState(school.year||String(new Date().getFullYear()));
+  const [pendingToast, setPendingToast] = useState("");
+  const months = TERM_MONTHS[term];
+  const tk = `${term}__${year}`;
+  const isLower = LOWER_CLASSES.includes(cls);
+  const subjects = isLower ? LOWER_MONTHLY_SUBJECTS : MONTHLY_SUBJECTS;
+  // ── Bulk Mark Sheet import: accepts either an uploaded CSV file or a
+  // marksheet pasted straight from Excel/Sheets (tab-separated) into a
+  // textarea. Both paths flow through the same parser below. ──────────────
+  const [showBulkMonthly, setShowBulkMonthly] = useState(false);
+  const [bulkMonth, setBulkMonth] = useState(months[0]);
+  const [bulkMonthlyText, setBulkMonthlyText] = useState("");
+  const [bulkMonthlyPreview, setBulkMonthlyPreview] = useState(null);
+  const [bulkMonthlyError, setBulkMonthlyError] = useState("");
+  const bulkMonthlyFileRef = useRef();
+  // Keep the bulk-import month selector valid if the term changes underneath it.
+  useEffect(() => { if (!months.includes(bulkMonth)) setBulkMonth(months[0]); }, [months, bulkMonth]);
+  // Wraps requestOrApplyMonthlyMark to surface a brief toast whenever an
+  // edit was filed for admin approval rather than saved immediately.
+  const handleMarkChange = useCallback((sid, name, tk2, month, sub, field, val, existingVal) => {
+    requestOrApplyMonthlyMark(sid, name, tk2, month, sub, field, val, existingVal);
+    const isFirstEntry = existingVal === undefined || existingVal === null || existingVal === "";
+    if (role !== "admin" && !isFirstEntry) {
+      setPendingToast(`Change to ${name}'s ${sub} mark sent to admin for approval.`);
+      setTimeout(()=>setPendingToast(""), 3500);
+    }
+  }, [requestOrApplyMonthlyMark, role]);
+  const classStudents = useMemo(()=>
+    students.filter(s=>s.className===cls).sort((a,b)=>a.name.localeCompare(b.name)),
+    [students, cls]
+  );
+  const getMonthsData = useCallback(() =>
+    months.map(month => {
+      const sortedRows = computeMonthRows({ month, classStudents, monthlyMarks, tk, subjects, isLower, bands, divisions });
+      const divCounts = isLower ? null : (() => {
+        const counts = {I:0,II:0,III:0,IV:0,U:0,X:0};
+        sortedRows.forEach(r=>{ const d=r.div; if(d==="X") counts.X++; else if(counts[d]!==undefined) counts[d]++; else counts.U++; });
+        return counts;
+      })();
+      return { month, sortedRows, divCounts };
+    }),
+    [months, classStudents, monthlyMarks, tk, subjects, isLower, bands, divisions]
+  );
+  // Parses pasted or uploaded marksheet text into preview rows. The header
+  // row needs a NAME/PUPIL/STUDENT column plus one column per subject, and
+  // works with either comma-separated (CSV) or tab-separated (pasted from
+  // Excel/Sheets) data -- whichever delimiter the header row actually uses.
+  const parseMonthlyMarksheet = useCallback((text) => {
+    const lines = text.split(/\r?\n/).filter(l => l.trim().length > 0);
+    if (lines.length < 2) throw new Error("Data must have a header row and at least one row of marks.");
+    const delim = lines[0].includes("\t") ? "\t" : ",";
+    const headers = lines[0].split(delim).map(h => h.trim().toUpperCase());
+    const nameIdx = headers.findIndex(h => h === "NAME" || h === "PUPIL" || h === "STUDENT");
+    if (nameIdx === -1) throw new Error("The header row must include a column named NAME, PUPIL, or STUDENT.");
+    const subjectCols = {};
+    subjects.forEach(sub => {
+      const idx = headers.findIndex(h => h === sub || h === sub.replace(/ /g, "_") || h === sub.replace(/ /g, ""));
+      if (idx !== -1) subjectCols[sub] = idx;
+    });
+    const rows = lines.slice(1).map((line, i) => {
+      const cells = line.split(delim).map(c => c.trim());
+      const rawName = toUpper(cells[nameIdx] || "");
+      if (!rawName) return null;
+      const matched = classStudents.find(s =>
+        s.name === rawName ||
+        s.name.toLowerCase().includes(rawName.toLowerCase().split(" ")[0]) ||
+        rawName.toLowerCase().includes(s.name.toLowerCase().split(" ")[0])
+      );
+      const marks = {};
+      subjects.forEach(sub => {
+        const idx = subjectCols[sub];
+        if (idx === undefined) return;
+        const v = cells[idx];
+        marks[sub] = (v !== undefined && v !== "" && !isNaN(Number(v))) ? Number(v) : null;
+      });
+      return { id: `bmm_${i}`, rawName, studentId: matched?.id || null, include: true, marks };
+    }).filter(Boolean);
+    if (rows.length === 0) throw new Error("No data rows found.");
+    return { rows, subjectCols, headers };
+  }, [subjects, classStudents]);
+  const handleBulkMonthlyFile = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setBulkMonthlyError("");
+    try {
+      const text = await file.text();
+      setBulkMonthlyPreview(parseMonthlyMarksheet(text));
+    } catch (err) {
+      setBulkMonthlyError(err.message || "Could not read that file.");
+    }
+    if (bulkMonthlyFileRef.current) bulkMonthlyFileRef.current.value = "";
+  };
+  const handleLoadPastedMonthly = () => {
+    setBulkMonthlyError("");
+    if (!bulkMonthlyText.trim()) { setBulkMonthlyError("Paste your marksheet data into the box first."); return; }
+    try {
+      setBulkMonthlyPreview(parseMonthlyMarksheet(bulkMonthlyText));
+    } catch (err) {
+      setBulkMonthlyError(err.message || "Could not read the pasted data.");
+    }
+  };
+  const bulkMonthLockKey = `${cls}__${tk}__${bulkMonth}`;
+  const isBulkMonthLocked = !!lockedMonthly?.[bulkMonthLockKey];
+  const confirmBulkMonthlyMarks = () => {
+    if (!bulkMonthlyPreview || isBulkMonthLocked) return;
+    let applied = 0, requested = 0;
+    bulkMonthlyPreview.rows.forEach(row => {
+      if (!row.include || !row.studentId) return;
+      const studentName = students.find(s => s.id === row.studentId)?.name || row.rawName;
+      subjects.forEach(sub => {
+        const val = row.marks[sub];
+        if (val === null || val === undefined) return;
+        const max = isLower ? lowerSubjectMax(sub) : 100;
+        const existing = monthlyMarks[row.studentId]?.[tk]?.[bulkMonth]?.[sub]?.mk;
+        const isFirstEntry = existing === undefined || existing === null || existing === "";
+        requestOrApplyMonthlyMark(row.studentId, studentName, tk, bulkMonth, sub, "mk", clampMark(val, max), existing);
+        if (role === "admin" || isFirstEntry) applied++; else requested++;
+      });
+    });
+    setBulkMonthlyPreview(null);
+    setShowBulkMonthly(false);
+    setBulkMonthlyText("");
+    setPendingToast(`Saved ${applied} mark${applied===1?"":"s"} for ${bulkMonth} ${term} ${year}${requested?`, ${requested} sent to admin for approval`:""}.`);
+    setTimeout(()=>setPendingToast(""), 4500);
+  };
+  // Generates a starter CSV (NAME + one column per subject) for the
+  // currently selected class, so teachers can fill it in and upload it back.
+  const downloadMonthlyMarkTemplate = () => {
+    const header = ["NAME", ...subjects].join(",");
+    const rows = classStudents.map(s => [s.name, ...subjects.map(()=>"")].join(","));
+    const csv = [header, ...rows].join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    triggerBlobDownload(blob, `${cls}_${bulkMonth}_${term.replace(" ","_")}_${year}_monthly_template.csv`);
+  };
+  return (
+    <div>
+      {pendingToast && (
+        <div style={{position:"fixed",top:16,right:16,zIndex:3000,background:"#1e3a6e",color:"white",padding:"12px 18px",borderRadius:10,fontSize:13,fontWeight:600,boxShadow:"0 8px 24px rgba(0,0,0,0.25)",maxWidth:320}}>
+          ⏳ {pendingToast}
+        </div>
+      )}
+
+      <div className="no-print" style={{display:"flex",gap:10,marginBottom:16,flexWrap:"wrap",alignItems:"flex-end",justifyContent:"space-between"}}>
+        <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"flex-end"}}>
+          <Sel label="Class" value={cls} onChange={setCls} opts={ALL_CLASSES}/>
+          <Sel label="Term" value={term} onChange={setTerm} opts={TERMS}/>
+          <div><label style={lbl}>Year</label><input type="number" value={year} onChange={e=>setYear(e.target.value)} style={{...inp,width:90}}/></div>
+        </div>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
+          <span style={{background:"#dbeafe",color:"#1e40af",borderRadius:20,padding:"4px 12px",fontSize:12,fontWeight:700,alignSelf:"center"}}>{cls} - {classStudents.length} students</span>
+          <button onClick={()=>setShowBulkMonthly(v=>!v)} style={btnWarning}>📋 Bulk Mark Sheet</button>
+          <button onClick={()=>exportMonthlyExcel({ school, cls, term, year, isLower, subjects, monthsData: getMonthsData() })} style={btnExcel}>📊 Download Excel</button>
+          <button onClick={()=>exportMonthlyWord({ school, cls, term, year, isLower, subjects, monthsData: getMonthsData() })} style={btnWord}>📄 Download Word</button>
+          <button onClick={()=>window.print()} style={btnPrimary}>🖨️ Print</button>
+        </div>
+      </div>
+      {/* Bulk Mark Sheet Upload Panel -- supports both a CSV file upload
+          and pasting a whole marksheet (e.g. copied from Excel) directly. */}
+      {showBulkMonthly && (
+        <div className="no-print" style={{background:"#fff7ed",border:"2px solid #f59e0b",borderRadius:12,padding:20,marginBottom:16}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12,flexWrap:"wrap",gap:8}}>
+            <h3 style={{margin:0,color:"#92400e",fontSize:14}}>📋 Bulk Mark Sheet - {cls} - {term} {year}</h3>
+            <button onClick={()=>{setShowBulkMonthly(false);setBulkMonthlyPreview(null);setBulkMonthlyError("");setBulkMonthlyText("");}} style={{...btnGhost,padding:"4px 10px",fontSize:12}}>✕ Close</button>
+          </div>
+          <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"flex-end",marginBottom:12}}>
+            <Sel label="Month to load into" value={bulkMonth} onChange={setBulkMonth} opts={months}/>
+          </div>
+          {isBulkMonthLocked && (
+            <div style={{background:"#fef2f2",border:"1px solid #fca5a5",borderRadius:8,padding:10,marginBottom:12,color:"#dc2626",fontSize:13}}>
+              🔒 {bulkMonth} {term} {year} is saved &amp; locked for {cls}. Unlock it on the calendar block below before loading bulk marks.
+            </div>
+          )}
+          <div style={{fontSize:12,color:"#78350f",marginBottom:12,lineHeight:1.6}}>
+            The first row must be a header with a <b>NAME</b> column, followed by one column per subject: <b>{subjects.join(", ")}</b>.
+            Works with a CSV file <i>or</i> a marksheet pasted straight from Excel/Google Sheets (comma- or tab-separated -- both are detected automatically).
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:12}}>
+            <div style={{background:"white",border:"1px solid #fde68a",borderRadius:8,padding:14}}>
+              <div style={{fontWeight:700,fontSize:12,color:"#92400e",marginBottom:8}}>OPTION 1 - Upload a file</div>
+              <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"center"}}>
+                <button onClick={downloadMonthlyMarkTemplate} style={{...btnGhost,fontSize:12,padding:"6px 12px"}}>⬇️ Download Template CSV</button>
+                <input ref={bulkMonthlyFileRef} type="file" accept=".csv,.txt" onChange={handleBulkMonthlyFile}
+                  style={{padding:"6px",border:"1.5px solid #d1d5db",borderRadius:7,fontSize:13,background:"white"}}/>
+              </div>
+            </div>
+            <div style={{background:"white",border:"1px solid #fde68a",borderRadius:8,padding:14}}>
+              <div style={{fontWeight:700,fontSize:12,color:"#92400e",marginBottom:8}}>OPTION 2 - Paste the whole marksheet</div>
+              <textarea value={bulkMonthlyText} onChange={e=>setBulkMonthlyText(e.target.value)}
+                placeholder={`NAME\t${subjects.join("\t")}\nJOHN OKELLO\t78\t65\t70\t82`}
+                rows={3} style={{width:"100%",padding:8,border:"1.5px solid #d1d5db",borderRadius:7,fontSize:12,fontFamily:"monospace",resize:"vertical",marginBottom:8}}/>
+              <button onClick={handleLoadPastedMonthly} disabled={!bulkMonthlyText.trim()} style={{...btnWarning,fontSize:12,padding:"6px 12px",opacity:bulkMonthlyText.trim()?1:0.5}}>📥 Load Pasted Data</button>
+            </div>
+          </div>
+          {bulkMonthlyError && <div style={{background:"#fef2f2",border:"1px solid #fca5a5",borderRadius:8,padding:10,marginBottom:12,color:"#dc2626",fontSize:13}}>{bulkMonthlyError}</div>}
+          {bulkMonthlyPreview && (() => {
+            const detected = subjects.filter(sub => bulkMonthlyPreview.subjectCols[sub] !== undefined);
+            const missing = subjects.filter(sub => bulkMonthlyPreview.subjectCols[sub] === undefined);
+            return (
+              <>
+                <div style={{fontSize:12,color:"#065f46",background:"#f0fdf4",borderRadius:8,padding:"8px 12px",marginBottom:10}}>
+                  ✅ Detected <b>{bulkMonthlyPreview.rows.length} rows</b>. Subjects found: <b>{detected.join(", ") || "none"}</b>.
+                  {missing.length > 0 && <span style={{color:"#b45309"}}> Missing: {missing.join(", ")}.</span>}
+                </div>
+                <div style={{maxHeight:320,overflowY:"auto",marginBottom:12,border:"1px solid #fde68a",borderRadius:8}}>
+                  <table style={{width:"100%",fontSize:11,minWidth:500}}>
+                    <thead>
+                      <tr style={{background:"#fef3c7"}}>
+                        <th style={th}>✓</th>
+                        <th style={{...th,textAlign:"left"}}>SHEET NAME</th>
+                        <th style={{...th,textAlign:"left"}}>MATCHED PUPIL</th>
+                        {detected.map(sub => <th key={sub} style={th}>{sub}</th>)}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {bulkMonthlyPreview.rows.map((row, ri) => (
+                        <tr key={row.id} style={{background:ri%2===0?"white":"#fffbeb",opacity:row.include?1:0.4}}>
+                          <td style={td}><input type="checkbox" checked={row.include} onChange={()=>setBulkMonthlyPreview(prev=>({...prev,rows:prev.rows.map((r,i)=>i===ri?{...r,include:!r.include}:r)}))}/></td>
+                          <td style={{...td,textAlign:"left",fontWeight:600}}>{row.rawName}</td>
+                          <td style={{...td,textAlign:"left"}}>
+                            <select value={row.studentId||""}
+                              onChange={e=>setBulkMonthlyPreview(prev=>({...prev,rows:prev.rows.map((r,i)=>i===ri?{...r,studentId:e.target.value||null}:r)}))}
+                              style={{...inp,padding:"2px 4px",fontSize:11,minWidth:0,width:150,
+                                borderColor:row.studentId?"#22c55e":"#f59e0b",
+                                background:row.studentId?"#f0fdf4":"#fefce8"}}>
+                              <option value="">- not matched -</option>
+                              {classStudents.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}
+                            </select>
+                          </td>
+                          {detected.map(sub => {
+                            const v = row.marks[sub];
+                            const subMax = isLower ? lowerSubjectMax(sub) : 100;
+                            return <td key={sub} style={td}>{v!=null ? clampMark(v, subMax) : "-"}</td>;
+                          })}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
+                  <button onClick={confirmBulkMonthlyMarks}
+                    disabled={isBulkMonthLocked || !bulkMonthlyPreview.rows.some(r=>r.include&&r.studentId)}
+                    style={{...btnPrimary,opacity:(!isBulkMonthLocked && bulkMonthlyPreview.rows.some(r=>r.include&&r.studentId))?1:0.5}}>
+                    💾 Save Marks for {bulkMonthlyPreview.rows.filter(r=>r.include&&r.studentId).length} Pupils - {bulkMonth}
+                  </button>
+                  <button onClick={()=>setBulkMonthlyPreview(null)} style={btnGhost}>Clear</button>
+                  <span style={{fontSize:11,color:"#6b7280"}}>Unmatched rows will not be saved.</span>
+                </div>
+              </>
+            );
+          })()}
+        </div>
+      )}
+      {months.map(month=>(
+        <MonthBlock key={month} month={month} term={term} year={year} cls={cls}
+          classStudents={classStudents} monthlyMarks={monthlyMarks} role={role}
+          updateMonthlyMark={updateMonthlyMark} requestOrApplyMonthlyMark={handleMarkChange} bands={bands} divisions={divisions} tk={tk}
+          lockedMonthly={lockedMonthly} lockMonthlyEntry={lockMonthlyEntry} unlockMonthlyEntry={unlockMonthlyEntry}
+          changeRequests={changeRequests} requestUnlockMonthly={requestUnlockMonthly} />
+      ))}
+    </div>
+  );
+}
+function MonthBlock({ month, cls, classStudents, monthlyMarks, updateMonthlyMark, requestOrApplyMonthlyMark, bands, divisions, tk, year, term, role, lockedMonthly, lockMonthlyEntry, unlockMonthlyEntry, changeRequests, requestUnlockMonthly }) {
+  const isLower = LOWER_CLASSES.includes(cls);
+  const subjects = isLower ? LOWER_MONTHLY_SUBJECTS : MONTHLY_SUBJECTS;
+  const rows = useMemo(()=> classStudents.map(s=>{
+    const m = monthlyMarks[s.id]?.[tk]?.[month] || {};
+    const perSub = subjects.map(sub=>{
+      const mk = m[sub]?.mk;
+      const isX = (mk===undefined||mk===null);
+      const agg = (!isLower && !isX) ? aggOf(mk, bands) : undefined;
+      return { sub, mk, agg, isX };
+    });
+    // X rule: any blank required paper → row is incomplete (aggregates + division = X)
+    const hasX = !isLower && perSub.some(p => p.isX);
+    const totMk = perSub.reduce((a,p)=>a+(p.mk??0),0);
+    const totAgg = isLower ? null : (hasX ? "X" : perSub.reduce((a,p)=>a+(p.agg??0),0));
+    const div = isLower ? null : (hasX ? "X" : divisionOf(totAgg, 4, divisions));
+    return { s, perSub, totMk, totAgg, div, hasX };
+  }), [classStudents, monthlyMarks, tk, month, bands, divisions, subjects, isLower]);
+  const positions = useMemo(()=> rankWithTies(rows.map(r=>r.totMk>0?r.totMk:null), rows.map(r=>typeof r.totAgg==="number"?r.totAgg:null)), [rows]);
+  const indexedRows = useMemo(()=> rows.map((r,i)=>({...r,pos:positions[i]})), [rows, positions]);
+  const sortedRows = useMemo(()=>{
+    return [...indexedRows].sort((a,b)=>{ if(a.pos==="-") return 1; if(b.pos==="-") return -1; return a.pos-b.pos; });
+  },[indexedRows]);
+  const divCounts = useMemo(()=>{
+    if (isLower) return null;
+    const counts = {I:0,II:0,III:0,IV:0,U:0,X:0};
+    sortedRows.forEach(r=>{ const d=r.div; if(d==="X") counts.X++; else if(counts[d]!==undefined) counts[d]++; else counts.U++; });
+    return counts;
+  },[sortedRows, isLower]);
+  // Save & lock: once clicked, this month's marks render read-only (see
+  // MarkInput) until an admin unlocks them again.
+  const lockKey = `${cls}__${tk}__${month}`;
+  const isLocked = !!lockedMonthly?.[lockKey];
+  const unlockRequestPending = useMemo(
+    () => (changeRequests||[]).some(r => r.kind==="unlock_monthly" && r.cls===cls && r.tk===tk && r.month===month),
+    [changeRequests, cls, tk, month]
+  );
+  const handleSave = () => lockMonthlyEntry(cls, tk, month);
+  const handleUnlock = () => unlockMonthlyEntry(cls, tk, month);
+  const handleRequestUnlock = () => requestUnlockMonthly(cls, tk, month);
+  const [sortByPos, setSortByPos] = useState(false);
+  return (
+    <div style={{marginBottom:24}}>
+      <div style={{background:"#1e3a6e",color:"white",padding:"10px 16px",borderRadius:"8px 8px 0 0",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
+        <span style={{fontWeight:700,fontSize:14}}>{month} - {term} {year}</span>
+        <div className="no-print" style={{display:"flex",alignItems:"center",gap:8}}>
+          {isLocked && (
+            <span style={{background:"#fee2e2",color:"#991b1b",borderRadius:20,padding:"3px 10px",fontSize:11,fontWeight:700}}>
+              🔒 Saved &amp; Locked
+            </span>
+          )}
+          {isLocked
+            ? (role==="admin"
+                ? <button onClick={handleUnlock} style={{...btnWarning,padding:"5px 12px",fontSize:11}}>🔓 Unlock</button>
+                : unlockRequestPending
+                  ? <span style={{background:"#fef3c7",color:"#92400e",borderRadius:20,padding:"3px 10px",fontSize:11,fontWeight:700}}>⏳ Unlock Requested</span>
+                  : <button onClick={handleRequestUnlock} style={{...btnWarning,padding:"5px 12px",fontSize:11}}>🔓 Request Unlock</button>)
+            : <button onClick={handleSave} style={{...btnSuccess,padding:"5px 12px",fontSize:11}}>💾 Save &amp; Lock</button>
+          }
+          <button onClick={()=>setSortByPos(v=>!v)} style={{...(sortByPos?btnPrimary:btnGhost),padding:"5px 10px",fontSize:11}} title="Toggle ordering between alphabetical and highest-to-lowest">
+            {sortByPos ? "🔤 A–Z" : "📊 Sort H→L"}
+          </button>
+          <span style={{fontSize:12,opacity:0.8}}>{cls} - {classStudents.length} STUDENTS</span>
+        </div>
+      </div>
+      <div style={{overflowX:"auto"}}>
+        <table style={{width:"100%",fontSize:12,minWidth:600}}>
+          <thead>
+            <tr style={{background:"#1e40af",color:"white"}}>
+              <th style={th} rowSpan={2}>S/N</th>
+              <th style={{...th,textAlign:"left",minWidth:160}} rowSpan={2}>NAME OF PUPIL</th>
+              {subjects.map(s=>(
+                isLower
+                  ? <th key={s} style={th} rowSpan={2}>{s}{lowerSubjectMax(s)!==100?` /${lowerSubjectMax(s)}`:""}</th>
+                  : <th key={s} style={th} colSpan={2}>{s}</th>
+              ))}
+              <th style={th} rowSpan={2}>TOT MK</th>
+              {!isLower && <><th style={th} rowSpan={2}>AGG</th><th style={th} rowSpan={2}>DIV</th></>}
+              <th style={th} rowSpan={2}>POS</th>
+            </tr>
+            {!isLower && (
+              <tr style={{background:"#2563eb",color:"white",fontSize:11}}>
+                {subjects.map(s=>(
+                  <React.Fragment key={s}>
+                    <th style={{...th,background:"#fef9c3",color:"#713f12"}}>{month}</th>
+                    <th style={{...th,background:"#fed7aa",color:"#7c2d12"}}>AGG</th>
+                  </React.Fragment>
+                ))}
+              </tr>
+            )}
+          </thead>
+          <tbody>
+            {(sortByPos ? sortedRows : indexedRows).map((r,i)=>(
+              <tr key={r.s.id} style={{background:i%2===0?"white":"#f8fafc"}}>
+                <td style={td}>{i+1}</td>
+                <td style={{...td,fontWeight:600,textAlign:"left"}}>{r.s.name}</td>
+                {r.perSub.map(p=>(
+                  isLower
+                    ? <td key={p.sub+"mk"} style={{...td,background:"#fefce8"}}>
+                        <MarkInput value={p.mk} existingVal={p.mk} max={lowerSubjectMax(p.sub)} style={markInput}
+                          locked={isLocked}
+                          onCommit={(newVal, existingVal)=>requestOrApplyMonthlyMark(r.s.id,r.s.name,tk,month,p.sub,"mk",newVal,existingVal)} />
+                      </td>
+                    : <React.Fragment key={p.sub}>
+                        <td style={{...td,background:"#fefce8"}}><MarkInput value={p.mk} existingVal={p.mk} max={100} style={markInput}
+                          locked={isLocked}
+                          onCommit={(newVal, existingVal)=>requestOrApplyMonthlyMark(r.s.id,r.s.name,tk,month,p.sub,"mk",newVal,existingVal)} /></td>
+                        <td style={{...td,background:"#fff7ed",fontWeight:600,color:p.isX?"#dc2626":"inherit"}}>{p.isX?"X":(p.mk!==undefined?p.agg:"-")}</td>
+                      </React.Fragment>
+                ))}
+                <td style={{...td,fontWeight:700,background:"#ede9fe"}}>{r.totMk||"-"}</td>
+                {!isLower && <>
+                  <td style={{...td,background:"#ede9fe",color:r.hasX?"#dc2626":"inherit",fontWeight:r.hasX?700:400}}>{r.hasX?"X":r.totAgg||"-"}</td>
+                  <td style={{...td,fontWeight:700,color:r.hasX?"#dc2626":"#1e40af"}}>{r.hasX?"X":r.totMk?r.div:"-"}</td>
+                </>}
+                <td style={{...td}}>{r.pos!=="-"?<PositionBadge pos={r.pos} size={13}/>:"-"}</td>
+              </tr>
+            ))}
+            {classStudents.length===0&&<tr><td colSpan={20} style={{padding:16,textAlign:"center",color:"#9ca3af"}}>No students.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+      {!isLower && divCounts && (
+        <div style={{borderTop:"2px solid #e5e7eb",padding:"10px 16px",background:"#f8fafc"}}>
+          <div style={{fontSize:12,fontWeight:700,color:"#0f766e",marginBottom:8,textTransform:"uppercase",letterSpacing:0.4}}>General Performance Analysis</div>
+          <div style={{overflowX:"auto"}}>
+            <table style={{width:"100%",fontSize:12}}>
+              <thead>
+                <tr style={{background:"#ccfbf1"}}>
+                  {["No. of Pupils","Div I","Div II","Div III","Div IV","U","X"].map(h=>(
+                    <th key={h} style={{...th,padding:"6px 10px",color:"#0f766e"}}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td style={{...td,fontWeight:700}}>{classStudents.length}</td>
+                  <td style={{...td,fontWeight:700,color:"#166534"}}>{divCounts.I}</td>
+                  <td style={{...td,fontWeight:700,color:"#1e40af"}}>{divCounts.II}</td>
+                  <td style={{...td,fontWeight:700,color:"#92400e"}}>{divCounts.III}</td>
+                  <td style={{...td,fontWeight:700,color:"#7c2d12"}}>{divCounts.IV}</td>
+                  <td style={{...td,fontWeight:700,color:"#6b7280"}}>{divCounts.U}</td>
+                  <td style={{...td,fontWeight:700,color:"#dc2626"}}>{divCounts.X}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+// ─── MONTHLY REPORT CARDS ────────────────────────────────────────────────────
+function MonthlyCards({ students, monthlyMarks, bands, divisions, school }) {
+  const [cls, setCls] = useState("P4");
+  const [term, setTerm] = useState("Term I");
+  const [year, setYear] = useState(school.year||String(new Date().getFullYear()));
+  const [search, setSearch] = useState("");
+  const isLower = LOWER_CLASSES.includes(cls);
+  const subjects = isLower ? LOWER_MONTHLY_SUBJECTS : MONTHLY_SUBJECTS;
+  const tk = `${term}__${year}`;
+  const months = TERM_MONTHS[term] || [];
+  const classStudents = useMemo(()=>
+    students.filter(s=>s.className===cls&&s.name.toLowerCase().includes(search.toLowerCase())).sort((a,b)=>a.name.localeCompare(b.name)),
+    [students, cls, search]
+  );
+  const allClassStudents = useMemo(()=>students.filter(s=>s.className===cls),[students,cls]);
+  const allMonthPositions = useMemo(()=>{
+    const result = {};
+    months.forEach(month => {
+      const allRows = allClassStudents.map(s=>{
+        const m = monthlyMarks[s.id]?.[tk]?.[month] || {};
+        const totMk = subjects.reduce((a,sub)=>a+(m[sub]?.mk??0),0);
+        let totAgg = null;
+        if (!isLower) {
+          const perSub = subjects.map(sub=>{
+            const mk = m[sub]?.mk;
+            const isX = (mk===undefined||mk===null);
+            return { mk, isX, agg: isX ? undefined : aggOf(mk, bands) };
+          });
+          const hasX = perSub.some(p=>p.isX);
+          totAgg = hasX ? null : perSub.reduce((a,p)=>a+(p.agg??0),0);
+        }
+        return { id:s.id, totMk, totAgg };
+      });
+      const ranks = rankWithTies(allRows.map(r=>r.totMk>0?r.totMk:null), allRows.map(r=>typeof r.totAgg==="number"?r.totAgg:null));
+      result[month] = {};
+      allRows.forEach((r,i)=>{ result[month][r.id] = ranks[i]; });
+    });
+    return result;
+  }, [allClassStudents, monthlyMarks, tk, months, subjects, isLower, bands]);
+  const cardData = useMemo(()=> classStudents.map(s=>{
+    const monthData = months.map(month=>{
+      const m = monthlyMarks[s.id]?.[tk]?.[month] || {};
+      const perSub = subjects.map(sub=>{
+        const mk = m[sub]?.mk;
+        const isX = (mk===undefined||mk===null);
+        const agg = (!isLower && !isX) ? aggOf(mk, bands) : undefined;
+        return { sub, mk, agg, isX };
+      });
+      // hasX only meaningful once at least one mark exists for the month
+      const anyEntered = perSub.some(p => !p.isX);
+      const hasX = !isLower && anyEntered && perSub.some(p => p.isX);
+      const totMk = perSub.reduce((a,p)=>a+(p.mk??0),0);
+      const totAgg = isLower ? null : (hasX ? "X" : perSub.reduce((a,p)=>a+(p.agg??0),0));
+      const div = (!isLower && !hasX && totAgg!==null) ? divisionOf(totAgg, 4, divisions) : (hasX ? "X" : null);
+      const pos = allMonthPositions[month]?.[s.id];
+      return { month, perSub, totMk, totAgg, div, pos, hasX };
+    });
+    return { s, monthData };
+  }), [classStudents, months, monthlyMarks, tk, subjects, bands, divisions, isLower, allMonthPositions]);
+  return (
+    <div>
+      <div className="no-print" style={{display:"flex",gap:10,marginBottom:16,flexWrap:"wrap",alignItems:"flex-end",justifyContent:"space-between"}}>
+        <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"flex-end"}}>
+          <Sel label="Class" value={cls} onChange={v=>setCls(v)} opts={ALL_CLASSES}/>
+          <Sel label="Term" value={term} onChange={v=>setTerm(v)} opts={TERMS}/>
+          <div><label style={lbl}>Year</label><input type="number" value={year} onChange={e=>setYear(e.target.value)} style={{...inp,width:90}}/></div>
+          <div><label style={lbl}>Search Pupil</label><input value={search} onChange={e=>setSearch(e.target.value)} style={{...inp,width:160}} placeholder="Filter by name..."/></div>
+        </div>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+          <button onClick={()=>exportMonthlyCardsWord({ school, cls, term, year, isLower, subjects, cardData, totalInClass: allClassStudents.length })} style={btnWord}>📄 Download Word</button>
+          <button onClick={()=>window.print()} style={btnPrimary}>🖨️ Print All Cards</button>
+        </div>
+      </div>
+      {classStudents.length===0 && (
+        <div style={{background:"white",borderRadius:12,padding:40,textAlign:"center",color:"#9ca3af",border:"1px solid #e5e7eb"}}>No students in {cls}.</div>
+      )}
+      <div style={{display:"flex",flexDirection:"column",gap:24}}>
+        {cardData.map(({s, monthData})=>(
+          <TermlyMonthlyCard key={s.id} school={school} student={s} monthData={monthData}
+            term={term} year={year} cls={cls} isLower={isLower} subjects={subjects} totalInClass={allClassStudents.length}/>
+        ))}
+      </div>
+    </div>
+  );
+}
+function TermlyMonthlyCard({ school, student, monthData, term, year, cls, isLower, subjects, totalInClass }) {
+  const s = student;
+  return (
+    <div className="page-break" style={{background:"white",border:"2px solid #1e3a6e",borderRadius:10,overflow:"hidden",maxWidth:900,margin:"0 auto",boxShadow:"0 4px 20px rgba(0,0,0,0.08)",pageBreakAfter:"always"}}>
+      <div style={{background:"linear-gradient(135deg,#1e3a6e 0%,#1e40af 100%)",color:"white",padding:"12px 20px",textAlign:"center"}}>
+        <div style={{fontWeight:800,fontSize:18,letterSpacing:1}}>{school.name}</div>
+        {school.motto && <div style={{fontSize:11,opacity:0.75,fontStyle:"italic",marginTop:1}}>"{school.motto}"</div>}
+        <div style={{fontSize:11,opacity:0.9,marginTop:2}}>{school.poBox}{school.email?` - ${school.email}`:""}</div>
+        <div style={{marginTop:8,display:"inline-block",background:"rgba(255,255,255,0.18)",borderRadius:20,padding:"3px 18px",fontSize:12,fontWeight:700,letterSpacing:0.5}}>
+          MONTHLY TESTS REPORT CARD - {term.toUpperCase()} {year}
+        </div>
+      </div>
+      <div style={{background:"#fefce8",borderBottom:"2px solid #fde68a",padding:"8px 16px",display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6,fontSize:13}}>
+        <div><b>NAME:</b> {s.name}</div>
+        <div><b>CLASS:</b> {cls}</div>
+        <div><b>YEAR:</b> {year}</div>
+      </div>
+      <div style={{overflowX:"auto"}}>
+        <table style={{width:"100%",fontSize:12,borderCollapse:"collapse"}}>
+          <thead>
+            <tr style={{background:"#1e3a6e",color:"white"}}>
+              <th style={{...th,color:"white",background:"#1e3a6e",textAlign:"left",minWidth:100,verticalAlign:"middle",fontSize:11}} rowSpan={2}>MONTHLY<br/>TESTS</th>
+              {subjects.map(sub=>(
+                <th key={sub} style={{...th,color:"white",background:"#1e3a6e"}} colSpan={isLower?1:2}>
+                  {sub}{isLower&&lowerSubjectMax(sub)!==100?` /${lowerSubjectMax(sub)}`:""}
+                </th>
+              ))}
+              <th style={{...th,color:"white",background:"#1e3a6e",verticalAlign:"middle",fontSize:11,minWidth:52}} rowSpan={2}>TOT<br/>MK</th>
+              {!isLower && <>
+                <th style={{...th,color:"white",background:"#1e3a6e",verticalAlign:"middle",fontSize:11,minWidth:52}} rowSpan={2}>TOT<br/>AGG</th>
+                <th style={{...th,color:"white",background:"#1e3a6e",verticalAlign:"middle",fontSize:11,minWidth:40}} rowSpan={2}>DIV</th>
+              </>}
+              <th style={{...th,color:"white",background:"#1e3a6e",verticalAlign:"middle",fontSize:11,minWidth:40}} rowSpan={2}>POS</th>
+            </tr>
+            <tr style={{background:"#2563eb",color:"white"}}>
+              {subjects.map(sub=>(
+                isLower
+                  ? <th key={sub+"mk"} style={{...th,background:"#3b82f6",color:"white",fontSize:10}}>MK</th>
+                  : <React.Fragment key={sub}>
+                      <th style={{...th,background:"#3b82f6",color:"white",fontSize:10}}>MK</th>
+                      <th style={{...th,background:"#60a5fa",color:"white",fontSize:10}}>AGG</th>
+                    </React.Fragment>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {monthData.map(({ month, perSub, totMk, totAgg, div, pos, hasX }, mIdx)=>{
+              const rowBg = mIdx%2===0?"#ffffff":"#f8fafc";
+              const monthLabelBg = mIdx%2===0?"#dbeafe":"#eff6ff";
+              return (
+                <tr key={month} style={{background:rowBg}}>
+                  <td style={{...td,fontWeight:800,fontSize:13,background:monthLabelBg,color:"#1e3a6e",textAlign:"left",paddingLeft:10,borderRight:"2px solid #93c5fd"}}>{month}</td>
+                  {perSub.map(p=>(
+                    isLower
+                      ? <td key={p.sub+"mk"} style={{...td,background:rowBg,fontWeight:p.mk!==undefined?600:400,color:p.mk!==undefined?"#1f2937":"#9ca3af"}}>{p.mk!==undefined?p.mk:"-"}</td>
+                      : <React.Fragment key={p.sub}>
+                          <td style={{...td,background:rowBg,fontWeight:p.mk!==undefined?600:400,color:p.mk!==undefined?"#1f2937":"#9ca3af"}}>{p.mk!==undefined?p.mk:"-"}</td>
+                          <td style={{...td,background:mIdx%2===0?"#fff7ed":"#fef3c7",fontWeight:(p.isX||p.agg!==undefined)?700:400,color:p.isX?"#dc2626":(p.agg!==undefined?"#92400e":"#9ca3af"),fontSize:11}}>{hasX&&p.isX?"X":(p.agg!==undefined?p.agg:"-")}</td>
+                        </React.Fragment>
+                  ))}
+                  <td style={{...td,fontWeight:700,background:mIdx%2===0?"#ede9fe":"#f5f3ff",color:"#4c1d95",fontSize:13}}>{totMk>0?totMk:"-"}</td>
+                  {!isLower && <>
+                    <td style={{...td,background:mIdx%2===0?"#ede9fe":"#f5f3ff",fontWeight:700,color:hasX?"#dc2626":"#4c1d95"}}>{hasX?"X":(totAgg>0?totAgg:"-")}</td>
+                    <td style={{...td,fontWeight:700,color:hasX?"#dc2626":"#1e40af"}}>{hasX?"X":(totMk>0?div:"-")}</td>
+                  </>}
+                  <td style={{...td,fontSize:13}}>{pos!=="-"&&pos?<PositionBadge pos={pos} size={13}/>:"-"}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+          <tfoot>
+            <tr style={{background:"#f1f5f9"}}>
+              <td style={{...td,textAlign:"left",paddingLeft:10,fontWeight:600,color:"#6b7280",fontSize:11}} colSpan={isLower?subjects.length+2:subjects.length*2+4}>
+                Total pupils in class: <b>{totalInClass}</b>
+              </td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+      <div style={{borderTop:"2px solid #e5e7eb",padding:"10px 16px",background:"#f8fafc",fontSize:13,lineHeight:2}}>
+        <div><b>Class Teacher's Comment:</b> .............................................................................. <b>Sign:</b> ......................</div>
+        <div><b>Head Teacher's Comment:</b> .............................................................................. <b>Sign:</b> ......................</div>
+      </div>
+    </div>
+  );
+}
+// ─── RESULT SHEETS ───────────────────────────────────────────────────────────
+function ResultSheets({ students, termMarks, bands, divisions, school }) {
+  const [cls, setCls] = useState("P4");
+  const [term, setTerm] = useState("Term I");
+  const [year, setYear] = useState(school.year||String(new Date().getFullYear()));
+  const [pdfBusy, setPdfBusy] = useState(false);
+  const sheetCardRef = useRef(null);
+  const analysisCardRef = useRef(null);
+  const isLower = LOWER_CLASSES.includes(cls);
+  const subjects = isLower ? LOWER_SUBJECTS : UPPER_SUBJECTS;
+  const tk = `${term}__${year}`;
+  const classStudents = useMemo(()=>
+    students.filter(s=>s.className===cls).sort((a,b)=>a.name.localeCompare(b.name)),
+    [students, cls]
+  );
+  const rows = useMemo(()=> classStudents.map(s=>{
+    const m = termMarks[s.id]?.[tk]||{};
+    const perSub = subjects.map(sub=>{
+      const ca=m[sub]?.ca, exam=m[sub]?.exam;
+      const isX = isLower?(exam===undefined||exam===null):(ca===undefined||ca===null)&&(exam===undefined||exam===null);
+      if(isX) return {sub,ca,exam,av:undefined,agg:undefined,isX:true,gradeLabel:"X"};
+      const hasBoth=typeof ca==="number"&&typeof exam==="number";
+      const av=hasBoth?Math.round((ca+exam)/2):(typeof exam==="number"?exam:typeof ca==="number"?ca:undefined);
+      const agg=av!==undefined?aggOf(av,bands):undefined;
+      const gl=av!==undefined?gradeLabel(av,bands):undefined;
+      return {sub,ca,exam,av,agg,isX:false,gradeLabel:gl};
+    });
+    const hasX=perSub.some(p=>p.isX);
+    const totMk=perSub.reduce((a,p)=>a+(p.av??0),0);
+    const totAgg=hasX?"X":perSub.reduce((a,p)=>a+(p.agg||0),0);
+    const div=hasX?"X":(typeof totAgg==="number"?divisionOf(totAgg,isLower?5:4,divisions):"X");
+    return {s,perSub,totMk,totAgg,div,hasX};
+  }),[classStudents,termMarks,tk,subjects,bands,divisions,isLower]);
+  const positions = useMemo(()=>rankWithTies(rows.map(r=>r.totMk>0?r.totMk:null), rows.map(r=>typeof r.totAgg==="number"?r.totAgg:null)),[rows]);
+  const sortedRows = useMemo(()=>{
+    const indexed=rows.map((r,i)=>({...r,pos:positions[i]}));
+    return [...indexed].sort((a,b)=>{ if(a.pos==="-") return 1; if(b.pos==="-") return -1; return a.pos-b.pos; });
+  },[rows,positions]);
+  const totals=sortedRows.map(r=>r.totMk).filter(v=>v>0);
+  const best=Math.max(...totals,0), worst=Math.min(...totals)||0;
+  const avg=totals.length?Math.round(totals.reduce((a,b)=>a+b,0)/totals.length):0;
+  const gradeKeys=bands.map(b=>b.grade);
+  const subjectAnalysis=!isLower?subjects.map(sub=>{
+    const gradeCounts={};
+    gradeKeys.forEach(g=>{ gradeCounts[g]=0; });
+    let xCount=0;
+    rows.forEach(r=>{ const p=r.perSub.find(p=>p.sub===sub); if(p&&p.isX){xCount++;}else if(p&&p.gradeLabel){gradeCounts[p.gradeLabel]=(gradeCounts[p.gradeLabel]||0)+1;} });
+    return {sub,gradeCounts,xCount,total:rows.length};
+  }):[];
+  const divCounts={I:0,II:0,III:0,IV:0,U:0,X:0};
+  sortedRows.forEach(r=>{ const d=r.hasX?"X":r.div; if(d==="X")divCounts.X++;else if(divCounts[d]!==undefined)divCounts[d]++;else divCounts.U++; });
+  return (
+    <div>
+      <div className="no-print" style={{display:"flex",gap:10,marginBottom:16,flexWrap:"wrap",alignItems:"flex-end",justifyContent:"space-between"}}>
+        <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"flex-end"}}>
+          <Sel label="Class" value={cls} onChange={setCls} opts={ALL_CLASSES}/>
+          <Sel label="Term" value={term} onChange={setTerm} opts={TERMS}/>
+          <div><label style={lbl}>Year</label><input type="number" value={year} onChange={e=>setYear(e.target.value)} style={{...inp,width:90}}/></div>
+        </div>
+        <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
+          <button onClick={()=>exportResultSheetExcel({ school, cls, term, year, isLower, subjects, sortedRows, best, worst, avg, subjectAnalysis, gradeKeys, divCounts, classCount: classStudents.length })} style={btnExcel}>📊 Download Excel</button>
+          <button onClick={()=>exportResultSheetWord({ school, cls, term, year, isLower, subjects, sortedRows, best, worst, avg, subjectAnalysis, gradeKeys, divCounts, classCount: classStudents.length })} style={btnWord}>📄 Download Word</button>
+          <button disabled={pdfBusy} onClick={async()=>{
+            setPdfBusy(true);
+            try {
+              await downloadNodesAsPdf(
+                [sheetCardRef.current, !isLower ? analysisCardRef.current : null],
+                `${safeFileName(cls)}_${safeFileName(term)}_${year}_Result_Sheet.pdf`
+              );
+            } finally { setPdfBusy(false); }
+          }} style={pdfBusy?btnPdfBusy:btnPdf}>{pdfBusy?"⏳ Generating...":"📕 Download PDF"}</button>
+          <button onClick={()=>window.print()} style={btnPrimary}>🖨️ Print Result Sheet</button>
+        </div>
+      </div>
+      <div ref={sheetCardRef} style={{background:"white",borderRadius:12,border:"1px solid #e5e7eb",overflow:"hidden",marginBottom:24}}>
+        <div style={{background:"#1e3a6e",color:"white",padding:"12px 16px",textAlign:"center"}}>
+          <div style={{fontWeight:800,fontSize:16}}>{school.name}</div>
+          <div style={{fontSize:12,opacity:0.9,marginTop:2}}>{school.poBox} | END OF {term.toUpperCase()} {year} - {cls} RESULT SHEET</div>
+        </div>
+        <div style={{overflowX:"auto"}}>
+          <table style={{width:"100%",fontSize:12,minWidth:800}}>
+            <thead>
+              <tr style={{background:"#1e40af",color:"white"}}>
+                <th style={th} rowSpan={2}>S/N</th>
+                <th style={{...th,textAlign:"left",minWidth:160}} rowSpan={2}>NAME OF PUPIL</th>
+                {isLower
+                  ?subjects.map(s=><th key={s} style={th} rowSpan={2}>{s}{lowerSubjectMax(s)!==100?` /${lowerSubjectMax(s)}`:""}</th>)
+                  :subjects.map(s=><th key={s} style={th} colSpan={4}>{s}</th>)
+                }
+                <th style={th} rowSpan={2}>TOT MK</th>
+                {!isLower&&<><th style={th} rowSpan={2}>TOT AGG</th><th style={th} rowSpan={2}>DIV</th></>}
+                <th style={th} rowSpan={2}>POS</th>
+              </tr>
+              {!isLower&&(
+                <tr style={{background:"#2563eb",color:"white",fontSize:11}}>
+                  {subjects.map(s=>(
+                    <React.Fragment key={s}>
+                      <th style={{...th,background:"#fef9c3",color:"#713f12"}}>CA</th>
+                      <th style={{...th,background:"#dcfce7",color:"#14532d"}}>EX</th>
+                      <th style={{...th,background:"#dbeafe",color:"#1e3a6e"}}>AV</th>
+                      <th style={{...th,background:"#fed7aa",color:"#7c2d12"}}>AG</th>
+                    </React.Fragment>
+                  ))}
+                </tr>
+              )}
+            </thead>
+            <tbody>
+              {sortedRows.map((r,i)=>(
+                <tr key={r.s.id} style={{background:i%2===0?"white":"#f8fafc"}}>
+                  <td style={td}>{i+1}</td>
+                  <td style={{...td,fontWeight:600,textAlign:"left"}}>{r.s.name}</td>
+                  {isLower
+                    ?r.perSub.map(p=><td key={p.sub} style={td}>{p.isX?"X":p.av??"-"}</td>)
+                    :r.perSub.map(p=>(
+                        <React.Fragment key={p.sub}>
+                          <td style={{...td,background:"#fefce8"}}>{p.isX?"X":p.ca??"-"}</td>
+                          <td style={{...td,background:"#f0fdf4"}}>{p.isX?"X":p.exam??"-"}</td>
+                          <td style={{...td,background:"#eff6ff",fontWeight:600}}>{p.isX?"X":p.av??"-"}</td>
+                          <td style={{...td,background:"#fff7ed"}}>{p.isX?"X":p.av!==undefined?p.agg:"-"}</td>
+                        </React.Fragment>
+                      ))
+                  }
+                  <td style={{...td,fontWeight:700,background:"#ede9fe"}}>{r.totMk||"-"}</td>
+                  {!isLower&&<>
+                    <td style={{...td,background:"#ede9fe",color:r.hasX?"#dc2626":"inherit",fontWeight:r.hasX?700:400}}>{r.hasX?"X":r.totAgg||"-"}</td>
+                    <td style={{...td,fontWeight:700,color:r.hasX?"#dc2626":"#1e40af"}}>{r.hasX?"X":r.totMk?r.div:"-"}</td>
+                  </>}
+                  <td style={{...td}}>{r.pos!=="-"?<PositionBadge pos={r.pos} size={13}/>:"-"}</td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr style={{background:"#dbeafe",fontWeight:700,fontSize:12}}>
+                <td colSpan={isLower?subjects.length+4:subjects.length*4+6} style={{...td,textAlign:"left",padding:"8px 12px",color:"#1e3a6e"}}>
+                  📈 Highest: <b>{best||"-"}</b> &nbsp;|&nbsp; Lowest: <b>{worst||"-"}</b> &nbsp;|&nbsp; Class Avg: <b>{avg||"-"}</b> &nbsp;|&nbsp; Best Pupil: <b>{sortedRows[0]?.s.name||"-"}</b>
+                </td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </div>
+      {!isLower&&(
+        <div ref={analysisCardRef} style={{background:"white",borderRadius:12,border:"1px solid #e5e7eb",overflow:"hidden",marginBottom:24}}>
+          <div style={{background:"#0f766e",color:"white",padding:"10px 16px",fontWeight:700}}>📊 Performance Analysis - {cls} {term} {year}</div>
+          <div style={{padding:16}}>
+            <h4 style={{margin:"0 0 8px",color:"#0f766e",fontSize:13}}>A. Subject Performance Analysis</h4>
+            <div style={{overflowX:"auto",marginBottom:20}}>
+              <table style={{width:"100%",fontSize:12}}>
+                <thead><tr style={{background:"#ccfbf1"}}><th style={{...th,textAlign:"left",padding:"8px 10px",color:"#0f766e"}}>Subject</th>{gradeKeys.map(g=><th key={g} style={{...th,padding:"8px 10px",color:"#0f766e"}}>{g}</th>)}<th style={{...th,padding:"8px 10px",color:"#dc2626"}}>X</th><th style={{...th,padding:"8px 10px",color:"#0f766e"}}>Total</th></tr></thead>
+                <tbody>
+                  {subjectAnalysis.map((sa,i)=>(
+                    <tr key={sa.sub} style={{background:i%2===0?"white":"#f0fdfa"}}>
+                      <td style={{...td,fontWeight:700,textAlign:"left"}}>{sa.sub}</td>
+                      {gradeKeys.map(g=><td key={g} style={td}>{sa.gradeCounts[g]||0}</td>)}
+                      <td style={{...td,fontWeight:700,color:"#dc2626"}}>{sa.xCount||0}</td>
+                      <td style={{...td,fontWeight:700}}>{sa.total}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <h4 style={{margin:"0 0 8px",color:"#0f766e",fontSize:13}}>B. General Performance Analysis</h4>
+            <div style={{overflowX:"auto",marginBottom:16}}>
+              <table style={{width:"100%",fontSize:12}}>
+                <thead><tr style={{background:"#ccfbf1"}}>{["No. of Pupils","Div I","Div II","Div III","Div IV","U","X"].map(h=><th key={h} style={{...th,padding:"8px 10px",color:"#0f766e"}}>{h}</th>)}</tr></thead>
+                <tbody>
+                  <tr>
+                    <td style={{...td,fontWeight:700}}>{classStudents.length}</td>
+                    <td style={{...td,fontWeight:700,color:"#166534"}}>{divCounts.I}</td>
+                    <td style={{...td,fontWeight:700,color:"#1e40af"}}>{divCounts.II}</td>
+                    <td style={{...td,fontWeight:700,color:"#92400e"}}>{divCounts.III}</td>
+                    <td style={{...td,fontWeight:700,color:"#7c2d12"}}>{divCounts.IV}</td>
+                    <td style={{...td,fontWeight:700,color:"#6b7280"}}>{divCounts.U}</td>
+                    <td style={{...td,fontWeight:700,color:"#dc2626"}}>{divCounts.X}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,fontSize:13,lineHeight:2}}>
+              <div style={{border:"1px solid #d1d5db",borderRadius:8,padding:12}}>
+                <b>Class Teacher's Comment:</b><br/>.........................................................<br/><b>Name:</b> ......................... <b>Sign:</b> ....................
+              </div>
+              <div style={{border:"1px solid #d1d5db",borderRadius:8,padding:12}}>
+                <b>Headteacher's Comment:</b><br/>.........................................................<br/><b>Name:</b> ......................... <b>Sign:</b> ....................
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+// ─── REPORT CARDS ────────────────────────────────────────────────────────────
+function ReportCards({ students, termMarks, bands, divisions, school, initials }) {
+  const [cls, setCls] = useState("P5");
+  const [term, setTerm] = useState("Term I");
+  const [year, setYear] = useState(school.year||String(new Date().getFullYear()));
+  const [search, setSearch] = useState("");
+  const [pdfBusy, setPdfBusy] = useState(false);
+  const cardListRef = useRef(null);
+  const isLower = LOWER_CLASSES.includes(cls);
+  const subjects = isLower ? LOWER_SUBJECTS : UPPER_SUBJECTS;
+  const tk = `${term}__${year}`;
+  const classStudents = useMemo(()=>
+    students.filter(s=>s.className===cls&&s.name.toLowerCase().includes(search.toLowerCase())).sort((a,b)=>a.name.localeCompare(b.name)),
+    [students, cls, search]
+  );
+  const rows = useMemo(()=> classStudents.map(s=>{
+    const m=termMarks[s.id]?.[tk]||{};
+    const perSub=subjects.map(sub=>{
+      const ca=m[sub]?.ca, exam=m[sub]?.exam;
+      const isX=isLower?(exam===undefined||exam===null):(ca===undefined||ca===null)&&(exam===undefined||exam===null);
+      if(isX) return {sub,ca,exam,av:undefined,agg:undefined,isX:true};
+      const hasBoth=typeof ca==="number"&&typeof exam==="number";
+      const av=hasBoth?Math.round((ca+exam)/2):(typeof exam==="number"?exam:typeof ca==="number"?ca:undefined);
+      const agg=av!==undefined?aggOf(av,bands):undefined;
+      return {sub,ca,exam,av,agg,isX:false};
+    });
+    const hasX=perSub.some(p=>p.isX);
+    const totMk=perSub.reduce((a,p)=>a+(p.av??0),0);
+    const totAgg=hasX?"X":perSub.reduce((a,p)=>a+(p.agg||0),0);
+    const div=hasX?"X":(typeof totAgg==="number"?divisionOf(totAgg,isLower?5:4,divisions):"X");
+    return {s,perSub,totMk,totAgg,div,hasX};
+  }),[classStudents,termMarks,tk,subjects,bands,divisions,isLower]);
+  const allClassStudents=useMemo(()=>students.filter(s=>s.className===cls),[students,cls]);
+  const allPositions=useMemo(()=>{
+    const pm={};
+    const allRows=allClassStudents.map(s=>{
+      const m=termMarks[s.id]?.[tk]||{};
+      let totMk=0; let totAgg=0; let hasX=false;
+      subjects.forEach(sub=>{
+        const ca=m[sub]?.ca,exam=m[sub]?.exam;
+        const isX=isLower?(exam===undefined||exam===null):(ca===undefined||ca===null)&&(exam===undefined||exam===null);
+        if(isX){ hasX=true; return; }
+        const hasBoth=typeof ca==="number"&&typeof exam==="number";
+        const av=hasBoth?Math.round((ca+exam)/2):(typeof exam==="number"?exam:typeof ca==="number"?ca:undefined);
+        totMk += (av??0);
+        if (!isLower && av!==undefined) totAgg += aggOf(av, bands);
+      });
+      return {id:s.id, totMk, totAgg: (isLower||hasX) ? null : totAgg};
+    });
+    const ranks=rankWithTies(allRows.map(r=>r.totMk>0?r.totMk:null), allRows.map(r=>typeof r.totAgg==="number"?r.totAgg:null));
+    allRows.forEach((r,i)=>{ pm[r.id]=ranks[i]; });
+    return pm;
+  },[allClassStudents,termMarks,tk,subjects,isLower,bands]);
+  return (
+    <div>
+      <div className="no-print" style={{display:"flex",gap:10,marginBottom:16,flexWrap:"wrap",alignItems:"flex-end",justifyContent:"space-between"}}>
+        <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"flex-end"}}>
+          <Sel label="Class" value={cls} onChange={setCls} opts={ALL_CLASSES}/>
+          <Sel label="Term" value={term} onChange={setTerm} opts={TERMS}/>
+          <div><label style={lbl}>Year</label><input type="number" value={year} onChange={e=>setYear(e.target.value)} style={{...inp,width:90}}/></div>
+          <div><label style={lbl}>Search Pupil</label><input value={search} onChange={e=>setSearch(e.target.value)} style={{...inp,width:180}} placeholder="Filter by name..."/></div>
+        </div>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+          <button onClick={()=>exportReportCardsWord({ school, cls, term, year, isLower, rows, allPositions, totalInClass: allClassStudents.length, bands, initials })} style={btnWord}>📄 Download Word</button>
+          <button disabled={pdfBusy} onClick={async()=>{
+            setPdfBusy(true);
+            try {
+              const cards = Array.from(cardListRef.current?.querySelectorAll(".report-card-sheet") || []);
+              await downloadNodesAsPdf(cards, `${safeFileName(cls)}_${safeFileName(term)}_${year}_Report_Cards.pdf`);
+            } finally { setPdfBusy(false); }
+          }} style={pdfBusy?btnPdfBusy:btnPdf}>{pdfBusy?"⏳ Generating...":"📕 Download PDF"}</button>
+          <button onClick={()=>window.print()} style={btnPrimary}>🖨️ Print All Cards</button>
+        </div>
+      </div>
+      {classStudents.length===0&&<div style={{background:"white",borderRadius:12,padding:40,textAlign:"center",color:"#9ca3af",border:"1px solid #e5e7eb"}}>No students found in {cls}.</div>}
+      <div ref={cardListRef} className="report-card-list">
+        {rows.map(r=>(
+          <ReportCard key={r.s.id} school={school} r={r} term={term} year={year} cls={cls}
+            position={allPositions[r.s.id]} totalInClass={allClassStudents.length}
+            isLower={isLower} bands={bands} initials={initials} />
+        ))}
+      </div>
+    </div>
+  );
+}
+function ReportCard({ school, r, term, year, cls, position, totalInClass, isLower, bands, initials }) {
+  const { s, perSub, totMk, totAgg, div, hasX } = r;
+  return (
+    <div className="report-card-sheet" style={{width:"210mm",minHeight:"297mm",maxWidth:"210mm",boxSizing:"border-box",padding:"10mm",background:"white"}}>
+      <div style={{background:"white",border:"3px solid #1e3a6e",borderRadius:12,overflow:"hidden",boxShadow:"0 4px 20px rgba(0,0,0,0.1)"}}>
+        <div style={{background:"linear-gradient(135deg,#1e3a6e 0%,#1e40af 100%)",color:"white",padding:"16px 20px",textAlign:"center"}}>
+          <div style={{fontWeight:800,fontSize:20,letterSpacing:1}}>{school.name}</div>
+          <div style={{fontSize:11,opacity:0.9,marginTop:2}}>{school.poBox} - {school.email}</div>
+          <div style={{marginTop:8,display:"inline-block",background:"rgba(255,255,255,0.15)",borderRadius:20,padding:"3px 16px",fontSize:12,fontWeight:600}}>
+            PUPIL'S ACADEMIC REPORT CARD - END OF {term.toUpperCase()} {year}
+          </div>
+        </div>
+        <div style={{background:"#fefce8",borderBottom:"2px solid #fde68a",padding:"10px 16px",display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,fontSize:13,alignItems:"center"}}>
+          <div><b>NAME:</b> {s.name}</div>
+          <div><b>CLASS:</b> {cls}</div>
+          <div><b>TERM:</b> {term}</div>
+          <div><b>YEAR:</b> {year}</div>
+          <div style={{display:"flex",alignItems:"center",gap:6}}><b>POSITION:</b> <PositionBadge pos={position} size={14}/> <span>out of {totalInClass}</span></div>
+        </div>
+        <div style={{padding:"12px 16px"}}>
+          <table style={{width:"100%",fontSize:13}}>
+            <thead>
+              <tr style={{background:"#1e3a6e",color:"white"}}>
+                <th style={{...th,textAlign:"left",color:"white"}}>SUBJECT</th>
+                {!isLower&&<><th style={{...th,color:"white"}}>CA</th><th style={{...th,color:"white"}}>EXAM</th></>}
+                <th style={{...th,color:"white"}}>AVERAGE</th>
+                {!isLower&&<th style={{...th,color:"white"}}>AGG</th>}
+                <th style={{...th,color:"white"}}>REMARKS</th>
+                <th style={{...th,color:"white"}}>INITIALS</th>
+              </tr>
+            </thead>
+            <tbody>
+              {perSub.map((p,i)=>{
+                const isUnscored=isLower&&lowerSubjectMax(p.sub)!==100;
+                return (
+                  <tr key={p.sub} style={{background:i%2===0?"white":"#f8fafc"}}>
+                    <td style={{...td,fontWeight:600,textAlign:"left"}}>{p.sub}{isUnscored?` (/${lowerSubjectMax(p.sub)})`:""}</td>
+                    {!isLower&&<><td style={{...td,background:"#fefce8"}}>{p.isX?"X":p.ca??"-"}</td><td style={{...td,background:"#f0fdf4"}}>{p.isX?"X":p.exam??"-"}</td></>}
+                    <td style={{...td,fontWeight:700,fontSize:15}}>{p.isX?"X":p.av??"-"}</td>
+                    {!isLower&&<td style={td}>{isUnscored?"-":(p.isX?"X":p.av!==undefined?p.agg:"-")}</td>}
+                    <td style={{...td,fontWeight:700,color:"#1e40af"}}>{isUnscored?"-":(p.isX?"Absent":p.av!==undefined?remarkFor(p.av):"-")}</td>
+                    <td style={{...td,fontWeight:600,color:"#7c3aed"}}>{((initials||{})[cls]||{})[p.sub]||""}</td>
+                  </tr>
+                );
+              })}
+              <tr style={{background:"#dbeafe",fontWeight:700}}>
+                <td style={{...td,textAlign:"left"}} colSpan={isLower?1:3}>TOTAL</td>
+                <td style={{...td,fontSize:15}}>{totMk||"-"}</td>
+                {!isLower&&<td style={td}>{hasX?"X":totAgg||"-"}</td>}
+                <td style={td}></td><td style={td}></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div style={{padding:"12px 4px 0",fontSize:13,lineHeight:2}}>
+        {!isLower&&<div><b>DIVISION:</b> <span style={{color:"#1e40af",fontWeight:700}}>{hasX?"X":totMk?div:"-"}</span></div>}
+        <div><b>CONDUCT:</b> ...........................................................................................</div>
+        <div><b>Class Teacher's Comment:</b> .............................................................................. <b>Sign:</b> ......................</div>
+        <div><b>Head Teacher's Comment:</b> .............................................................................. <b>Sign:</b> ......................</div>
+        <div><b>Next Term begins on</b> ....................... <b>Ends on</b> .......................</div>
+        <div><b>Requirements:</b> {school.requirements||"..........................................................................................."}</div>
+        <div><b>Parent's Signature after reading:</b> ...................................................................</div>
+      </div>
+    </div>
+  );
+}
+// ─── SUBJECT INITIALS MANAGER ────────────────────────────────────────────────
+function SubjectInitialsManager({ initials, setInitials }) {
+  const [selClass, setSelClass] = useState("P1");
+  const [selSubject, setSelSubject] = useState("");
+  const [inputVal, setInputVal] = useState("");
+  const [msg, setMsg] = useState("");
+  const isLower = LOWER_CLASSES.includes(selClass);
+  const subjects = isLower ? LOWER_SUBJECTS : UPPER_SUBJECTS;
+  // Auto-select first subject when class changes
+  const handleClassChange = (cls) => {
+    setSelClass(cls);
+    const subs = LOWER_CLASSES.includes(cls) ? LOWER_SUBJECTS : UPPER_SUBJECTS;
+    setSelSubject(subs[0] || "");
+    setInputVal("");
+    setMsg("");
+  };
+  const classInitials = (initials || {})[selClass] || {};
+  const handleAdd = () => {
+    const sub = selSubject || subjects[0];
+    const val = inputVal.trim().toUpperCase();
+    if (!val) { setMsg("Please enter an initial."); return; }
+    if (val.length > 6) { setMsg("Keep initials short (max 6 chars)."); return; }
+    setInitials(prev => ({
+      ...prev,
+      [selClass]: { ...(prev[selClass] || {}), [sub]: val }
+    }));
+    setInputVal("");
+    setMsg("✅ Saved!");
+    setTimeout(() => setMsg(""), 2000);
+  };
+  const handleRemove = (sub) => {
+    setInitials(prev => {
+      const updated = { ...(prev[selClass] || {}) };
+      delete updated[sub];
+      return { ...prev, [selClass]: updated };
+    });
+  };
+  return (
+    <div style={{background:"white",borderRadius:12,padding:20,border:"1px solid #e5e7eb"}}>
+      <h3 style={{margin:"0 0 4px",color:"#1e3a6e",fontSize:15,fontWeight:700}}>✍️ Subject Initials</h3>
+      <p style={{margin:"0 0 16px",fontSize:12,color:"#6b7280"}}>
+        Set the teacher's initials per class and subject. These appear in the INITIALS column on printed report cards.
+      </p>
+      {/* Input row */}
+      <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"flex-end",marginBottom:16}}>
+        <div>
+          <label style={lbl}>Class</label>
+          <select value={selClass} onChange={e=>handleClassChange(e.target.value)} style={{...inp,width:90}}>
+            {ALL_CLASSES.map(c=><option key={c}>{c}</option>)}
+          </select>
+        </div>
+        <div>
+          <label style={lbl}>Subject</label>
+          <select value={selSubject||subjects[0]} onChange={e=>setSelSubject(e.target.value)} style={{...inp,width:120}}>
+            {subjects.map(s=><option key={s}>{s}</option>)}
+          </select>
+        </div>
+        <div>
+          <label style={lbl}>Initial(s)</label>
+          <input
+            value={inputVal}
+            onChange={e=>setInputVal(e.target.value)}
+            onKeyDown={e=>e.key==="Enter"&&handleAdd()}
+            placeholder="e.g. JK"
+            maxLength={6}
+            style={{...inp,width:90,textTransform:"uppercase"}}
+          />
+        </div>
+        <button onClick={handleAdd} style={btnPrimary}>Set Initial</button>
+      </div>
+      {msg && <div style={{fontSize:12,marginBottom:12,color:msg.startsWith("✅")?"#16a34a":"#dc2626"}}>{msg}</div>}
+      {/* Table of current initials for selected class */}
+      <div>
+        <div style={{fontSize:12,fontWeight:700,color:"#374151",marginBottom:8}}>
+          Current initials for <span style={{color:"#1e3a6e"}}>{selClass}</span>:
+        </div>
+        {subjects.filter(s=>classInitials[s]).length === 0
+          ? <div style={{fontSize:12,color:"#9ca3af",fontStyle:"italic"}}>No initials set for {selClass} yet.</div>
+          : <table style={{fontSize:13,borderCollapse:"collapse",width:"100%"}}>
+              <thead>
+                <tr style={{background:"#dbeafe"}}>
+                  {["Subject","Initial",""].map(h=><th key={h} style={{padding:"6px 10px",textAlign:"left",color:"#1e3a6e",fontWeight:700}}>{h}</th>)}
+                </tr>
+              </thead>
+              <tbody>
+                {subjects.filter(s=>classInitials[s]).map((s,i)=>(
+                  <tr key={s} style={{background:i%2===0?"white":"#f8fafc"}}>
+                    <td style={{padding:"5px 10px",fontWeight:600}}>{s}</td>
+                    <td style={{padding:"5px 10px",color:"#7c3aed",fontWeight:700}}>{classInitials[s]}</td>
+                    <td style={{padding:"5px 10px"}}>
+                      <button onClick={()=>handleRemove(s)} style={{...btnDanger,padding:"3px 8px",fontSize:11}}>Remove</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+        }
+      </div>
+      {/* Overview of all classes that have initials */}
+      {Object.keys(initials||{}).filter(c=>Object.keys((initials||{})[c]||{}).length>0).length > 0 && (
+        <div style={{marginTop:16,paddingTop:14,borderTop:"1px solid #f3f4f6"}}>
+          <div style={{fontSize:12,fontWeight:700,color:"#374151",marginBottom:8}}>All classes with initials set:</div>
+          <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
+            {ALL_CLASSES.filter(c=>Object.keys((initials||{})[c]||{}).length>0).map(c=>(
+              <div key={c} style={{background:"#ede9fe",border:"1px solid #c4b5fd",borderRadius:8,padding:"6px 12px",fontSize:12}}>
+                <span style={{fontWeight:700,color:"#5b21b6"}}>{c}</span>
+                {" — "}
+                <span style={{color:"#374151"}}>{Object.keys((initials||{})[c]||{}).join(", ")}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+// ─── MANAGE REQUESTS (admin only) ─────────────────────────────────────────────
+// Whenever a teacher changes a mark that already had a value, the edit lands
+// here as a pending request instead of being written straight to storage.
+// The admin reviews the old vs. new value and approves or rejects it. First-
+// time entries (a blank cell being filled in) never come through here -- only
+// changes to marks that were already recorded.
+function ManageRequests({ changeRequests, approveChangeRequest, rejectChangeRequest }) {
+  const pending = useMemo(() =>
+    [...changeRequests].sort((a,b) => new Date(b.requestedAt) - new Date(a.requestedAt)),
+    [changeRequests]
+  );
+  const isUnlockReq = (req) => req.kind === "unlock_term" || req.kind === "unlock_monthly";
+  const describeField = (req) => {
+    const [term, year] = (req.tk || "").split("__");
+    if (req.kind === "unlock_term") return `${term || ""} ${year || ""} · Whole sheet`;
+    if (req.kind === "unlock_monthly") return `${term || ""} ${year || ""} · ${req.month} · Whole sheet`;
+    const fieldLabel = req.field === "ca" ? "CA" : req.field === "exam" ? "Exam" : req.field === "mk" ? "Mark" : req.field;
+    if (req.kind === "term") return `${term || ""} ${year || ""} · ${req.sub} · ${fieldLabel}`;
+    return `${term || ""} ${year || ""} · ${req.month} · ${req.sub} · ${fieldLabel}`;
+  };
+  return (
+    <div style={{maxWidth:900,margin:"0 auto"}}>
+      <div style={{background:"linear-gradient(135deg,#1e3a6e,#2563eb)",borderRadius:14,padding:"24px 28px",marginBottom:20,color:"white"}}>
+        <div style={{fontSize:22,fontWeight:800,marginBottom:6}}>🛂 Manage Requests</div>
+        <div style={{fontSize:13,opacity:0.9,lineHeight:1.6}}>
+          When a teacher changes a mark that was already entered, it appears here for your approval instead of saving immediately.
+          First-time entries (a blank mark being filled in) don't need approval and are saved right away.
+          Requests to unlock a saved sheet also land here - approving one reopens that whole class/term (or month) for editing again.
+        </div>
+      </div>
+      {pending.length === 0 ? (
+        <div style={{background:"white",borderRadius:12,padding:32,border:"1px solid #e5e7eb",textAlign:"center",color:"#9ca3af",fontSize:13}}>
+          ✅ No pending requests. Changes to already-entered marks, and unlock requests, will show up here.
+        </div>
+      ) : (
+        <div style={{background:"white",borderRadius:12,border:"1px solid #e5e7eb",overflow:"hidden"}}>
+          <table style={{width:"100%",fontSize:13}}>
+            <thead>
+              <tr style={{background:"#1e3a6e",color:"white"}}>
+                <th style={th}>Student / Class</th>
+                <th style={th}>Where</th>
+                <th style={th}>Old Value</th>
+                <th style={th}>New Value</th>
+                <th style={th}>Requested By</th>
+                <th style={th}>When</th>
+                <th style={th}>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {pending.map(req => (
+                <tr key={req.id}>
+                  <td style={{...td,fontWeight:600,textAlign:"left"}}>
+                    {isUnlockReq(req) ? `🔓 ${req.cls} (unlock request)` : req.studentName}
+                  </td>
+                  <td style={td}>{describeField(req)}</td>
+                  {isUnlockReq(req) ? (
+                    <>
+                      <td style={{...td,background:"#fef2f2",color:"#991b1b",fontWeight:700}}>🔒 Locked</td>
+                      <td style={{...td,background:"#f0fdf4",color:"#166534",fontWeight:700}}>🔓 Unlocked</td>
+                    </>
+                  ) : (
+                    <>
+                      <td style={{...td,background:"#fef2f2",color:"#991b1b",fontWeight:700}}>{req.oldVal===undefined||req.oldVal===null||req.oldVal===""?"—":req.oldVal}</td>
+                      <td style={{...td,background:"#f0fdf4",color:"#166534",fontWeight:700}}>{req.newVal===undefined||req.newVal===null||req.newVal===""?"—":req.newVal}</td>
+                    </>
+                  )}
+                  <td style={td}>{req.requestedBy}</td>
+                  <td style={{...td,fontSize:11,color:"#6b7280"}}>{new Date(req.requestedAt).toLocaleString()}</td>
+                  <td style={td}>
+                    <div style={{display:"flex",gap:6,justifyContent:"center"}}>
+                      <button onClick={()=>approveChangeRequest(req.id)} style={{...btnSuccess,padding:"6px 12px",fontSize:12}}>✅ Approve</button>
+                      <button onClick={()=>rejectChangeRequest(req.id)} style={{...btnDanger,padding:"6px 12px",fontSize:12}}>❌ Reject</button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+// ─── MANAGE TEACHER PASSWORDS (admin only) ───────────────────────────────────
+function ManageTeacherPasswords({ accounts, setAccounts, currentUser }) {
+  const [drafts, setDrafts] = useState({}); // { [key]: newPlainPw }
+  const [msg, setMsg] = useState({}); // { [key]: "✅..." | "⚠️..." }
+  const teacherEntries = Object.entries(accounts || {})
+    .filter(([, a]) => a && a.role === "teacher")
+    .sort((a, b) => (a[1].username || "").localeCompare(b[1].username || ""));
+  const updatePw = (key) => {
+    const newPw = (drafts[key] || "").trim();
+    if (!newPw) { setMsg(m => ({ ...m, [key]: "⚠️ Enter a new password." })); return; }
+    if (newPw.length < 4) { setMsg(m => ({ ...m, [key]: "⚠️ Use at least 4 characters." })); return; }
+    hashPassword(newPw).then(hashed => {
+      setAccounts(prev => ({ ...prev, [key]: { ...prev[key], passwordHash: hashed } }));
+      setDrafts(d => ({ ...d, [key]: "" }));
+      setMsg(m => ({ ...m, [key]: "✅ Updated" }));
+      setTimeout(() => setMsg(m => ({ ...m, [key]: "" })), 2500);
+    });
+  };
+  return (
+    <div style={{background:"white",borderRadius:12,padding:20,border:"1px solid #e5e7eb"}}>
+      <h3 style={{margin:"0 0 6px",color:"#1e3a6e",fontSize:15,fontWeight:700}}>👥 Manage Teacher Passwords</h3>
+      <div style={{fontSize:12,color:"#6b7280",marginBottom:14}}>
+        As the administrator ({currentUser}), you can reset any teacher's password here. The teacher will use the new password on their next login.
+      </div>
+      {teacherEntries.length === 0 ? (
+        <div style={{fontSize:13,color:"#6b7280"}}>No teacher accounts found.</div>
+      ) : (
+        <div style={{overflowX:"auto"}}>
+          <table style={{width:"100%",fontSize:13,borderCollapse:"collapse"}}>
+            <thead>
+              <tr style={{background:"#dbeafe"}}>
+                {["Username","New Password","",""].map((h,i)=>(
+                  <th key={i} style={{padding:"8px 10px",textAlign:"left",color:"#1e3a6e",fontWeight:700}}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {teacherEntries.map(([key, a], i) => (
+                <tr key={key} style={{background:i%2===0?"white":"#f8fafc"}}>
+                  <td style={{padding:"8px 10px",fontWeight:600,color:"#1e3a6e"}}>{a.username}</td>
+                  <td style={{padding:"6px 10px"}}>
+                    <input
+                      type="text"
+                      value={drafts[key]||""}
+                      onChange={e=>setDrafts(d=>({...d,[key]:e.target.value}))}
+                      placeholder="Enter new password"
+                      style={{...inp,width:"100%"}}
+                    />
+                  </td>
+                  <td style={{padding:"6px 10px"}}>
+                    <button onClick={()=>updatePw(key)} style={{...btnPrimary,padding:"6px 14px",fontSize:12}}>Set Password</button>
+                  </td>
+                  <td style={{padding:"6px 10px",fontSize:12,color:msg[key]&&msg[key].startsWith("✅")?"#16a34a":"#dc2626"}}>{msg[key]||""}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+// ─── SETTINGS ────────────────────────────────────────────────────────────────
+function Settings({ school, setSchool, bands, setBands, divisions, setDivisions, accounts, setAccounts, role, currentUser, students, setStudents, setTermMarks, setMonthlyMarks, initials, setInitials }) {
+  const [curPw, setCurPw] = useState("");
+  const [newPw, setNewPw] = useState("");
+  const [confirmPw, setConfirmPw] = useState("");
+  const [pwMsg, setPwMsg] = useState("");
+  const [dangerConfirm, setDangerConfirm] = useState(null); // null | 'students' | 'results' | 'everything'
+  const [dangerInput, setDangerInput] = useState("");
+  const handlePwChange = () => {
+    if (!curPw) { setPwMsg("Enter your current password."); return; }
+    if (!newPw) { setPwMsg("Enter new password."); return; }
+    if (newPw !== confirmPw) { setPwMsg("Passwords do not match."); return; }
+    const myKey = (currentUser || "").trim().toLowerCase();
+    const myAcct = accounts[myKey];
+    if (!myAcct) { setPwMsg("Could not find your account."); return; }
+    verifyPassword(curPw, myAcct.passwordHash).then(ok => {
+      if (!ok) { setPwMsg("Current password is incorrect."); return; }
+      hashPassword(newPw).then(hashed => {
+        setAccounts(prev => ({ ...prev, [myKey]: { ...prev[myKey], passwordHash: hashed } }));
+        setCurPw(""); setNewPw(""); setConfirmPw(""); setPwMsg("✅ Password updated!");
+        setTimeout(()=>setPwMsg(""),3000);
+      });
+    });
+  };
+  const dangerOptions = [
+    {
+      key: "students",
+      label: "Delete All Students",
+      icon: "🗑️",
+      desc: "Permanently removes every student record. Marks data will remain but will be orphaned.",
+      color: "#dc2626",
+      bg: "#fef2f2",
+      border: "#fca5a5",
+      action: () => { setStudents([]); },
+    },
+    {
+      key: "results",
+      label: "Delete All Results",
+      icon: "🗑️",
+      desc: "Clears all term marks and monthly marks. Student records are kept.",
+      color: "#b45309",
+      bg: "#fffbeb",
+      border: "#fcd34d",
+      action: () => { setTermMarks({}); setMonthlyMarks({}); },
+    },
+    {
+      key: "everything",
+      label: "Reset Everything",
+      icon: "💣",
+      desc: "Wipes all students, all term marks, and all monthly marks. School settings and grade bands are kept.",
+      color: "#7f1d1d",
+      bg: "#fef2f2",
+      border: "#ef4444",
+      action: () => { setStudents([]); setTermMarks({}); setMonthlyMarks({}); },
+    },
+  ];
+  const activeDanger = dangerOptions.find(d => d.key === dangerConfirm);
+  const handleDangerExecute = () => {
+    if (!activeDanger) return;
+    activeDanger.action();
+    setDangerConfirm(null);
+    setDangerInput("");
+  };
+  // Defense in depth: even if Settings were ever reached some other way,
+  // teachers still can't see or use it -- only the admin account can.
+  if (role !== "admin") {
+    return (
+      <div style={{maxWidth:560,margin:"60px auto",textAlign:"center"}}>
+        <div style={{fontSize:40,marginBottom:12}}>🔒</div>
+        <div style={{fontWeight:800,fontSize:17,color:"#1e3a6e",marginBottom:8}}>Restricted Area</div>
+        <div style={{fontSize:13,color:"#6b7280",lineHeight:1.6}}>
+          Settings is only available to the school administrator account.
+          Ask your administrator if you need something changed here.
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:20}}>
+      <div style={{background:"white",borderRadius:12,padding:20,border:"1px solid #e5e7eb"}}>
+        <h3 style={{margin:"0 0 16px",color:"#1e3a6e",fontSize:15,fontWeight:700}}>🏫 School Information</h3>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+          {[["name","School Name"],["motto","School Motto"],["poBox","P.O. Box"],["district","District"],["email","Email"],["headTeacher","Head Teacher"],["year","Academic Year"],["nextOpens","Next Term Opens"],["nextEnds","Next Term Ends"]].map(([k,label])=>(
+            <div key={k}>
+              <label style={lbl}>{label}</label>
+              <input value={school[k]||""} onChange={e=>setSchool(prev=>({...prev,[k]:e.target.value}))} style={{...inp,width:"100%"}} placeholder={label}/>
+            </div>
+          ))}
+          <div style={{gridColumn:"1/-1"}}>
+            <label style={lbl}>Requirements / What to Bring Next Term</label>
+            <input value={school.requirements||""} onChange={e=>setSchool(prev=>({...prev,requirements:e.target.value}))} style={{...inp,width:"100%"}} placeholder="e.g. Fees: 150,000, Exercise books x10, Uniform"/>
+          </div>
+        </div>
+      </div>
+      <div style={{background:"white",borderRadius:12,padding:20,border:"1px solid #e5e7eb"}}>
+        <h3 style={{margin:"0 0 16px",color:"#1e3a6e",fontSize:15,fontWeight:700}}>🔒 Change My Password</h3>
+        <div style={{fontSize:12,color:"#6b7280",marginBottom:14}}>Signed in as <b>{currentUser}</b> ({role==="admin"?"Admin":"Teacher"}). This only changes your own login.</div>
+        <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"flex-end"}}>
+          <div><label style={lbl}>Current Password</label><input type="password" value={curPw} onChange={e=>setCurPw(e.target.value)} style={inp}/></div>
+          <div><label style={lbl}>New Password</label><input type="password" value={newPw} onChange={e=>setNewPw(e.target.value)} style={inp}/></div>
+          <div><label style={lbl}>Confirm Password</label><input type="password" value={confirmPw} onChange={e=>setConfirmPw(e.target.value)} style={inp}/></div>
+          <button onClick={handlePwChange} style={btnPrimary}>Update Password</button>
+        </div>
+        {pwMsg&&<div style={{marginTop:8,fontSize:13,color:pwMsg.startsWith("✅")?"#16a34a":"#dc2626"}}>{pwMsg}</div>}
+      </div>
+      <ManageTeacherPasswords accounts={accounts} setAccounts={setAccounts} currentUser={currentUser} />
+      <div style={{background:"white",borderRadius:12,padding:20,border:"1px solid #e5e7eb"}}>
+        <h3 style={{margin:"0 0 16px",color:"#1e3a6e",fontSize:15,fontWeight:700}}>🎯 Grade Bands</h3>
+        <div style={{overflowX:"auto"}}>
+          <table style={{width:"100%",fontSize:13}}>
+            <thead><tr style={{background:"#dbeafe"}}>{["Min","Max","Grade","Label",""].map(h=><th key={h} style={{padding:"8px 10px",textAlign:"left",color:"#1e3a6e",fontWeight:700}}>{h}</th>)}</tr></thead>
+            <tbody>
+              {bands.map((b,i)=>(
+                <tr key={i} style={{background:i%2===0?"white":"#f8fafc"}}>
+                  {["min","max","grade","label"].map(f=>(
+                    <td key={f} style={{padding:"4px 6px"}}>
+                      <input value={b[f]} onChange={e=>setBands(prev=>prev.map((x,j)=>j===i?{...x,[f]:f==="min"||f==="max"?Number(e.target.value):e.target.value}:x))}
+                        style={{...inp,width:f==="label"?120:70,padding:"4px 6px",fontSize:12}}/>
+                    </td>
+                  ))}
+                  <td style={{padding:"4px 6px"}}><button onClick={()=>setBands(prev=>prev.filter((_,j)=>j!==i))} style={{...btnDanger,padding:"3px 8px",fontSize:11}}>?</button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <button onClick={()=>setBands(prev=>[...prev,{min:0,max:0,grade:"",label:""}])} style={{...btnGhost,marginTop:8,fontSize:12}}>+ Add Band</button>
+          <div style={{marginTop:14,padding:"10px 12px",background:"#fef2f2",border:"1px solid #fecaca",borderRadius:8,fontSize:12,color:"#7f1d1d",display:"flex",gap:10,alignItems:"flex-start"}}>
+            <span style={{fontWeight:800,color:"#dc2626",fontSize:14,lineHeight:1}}>X</span>
+            <span><b>Missing paper / Did not complete examination.</b> Automatically applied to any subject left blank ("-"). X replaces the subject aggregate, the total aggregate and the division, but does not affect the total marks, the position, or the number of pupils on the result sheet.</span>
+          </div>
+        </div>
+      </div>
+      <div style={{background:"white",borderRadius:12,padding:20,border:"1px solid #e5e7eb"}}>
+        <h3 style={{margin:"0 0 16px",color:"#1e3a6e",fontSize:15,fontWeight:700}}>📐 Division Ranges</h3>
+        <div style={{overflowX:"auto"}}>
+          <table style={{width:"100%",fontSize:13}}>
+            <thead><tr style={{background:"#dbeafe"}}>{["Division","Min Agg","Max Agg",""].map(h=><th key={h} style={{padding:"8px 10px",textAlign:"left",color:"#1e3a6e",fontWeight:700}}>{h}</th>)}</tr></thead>
+            <tbody>
+              {divisions.map((d,i)=>(
+                <tr key={i} style={{background:i%2===0?"white":"#f8fafc"}}>
+                  {["name","min","max"].map(f=>(
+                    <td key={f} style={{padding:"4px 6px"}}>
+                      <input value={d[f]} onChange={e=>setDivisions(prev=>prev.map((x,j)=>j===i?{...x,[f]:f==="name"?e.target.value:Number(e.target.value)}:x))}
+                        style={{...inp,width:80,padding:"4px 6px",fontSize:12}}/>
+                    </td>
+                  ))}
+                  <td style={{padding:"4px 6px"}}><button onClick={()=>setDivisions(prev=>prev.filter((_,j)=>j!==i))} style={{...btnDanger,padding:"3px 8px",fontSize:11}}>?</button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <button onClick={()=>setDivisions(prev=>[...prev,{name:"",min:0,max:0}])} style={{...btnGhost,marginTop:8,fontSize:12}}>+ Add Division</button>
+        </div>
+      </div>
+      {/* === SUBJECT INITIALS === */}
+      <SubjectInitialsManager initials={initials} setInitials={setInitials} />
+      {/* === DANGER ZONE === */}
+      <div style={{background:"#fff1f2",borderRadius:12,padding:20,border:"2px solid #fca5a5"}}>
+        <h3 style={{margin:"0 0 4px",color:"#991b1b",fontSize:15,fontWeight:800,display:"flex",alignItems:"center",gap:8}}>
+          <span>⚠️</span> Danger Zone
+        </h3>
+        <p style={{margin:"0 0 16px",fontSize:12,color:"#b91c1c"}}>These actions are permanent and cannot be undone. Proceed with extreme caution.</p>
+        <div style={{display:"flex",flexDirection:"column",gap:12}}>
+          {dangerOptions.map(opt=>(
+            <div key={opt.key} style={{background:opt.bg,border:`1.5px solid ${opt.border}`,borderRadius:10,padding:"14px 16px",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12}}>
+              <div>
+                <div style={{fontWeight:700,fontSize:13,color:opt.color}}>{opt.icon} {opt.label}</div>
+                <div style={{fontSize:12,color:"#6b7280",marginTop:3}}>{opt.desc}</div>
+              </div>
+              <button
+                onClick={()=>{ setDangerConfirm(opt.key); setDangerInput(""); }}
+                style={{padding:"8px 18px",background:opt.color,color:"white",border:"none",borderRadius:8,fontWeight:700,fontSize:13,cursor:"pointer",flexShrink:0}}>
+                {opt.label}
+              </button>
+            </div>
+          ))}
+        </div>
+        {/* Confirmation modal */}
+        {dangerConfirm && activeDanger && (
+          <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.65)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:2000,padding:16}}>
+            <div style={{background:"white",borderRadius:16,padding:32,width:"100%",maxWidth:420,boxShadow:"0 24px 80px rgba(0,0,0,0.4)"}}>
+              <div style={{fontSize:36,textAlign:"center",marginBottom:8}}>{activeDanger.icon}</div>
+              <h3 style={{margin:"0 0 8px",color:activeDanger.color,fontSize:16,fontWeight:800,textAlign:"center"}}>{activeDanger.label}</h3>
+              <p style={{margin:"0 0 16px",fontSize:13,color:"#374151",textAlign:"center",lineHeight:1.6}}>{activeDanger.desc}</p>
+              <div style={{background:"#fef2f2",border:"1px solid #fca5a5",borderRadius:8,padding:"10px 14px",marginBottom:16,fontSize:12,color:"#991b1b"}}>
+                Are you sure you want to delete <b>{
+                  activeDanger.key==="students" ? `${students.length} student record(s)` :
+                  activeDanger.key==="results" ? "all term marks and monthly marks" :
+                  `${students.length} student(s) and all marks data`
+                }</b>? This action cannot be reversed.
+              </div>
+              <div style={{display:"flex",gap:10}}>
+                <button
+                  onClick={handleDangerExecute}
+                  style={{flex:1,padding:"11px",background:activeDanger.color,color:"white",border:"none",borderRadius:8,fontWeight:700,fontSize:14,cursor:"pointer"}}>
+                  Confirm - {activeDanger.label}
+                </button>
+                <button onClick={()=>{setDangerConfirm(null);setDangerInput("");}} style={{...btnGhost,padding:"11px 20px"}}>Cancel</button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+// ─── DOWNLOAD CENTRE ─────────────────────────────────────────────────────────
+function DownloadCentre({ students, termMarks, monthlyMarks, bands, divisions, school, accounts, role, currentUser, forceRestoreData }) {
+  const [importStatus, setImportStatus] = useState("");
+  const [importError, setImportError] = useState("");
+  const [restoreConfirm, setRestoreConfirm] = useState(false);
+  const [pendingRestore, setPendingRestore] = useState(null);
+  // ── Access gate ──
+  // The Download Centre is deliberately hard to get into: only the admin
+  // account can open it at all, and even then must re-enter their own
+  // password plus a typed confirmation phrase before the buttons unlock.
+  // This is intentional friction, not a bug -- it discourages casual or
+  // accidental exports of student data and the accounts file.
+  const [unlocked, setUnlocked] = useState(false);
+  const [gatePw, setGatePw] = useState("");
+  const [gatePhrase, setGatePhrase] = useState("");
+  const [gateErr, setGateErr] = useState("");
+  const CONFIRM_PHRASE = "I CONFIRM DOWNLOAD";
+  const importRef = useRef();
+  const ts = () => new Date().toISOString().slice(0,10);
+  // ── Full backup JSON ──
+  const downloadFullBackup = () => {
+    const data = {
+      _meta: { version: 2, exportedAt: new Date().toISOString(), school: school.name },
+      school, bands, divisions, accounts,
+      students, termMarks, monthlyMarks,
+    };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    triggerBlobDownload(blob, `MKIS_full_backup_${ts()}.json`);
+  };
+  // ── Students only CSV ──
+  const downloadStudentsCSV = () => {
+    const rows = [["ID","Name","Class","Gender"]];
+    students.forEach(s => rows.push([s.id, s.name, s.className, s.gender]));
+    const csv = rows.map(r => r.map(v => `"${String(v).replace(/"/g,'""')}"`).join(",")).join("\n");
+    triggerBlobDownload(new Blob([csv], { type:"text/csv" }), `students_${ts()}.csv`);
+  };
+  // ── Term marks CSV (one row per student-term-subject) ──
+  const downloadTermMarksCSV = () => {
+    const rows = [["StudentID","StudentName","Term","Subject","CA","Exam"]];
+    students.forEach(s => {
+      Object.entries(termMarks[s.id] || {}).forEach(([tk, subs]) => {
+        Object.entries(subs).forEach(([sub, marks]) => {
+          rows.push([s.id, s.name, tk, sub, marks.ca ?? "", marks.exam ?? ""]);
+        });
+      });
+    });
+    const csv = rows.map(r => r.map(v => `"${String(v).replace(/"/g,'""')}"`).join(",")).join("\n");
+    triggerBlobDownload(new Blob([csv], { type:"text/csv" }), `term_marks_${ts()}.csv`);
+  };
+  // ── Monthly marks CSV ──
+  const downloadMonthlyMarksCSV = () => {
+    const rows = [["StudentID","StudentName","Term","Month","Subject","Mark"]];
+    students.forEach(s => {
+      Object.entries(monthlyMarks[s.id] || {}).forEach(([tk, months]) => {
+        Object.entries(months).forEach(([month, subs]) => {
+          Object.entries(subs).forEach(([sub, marks]) => {
+            rows.push([s.id, s.name, tk, month, sub, marks.mk ?? ""]);
+          });
+        });
+      });
+    });
+    const csv = rows.map(r => r.map(v => `"${String(v).replace(/"/g,'""')}"`).join(",")).join("\n");
+    triggerBlobDownload(new Blob([csv], { type:"text/csv" }), `monthly_marks_${ts()}.csv`);
+  };
+  // ── Settings JSON only ──
+  const downloadSettingsJSON = () => {
+    const data = { _meta: { version: 2, exportedAt: new Date().toISOString() }, school, bands, divisions };
+    triggerBlobDownload(new Blob([JSON.stringify(data, null, 2)], { type:"application/json" }), `settings_backup_${ts()}.json`);
+  };
+  // ── Download a complete, runnable Next.js project (.zip) ──
+  // Bundles the live MKIS component source + a localStorage-backed
+  // window.storage shim + Next.js scaffolding so the school can run the
+  // exact same app offline with `npm install && npm run dev`.
+  const [nextZipBuilding, setNextZipBuilding] = useState(false);
+  const [previewFile, setPreviewFile] = useState(null);
+  // Build version stamp — updates every time the page loads (i.e. every
+  // deploy). Also embedded inside the generated package.json/README so users
+  // can tell which version of the source their downloaded ZIP contains.
+  const BUILD_VERSION = useMemo(() => {
+    const d = new Date();
+    const pad = n => String(n).padStart(2,"0");
+    return `${d.getFullYear()}.${pad(d.getMonth()+1)}.${pad(d.getDate())}.${pad(d.getHours())}${pad(d.getMinutes())}`;
+  }, []);
+
+  const NEXT_FILES = useMemo(() => ({
+    "package.json": JSON.stringify({
+      name: "st-kizito-mis-nextjs",
+      version: BUILD_VERSION,
+      private: true,
+      scripts: { dev: "next dev", build: "next build", start: "next start" },
+      dependencies: {
+        next: "^14.2.5",
+        react: "^18.3.1",
+        "react-dom": "^18.3.1",
+        xlsx: "^0.18.5",
+        jszip: "^3.10.1",
+      },
+    }, null, 2),
+    "next.config.js":
+`/** @type {import('next').NextConfig} */
+const nextConfig = { reactStrictMode: true };
+module.exports = nextConfig;
+`,
+    "jsconfig.json": JSON.stringify({
+      compilerOptions: { baseUrl: ".", paths: { "@/*": ["./*"] } },
+    }, null, 2),
+    ".gitignore":
+`node_modules
+.next
+out
+.env*.local
+`,
+    "README.md":
+`# St. Kizito's Primary School — Result Management System (Next.js)
+
+Build version: **${BUILD_VERSION}**
+Exported: ${new Date().toISOString()}
+
+A complete, self-contained Next.js build of the MKIS result management app.
+
+## Run it
+
+\`\`\`bash
+npm install
+npm run dev
+\`\`\`
+
+Then open http://localhost:3000
+
+## Notes
+
+- All data is stored in the browser's localStorage (no server / database needed).
+- To back up data: open the Download Centre inside the app and export a Full Backup (.json).
+- To deploy: \`npm run build && npm start\`, or push to Vercel.
+`,
+    "lib/storage-shim.js":
+`// Provides window.storage.{get,set} backed by localStorage so the MKIS
+// component runs identically outside the Lovable host environment.
+// Build: ${BUILD_VERSION}
+export function installStorageShim() {
+  if (typeof window === "undefined") return;
+  if (window.storage && window.storage.__mkisShim) return;
+  const prefix = "mkis_shared::";
+  window.storage = {
+    __mkisShim: true,
+    async get(key) {
+      try {
+        const value = window.localStorage.getItem(prefix + key);
+        return value == null ? null : { value };
+      } catch { return null; }
+    },
+    async set(key, value) {
+      try { window.localStorage.setItem(prefix + key, String(value)); } catch {}
+      return true;
+    },
+    async remove(key) {
+      try { window.localStorage.removeItem(prefix + key); } catch {}
+      return true;
+    },
+  };
+}
+`,
+    "app/layout.js":
+`export const metadata = {
+  title: "St. Kizito's Primary School — Result Management System",
+  description: "Result Management System for St. Kizito's Primary School",
+};
+
+export default function RootLayout({ children }) {
+  return (
+    <html lang="en">
+      <body style={{ margin: 0, fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, sans-serif" }}>
+        {children}
+      </body>
+    </html>
+  );
+}
+`,
+    "app/page.js":
+`"use client";
+import dynamic from "next/dynamic";
+import { useEffect, useState } from "react";
+import { installStorageShim } from "../lib/storage-shim";
+
+const MKIS = dynamic(() => import("../components/MKIS.jsx"), { ssr: false });
+
+export default function Page() {
+  const [ready, setReady] = useState(false);
+  useEffect(() => { installStorageShim(); setReady(true); }, []);
+  if (!ready) return null;
+  return <MKIS />;
+}
+`,
+    "components/MKIS.jsx": MKIS_SOURCE,
+  }), [BUILD_VERSION]);
+
+  const downloadNextJsProject = async () => {
+    try {
+      setNextZipBuilding(true);
+      const zip = new JSZip();
+      const projectName = "st-kizito-mis-nextjs";
+      const root = zip.folder(projectName);
+      for (const [path, content] of Object.entries(NEXT_FILES)) {
+        root.file(path, content);
+      }
+      const blob = await zip.generateAsync({ type: "blob" });
+      triggerBlobDownload(blob, projectName + "_v" + BUILD_VERSION + ".zip");
+    } catch (err) {
+      alert("Failed to build Next.js project zip: " + (err?.message || err));
+    } finally {
+      setNextZipBuilding(false);
+    }
+  };
+  // ── Restore from full backup ──
+  const handleImportFile = async (e) => {
+    setImportStatus(""); setImportError("");
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text);
+      if (!data._meta || !data.students) throw new Error("Not a valid MKIS backup file. Missing required fields.");
+      setPendingRestore(data);
+      setRestoreConfirm(true);
+    } catch(err) {
+      setImportError("❌ " + err.message);
+    }
+    if (importRef.current) importRef.current.value = "";
+  };
+  const confirmRestore = () => {
+    if (!pendingRestore) return;
+    const d = pendingRestore;
+    // This is a deliberate, user-confirmed full replace -- the whole point of
+    // "restore from backup" is to overwrite current data with the backup's
+    // contents, so it intentionally bypasses the merge layer used elsewhere.
+    forceRestoreData(d);
+    setPendingRestore(null);
+    setRestoreConfirm(false);
+    setImportStatus(`✅ Restored successfully from backup (${d._meta?.exportedAt?.slice(0,10) || "unknown date"}). ${d.students?.length || 0} students loaded.`);
+  };
+  const unlockGate = () => {
+    setGateErr("");
+    if (gatePhrase.trim().toUpperCase() !== CONFIRM_PHRASE) {
+      setGateErr(`Type the confirmation phrase exactly: "${CONFIRM_PHRASE}"`);
+      return;
+    }
+    const myKey = (currentUser || "").trim().toLowerCase();
+    const myAcct = accounts[myKey];
+    if (!myAcct) { setGateErr("Could not verify your account."); return; }
+    verifyPassword(gatePw, myAcct.passwordHash).then(ok => {
+      if (ok) { setUnlocked(true); setGatePw(""); setGatePhrase(""); }
+      else setGateErr("Incorrect password.");
+    });
+  };
+  const stats = [
+    { label: "Students", value: students.length, icon: "👥", color: "#1e40af", bg: "#dbeafe" },
+    { label: "Term Mark Records", value: Object.keys(termMarks).length, icon: "📝", color: "#065f46", bg: "#d1fae5" },
+    { label: "Monthly Mark Records", value: Object.keys(monthlyMarks).length, icon: "📅", color: "#92400e", bg: "#fef3c7" },
+    { label: "Grade Bands", value: bands.length, icon: "🎯", color: "#6b21a8", bg: "#f3e8ff" },
+  ];
+  const downloadGroups = [
+    {
+      title: "💾 Full System Backup",
+      desc: "Everything in one JSON file - students, all marks, settings, grade bands, divisions, and login accounts. Use this to back up to GitHub or restore later.",
+      items: [
+        { label: "Download Full Backup (.json)", action: downloadFullBackup, style: btnPrimary, hint: "Recommended for GitHub storage" },
+      ],
+    },
+    {
+      title: "👥 Student Data",
+      desc: "Export the student roster as a spreadsheet-friendly CSV.",
+      items: [
+        { label: "Download Students (.csv)", action: downloadStudentsCSV, style: btnSuccess, hint: `${students.length} students` },
+      ],
+    },
+    {
+      title: "📝 Marks Data",
+      desc: "Export raw marks data as CSVs. These can be used for analysis or re-import into other tools.",
+      items: [
+        { label: "Download Term Marks (.csv)", action: downloadTermMarksCSV, style: btnExcel, hint: "CA & Exam marks per student per term" },
+        { label: "Download Monthly Marks (.csv)", action: downloadMonthlyMarksCSV, style: btnExcel, hint: "Monthly test marks per student" },
+      ],
+    },
+    {
+      title: "⚙️ Settings & Configuration",
+      desc: "Export school info, grade bands, and division ranges - without student data or marks.",
+      items: [
+        { label: "Download Settings (.json)", action: downloadSettingsJSON, style: btnWord, hint: "School info, bands, divisions" },
+      ],
+    },
+    {
+      title: `⚛️ Next.js Project (Source Code) — Build v${BUILD_VERSION}`,
+      desc: "Download a complete, runnable Next.js project containing the entire Result Management System. Unzip, then run `npm install && npm run dev` to launch it offline on any computer. The ZIP is rebuilt from the live source every time you click — so it always contains the latest code. Use the preview buttons below to inspect any file before downloading.",
+      items: [
+        {
+          label: nextZipBuilding ? "Building zip…" : `Download Next.js Project (.zip) — v${BUILD_VERSION}`,
+          action: downloadNextJsProject,
+          style: btnPrimary,
+          hint: "Includes source, package.json, and storage shim",
+        },
+        ...Object.keys(NEXT_FILES).filter(p => p !== "components/MKIS.jsx").map(path => ({
+          label: `👁 Preview ${path}`,
+          action: () => setPreviewFile(path),
+          style: { ...btnWord, padding: "8px 12px", fontSize: 12 },
+          hint: `${(NEXT_FILES[path].length/1024).toFixed(1)} KB`,
+        })),
+        {
+          label: "👁 Preview components/MKIS.jsx",
+          action: () => setPreviewFile("components/MKIS.jsx"),
+          style: { ...btnWord, padding: "8px 12px", fontSize: 12 },
+          hint: `${(NEXT_FILES["components/MKIS.jsx"].length/1024).toFixed(1)} KB (live source)`,
+        },
+      ],
+    },
+  ];
+  // Teachers never get past this — the Download Centre is admin-only.
+  if (role !== "admin") {
+    return (
+      <div style={{maxWidth:560,margin:"60px auto",textAlign:"center"}}>
+        <div style={{fontSize:40,marginBottom:12}}>🔒</div>
+        <div style={{fontWeight:800,fontSize:17,color:"#1e3a6e",marginBottom:8}}>Restricted Area</div>
+        <div style={{fontSize:13,color:"#6b7280",lineHeight:1.6}}>
+          The Download Centre is only available to the school administrator account.
+          Ask your administrator if you need a copy of the data.
+        </div>
+      </div>
+    );
+  }
+  // Admin, but hasn't unlocked this session yet — require password + typed
+  // confirmation phrase before any download/restore controls are usable.
+  if (!unlocked) {
+    return (
+      <div style={{maxWidth:460,margin:"60px auto"}}>
+        <div style={{background:"white",borderRadius:16,padding:32,border:"2px solid #fde68a",boxShadow:"0 12px 40px rgba(0,0,0,0.08)"}}>
+          <div style={{fontSize:34,textAlign:"center",marginBottom:8}}>🛑</div>
+          <h3 style={{margin:"0 0 6px",textAlign:"center",color:"#92400e",fontSize:16,fontWeight:800}}>Verify Before Downloading</h3>
+          <div style={{fontSize:12,color:"#6b7280",textAlign:"center",marginBottom:20,lineHeight:1.6}}>
+            This area can export sensitive student data. Re-enter your admin password and type the confirmation phrase below to continue.
+          </div>
+          <div style={{marginBottom:14}}>
+            <label style={lbl}>Admin Password</label>
+            <input type="password" value={gatePw} onChange={e=>setGatePw(e.target.value)} style={inp} placeholder="Your password" />
+          </div>
+          <div style={{marginBottom:14}}>
+            <label style={lbl}>Type "{CONFIRM_PHRASE}"</label>
+            <input type="text" value={gatePhrase} onChange={e=>setGatePhrase(e.target.value)}
+              onKeyDown={e=>{ if(e.key==="Enter") unlockGate(); }}
+              style={inp} placeholder={CONFIRM_PHRASE} />
+          </div>
+          {gateErr && <div style={{color:"#dc2626",fontSize:13,marginBottom:12}}>{gateErr}</div>}
+          <button onClick={unlockGate} style={{...btnWarning,width:"100%",padding:"11px"}}>Unlock Download Centre</button>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div style={{maxWidth:800,margin:"0 auto"}}>
+      {/* Header card */}
+      <div style={{background:"linear-gradient(135deg,#1e3a6e,#2563eb)",borderRadius:14,padding:"24px 28px",marginBottom:20,color:"white"}}>
+        <div style={{fontSize:22,fontWeight:800,marginBottom:6}}>📥 Download Centre</div>
+        <div style={{fontSize:13,opacity:0.9,lineHeight:1.6}}>
+          Back up your entire system to a JSON file and store it on GitHub, Google Drive, or any cloud service.
+          Restore any backup with a single click. All data stays in your browser - nothing is sent to a server.
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:12,marginTop:20}}>
+          {stats.map(s=>(
+            <div key={s.label} style={{background:"rgba(255,255,255,0.15)",borderRadius:10,padding:"12px 14px"}}>
+              <div style={{fontSize:22,fontWeight:800}}>{s.value}</div>
+              <div style={{fontSize:11,opacity:0.85,marginTop:2}}>{s.icon} {s.label}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+      {/* Download groups */}
+      {downloadGroups.map(group => (
+        <div key={group.title} style={{background:"white",borderRadius:12,padding:20,border:"1px solid #e5e7eb",marginBottom:14}}>
+          <div style={{fontWeight:700,fontSize:14,color:"#1e3a6e",marginBottom:4}}>{group.title}</div>
+          <div style={{fontSize:12,color:"#6b7280",marginBottom:14,lineHeight:1.5}}>{group.desc}</div>
+          <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
+            {group.items.map(item=>(
+              <div key={item.label} style={{display:"flex",flexDirection:"column",gap:4}}>
+                <button onClick={item.action} style={item.style}>{item.label}</button>
+                {item.hint && <span style={{fontSize:11,color:"#9ca3af",paddingLeft:2}}>{item.hint}</span>}
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+      {/* Restore section */}
+      <div style={{background:"#fefce8",borderRadius:12,padding:20,border:"2px solid #fde68a",marginBottom:14}}>
+        <div style={{fontWeight:700,fontSize:14,color:"#92400e",marginBottom:4}}>♻️ Restore from Backup</div>
+        <div style={{fontSize:12,color:"#78350f",marginBottom:14,lineHeight:1.5}}>
+          Upload a previously downloaded <b>Full Backup (.json)</b> file to restore all data.
+          This will overwrite your current students, marks, and settings with the backup contents.
+        </div>
+        <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
+          <label style={{...btnWarning,cursor:"pointer",display:"inline-block"}}>
+            📁 Choose Backup File
+            <input ref={importRef} type="file" accept=".json" onChange={handleImportFile} style={{display:"none"}}/>
+          </label>
+          <span style={{fontSize:12,color:"#92400e"}}>Only MKIS full backup .json files are accepted</span>
+        </div>
+        {importError && (
+          <div style={{marginTop:12,background:"#fef2f2",border:"1px solid #fca5a5",borderRadius:8,padding:"10px 14px",fontSize:13,color:"#dc2626"}}>{importError}</div>
+        )}
+        {importStatus && (
+          <div style={{marginTop:12,background:"#f0fdf4",border:"1px solid #86efac",borderRadius:8,padding:"10px 14px",fontSize:13,color:"#166534",fontWeight:600}}>{importStatus}</div>
+        )}
+      </div>
+      {/* GitHub tip */}
+      <div style={{background:"#f8fafc",borderRadius:12,padding:18,border:"1px solid #e5e7eb",fontSize:12,color:"#6b7280",lineHeight:1.8}}>
+        <div style={{fontWeight:700,color:"#374151",marginBottom:6}}>💡 Storage Tips</div>
+        <div><b>GitHub:</b> Create a private repo, upload the JSON backup file, and commit. Download the raw file to restore later.</div>
+        <div><b>Google Drive / Dropbox:</b> Drag the JSON file into a folder. Share it with yourself across devices.</div>
+        <div><b>WhatsApp / Email:</b> Send the JSON file to yourself as a document attachment for quick access.</div>
+        <div style={{marginTop:8,color:"#dc2626",fontWeight:600}}>🔒 The backup includes your login accounts - keep the file private.</div>
+      </div>
+      {/* Restore confirmation modal */}
+      {restoreConfirm && pendingRestore && (
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.65)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:2000,padding:16}}>
+          <div style={{background:"white",borderRadius:16,padding:32,width:"100%",maxWidth:440,boxShadow:"0 24px 80px rgba(0,0,0,0.4)"}}>
+            <div style={{fontSize:36,textAlign:"center",marginBottom:8}}>⚠️</div>
+            <h3 style={{margin:"0 0 8px",color:"#92400e",fontSize:16,fontWeight:800,textAlign:"center"}}>Confirm Restore</h3>
+            <div style={{background:"#fefce8",border:"1px solid #fde68a",borderRadius:8,padding:"12px 14px",marginBottom:16,fontSize:13,color:"#78350f",lineHeight:1.7}}>
+              <div><b>Backup date:</b> {pendingRestore._meta?.exportedAt?.slice(0,10) || "Unknown"}</div>
+              <div><b>School:</b> {pendingRestore._meta?.school || pendingRestore.school?.name || "Unknown"}</div>
+              <div><b>Students in backup:</b> {pendingRestore.students?.length || 0}</div>
+            </div>
+            <div style={{background:"#fef2f2",border:"1px solid #fca5a5",borderRadius:8,padding:"10px 14px",marginBottom:20,fontSize:12,color:"#991b1b"}}>
+              ⚠️ This will <b>replace all current data</b> with the backup. Your existing students and marks will be overwritten.
+            </div>
+            <div style={{display:"flex",gap:10}}>
+              <button onClick={confirmRestore} style={{...btnPrimary,flex:1,padding:"11px"}}>✅ Yes, Restore Now</button>
+              <button onClick={()=>{setRestoreConfirm(false);setPendingRestore(null);}} style={{...btnGhost,padding:"11px 20px"}}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* File preview modal */}
+      {previewFile && NEXT_FILES[previewFile] && (
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.75)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:2100,padding:16}} onClick={()=>setPreviewFile(null)}>
+          <div onClick={e=>e.stopPropagation()} style={{background:"#0f172a",color:"#e2e8f0",borderRadius:12,width:"100%",maxWidth:900,maxHeight:"85vh",display:"flex",flexDirection:"column",boxShadow:"0 24px 80px rgba(0,0,0,0.6)"}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"14px 18px",borderBottom:"1px solid #1e293b"}}>
+              <div>
+                <div style={{fontWeight:800,fontSize:14}}>📄 {previewFile}</div>
+                <div style={{fontSize:11,color:"#94a3b8",marginTop:2}}>
+                  Build v{BUILD_VERSION} · {(NEXT_FILES[previewFile].length/1024).toFixed(1)} KB · {NEXT_FILES[previewFile].split("\n").length} lines
+                </div>
+              </div>
+              <div style={{display:"flex",gap:8}}>
+                <button onClick={()=>{ navigator.clipboard?.writeText(NEXT_FILES[previewFile]); }} style={{...btnGhost,padding:"6px 12px",fontSize:12}}>📋 Copy</button>
+                <button onClick={()=>setPreviewFile(null)} style={{...btnGhost,padding:"6px 12px",fontSize:12}}>✕ Close</button>
+              </div>
+            </div>
+            <pre style={{margin:0,padding:"16px 18px",overflow:"auto",fontSize:12,lineHeight:1.55,fontFamily:"ui-monospace, SFMono-Regular, Menlo, monospace",whiteSpace:"pre",flex:1}}>
+{NEXT_FILES[previewFile]}
+            </pre>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── AUDIT LOG ───────────────────────────────────────────────────────────────
+function AuditLog() {
+  const [rows, setRows] = React.useState([]);
+  const [loading, setLoading] = React.useState(true);
+  const [err, setErr] = React.useState("");
+  const [filter, setFilter] = React.useState("");
+  const [limit, setLimit] = React.useState(200);
+  const [expanded, setExpanded] = React.useState(null);
+
+  const load = React.useCallback(async () => {
+    setLoading(true); setErr("");
+    let q = supabase.from("kv_audit").select("*").order("changed_at", { ascending: false }).limit(limit);
+    if (filter.trim()) q = q.ilike("key", `%${filter.trim()}%`);
+    const { data, error } = await q;
+    if (error) setErr(error.message); else setRows(data || []);
+    setLoading(false);
+  }, [filter, limit]);
+
+  React.useEffect(() => { load(); }, [load]);
+
+  const fmt = (s) => { try { return new Date(s).toLocaleString(); } catch { return s; } };
+  const preview = (v) => {
+    if (v == null) return <span style={{color:"#9ca3af"}}>—</span>;
+    const s = String(v);
+    return s.length > 120 ? s.slice(0,120) + "…" : s;
+  };
+  const actionColor = (a) => a === "INSERT" ? "#059669" : a === "DELETE" ? "#dc2626" : "#2563eb";
+
+  const exportCsv = () => {
+    const head = ["changed_at","changed_by_email","action","key","old_value","new_value"];
+    const esc = (v) => `"${String(v ?? "").replace(/"/g,'""')}"`;
+    const csv = [head.join(","), ...rows.map(r => head.map(h => esc(r[h])).join(","))].join("\n");
+    const blob = new Blob([csv], { type:"text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = `audit_log_${new Date().toISOString().slice(0,19).replace(/[:T]/g,"-")}.csv`;
+    a.click(); URL.revokeObjectURL(url);
+  };
+
+  return (
+    <div style={{background:"white",borderRadius:8,padding:20,boxShadow:"0 1px 3px rgba(0,0,0,0.1)"}}>
+      <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap",marginBottom:16}}>
+        <h2 style={{margin:0,fontSize:18,fontWeight:700,color:"#1e3a6e"}}>🕓 Audit Log</h2>
+        <span style={{fontSize:12,color:"#6b7280"}}>Every change made to results, students and settings — with who and when.</span>
+      </div>
+      <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:12}}>
+        <input value={filter} onChange={e=>setFilter(e.target.value)} placeholder="Filter by key (e.g. termMarks, students)"
+          style={{flex:"1 1 220px",padding:"8px 10px",border:"1px solid #d1d5db",borderRadius:6,fontSize:13}} />
+        <select value={limit} onChange={e=>setLimit(Number(e.target.value))} style={{padding:"8px 10px",border:"1px solid #d1d5db",borderRadius:6,fontSize:13}}>
+          <option value={100}>Last 100</option>
+          <option value={200}>Last 200</option>
+          <option value={500}>Last 500</option>
+          <option value={1000}>Last 1000</option>
+        </select>
+        <button onClick={load} style={{padding:"8px 14px",background:"#2563eb",color:"white",border:"none",borderRadius:6,cursor:"pointer",fontSize:13,fontWeight:600}}>🔄 Refresh</button>
+        <button onClick={exportCsv} disabled={!rows.length} style={{padding:"8px 14px",background:"#059669",color:"white",border:"none",borderRadius:6,cursor:"pointer",fontSize:13,fontWeight:600,opacity:rows.length?1:0.5}}>⬇️ Export CSV</button>
+      </div>
+      {err && <div style={{padding:10,background:"#fef2f2",color:"#991b1b",borderRadius:6,fontSize:13,marginBottom:12}}>Error: {err}</div>}
+      {loading ? <div style={{padding:20,textAlign:"center",color:"#6b7280"}}>Loading…</div> : (
+        <div style={{overflowX:"auto"}}>
+          <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+            <thead>
+              <tr style={{background:"#f9fafb",textAlign:"left"}}>
+                <th style={{padding:"8px 10px",borderBottom:"1px solid #e5e7eb"}}>When</th>
+                <th style={{padding:"8px 10px",borderBottom:"1px solid #e5e7eb"}}>Who</th>
+                <th style={{padding:"8px 10px",borderBottom:"1px solid #e5e7eb"}}>Action</th>
+                <th style={{padding:"8px 10px",borderBottom:"1px solid #e5e7eb"}}>Key</th>
+                <th style={{padding:"8px 10px",borderBottom:"1px solid #e5e7eb"}}>Change</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.length === 0 && <tr><td colSpan={5} style={{padding:20,textAlign:"center",color:"#9ca3af"}}>No audit entries yet.</td></tr>}
+              {rows.map(r => (
+                <React.Fragment key={r.id}>
+                  <tr style={{borderBottom:"1px solid #f3f4f6",cursor:"pointer"}} onClick={()=>setExpanded(expanded===r.id?null:r.id)}>
+                    <td style={{padding:"8px 10px",whiteSpace:"nowrap"}}>{fmt(r.changed_at)}</td>
+                    <td style={{padding:"8px 10px"}}>{r.changed_by_email || <span style={{color:"#9ca3af"}}>system</span>}</td>
+                    <td style={{padding:"8px 10px"}}><span style={{color:actionColor(r.action),fontWeight:700}}>{r.action}</span></td>
+                    <td style={{padding:"8px 10px",fontFamily:"monospace",color:"#374151"}}>{r.key}</td>
+                    <td style={{padding:"8px 10px",color:"#6b7280"}}>{expanded===r.id ? "▲ hide" : "▼ view"}</td>
+                  </tr>
+                  {expanded===r.id && (
+                    <tr><td colSpan={5} style={{padding:"10px 14px",background:"#f9fafb"}}>
+                      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+                        <div>
+                          <div style={{fontSize:11,fontWeight:700,color:"#6b7280",marginBottom:4}}>BEFORE</div>
+                          <pre style={{margin:0,padding:8,background:"#fff",border:"1px solid #e5e7eb",borderRadius:4,maxHeight:300,overflow:"auto",fontSize:11,whiteSpace:"pre-wrap",wordBreak:"break-all"}}>{r.old_value ?? "(none)"}</pre>
+                        </div>
+                        <div>
+                          <div style={{fontSize:11,fontWeight:700,color:"#6b7280",marginBottom:4}}>AFTER</div>
+                          <pre style={{margin:0,padding:8,background:"#fff",border:"1px solid #e5e7eb",borderRadius:4,maxHeight:300,overflow:"auto",fontSize:11,whiteSpace:"pre-wrap",wordBreak:"break-all"}}>{r.new_value ?? "(none)"}</pre>
+                        </div>
+                      </div>
+                    </td></tr>
+                  )}
+                </React.Fragment>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
