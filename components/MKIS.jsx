@@ -1,11 +1,15 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import * as XLSX from "xlsx";
 import JSZip from "jszip";
+import { jsPDF } from "jspdf";
+import html2canvas from "html2canvas";
 import MKIS_SOURCE from "./MKIS.jsx?raw";
 import { supabase } from "@/integrations/supabase/client";
 // NOTE: Excel export uses the "xlsx" package (already available in Claude.ai artifacts;
 // for a standalone project run: npm install xlsx).
 // Word export below is dependency-free (HTML-to-.doc), so it works everywhere, including artifacts.
+// PDF export uses "jspdf" + "html2canvas" (run: npm install jspdf html2canvas). It rasterizes
+// the same on-screen DOM nodes used for printing, so the PDF always matches what's on screen.
 // ─── CONSTANTS ───────────────────────────────────────────────────────────────
 const ALL_CLASSES = ["P1","P2","P3","P4","P5","P6","P7"];
 const LOWER_CLASSES = ["P1","P2","P3"];
@@ -648,6 +652,77 @@ function exportReportCardsWord({ school, cls, term, year, isLower, rows, allPosi
   });
   downloadWordHtml(`${cls} ${term} ${year} Report Cards`, body, `${safeFileName(cls)}_${safeFileName(term)}_${year}_Report_Cards.doc`, { pageSize: "210mm 297mm", margin: "12mm" });
 }
+// ─── PDF EXPORT HELPERS (jsPDF + html2canvas) ──────────────────────────────────
+// Rasterizes real on-screen DOM nodes into a paginated A4 PDF, so the PDF
+// always matches what the user sees on screen / would get from the print
+// button, instead of being rebuilt from scratch with a second layout engine.
+const PDF_PAGE_W_MM = 210; // A4 portrait width
+const PDF_PAGE_H_MM = 297; // A4 portrait height
+// html2canvas only captures the visibly-scrolled portion of elements with
+// overflow:auto/scroll (e.g. the horizontally-scrollable Result Sheet table
+// on narrow screens). Temporarily expand any such element to its full
+// content size before capture, then restore it right after.
+function expandOverflowForCapture(root) {
+  const candidates = [root, ...root.querySelectorAll("*")];
+  const restoreFns = [];
+  candidates.forEach(el => {
+    const cs = window.getComputedStyle(el);
+    const clips = ["auto", "scroll"].includes(cs.overflowX) || ["auto", "scroll"].includes(cs.overflowY);
+    if (clips && el.scrollWidth > el.clientWidth + 1) {
+      const prev = { overflow: el.style.overflow, overflowX: el.style.overflowX, overflowY: el.style.overflowY, width: el.style.width };
+      el.style.overflow = "visible";
+      el.style.overflowX = "visible";
+      el.style.overflowY = "visible";
+      el.style.width = el.scrollWidth + "px";
+      restoreFns.push(() => { el.style.overflow = prev.overflow; el.style.overflowX = prev.overflowX; el.style.overflowY = prev.overflowY; el.style.width = prev.width; });
+    }
+  });
+  return () => restoreFns.forEach(fn => fn());
+}
+// Renders one DOM node to a canvas, then slices that canvas into as many
+// A4-width "pages" as its height needs -- so tall tables/lists flow cleanly
+// onto additional pages instead of getting cut off.
+async function nodeToPdfPageSlices(node, scale = 2) {
+  const restore = expandOverflowForCapture(node);
+  let canvas;
+  try {
+    canvas = await html2canvas(node, { scale, useCORS: true, backgroundColor: "#ffffff" });
+  } finally {
+    restore();
+  }
+  const pxPerMm = canvas.width / PDF_PAGE_W_MM;
+  const pageHeightPx = Math.max(1, Math.floor(pxPerMm * PDF_PAGE_H_MM));
+  const slices = [];
+  let offset = 0;
+  while (offset < canvas.height) {
+    const sliceHeightPx = Math.min(pageHeightPx, canvas.height - offset);
+    const sliceCanvas = document.createElement("canvas");
+    sliceCanvas.width = canvas.width;
+    sliceCanvas.height = sliceHeightPx;
+    sliceCanvas.getContext("2d").drawImage(canvas, 0, offset, canvas.width, sliceHeightPx, 0, 0, canvas.width, sliceHeightPx);
+    slices.push({ dataUrl: sliceCanvas.toDataURL("image/jpeg", 0.95), heightMm: sliceHeightPx / pxPerMm });
+    offset += sliceHeightPx;
+  }
+  return slices;
+}
+// Builds and downloads a single multi-page PDF from an ordered list of DOM
+// nodes (e.g. one node per pupil's report card, or [table, analysis] for a
+// result sheet). Each node starts on a fresh page; tall nodes span more.
+async function downloadNodesAsPdf(nodes, filename) {
+  const validNodes = nodes.filter(Boolean);
+  if (!validNodes.length) return;
+  const pdf = new jsPDF({ unit: "mm", format: "a4", orientation: "portrait" });
+  let started = false;
+  for (const node of validNodes) {
+    const slices = await nodeToPdfPageSlices(node);
+    for (const slice of slices) {
+      if (started) pdf.addPage();
+      pdf.addImage(slice.dataUrl, "JPEG", 0, 0, PDF_PAGE_W_MM, slice.heightMm);
+      started = true;
+    }
+  }
+  pdf.save(filename);
+}
 // ─── SHARED STYLES ───────────────────────────────────────────────────────────
 const lbl = { display:"block", fontSize:11, fontWeight:700, color:"#374151", marginBottom:4, textTransform:"uppercase", letterSpacing:0.5 };
 const inp = { padding:"8px 10px", border:"1.5px solid #d1d5db", borderRadius:7, fontSize:13, outline:"none", background:"white", minWidth:80 };
@@ -709,6 +784,8 @@ const btnGhost   = { padding:"8px 16px", background:"white", color:"#374151", bo
 const btnSuccess = { padding:"8px 16px", background:"linear-gradient(135deg,#059669,#10b981)", color:"white", border:"none", borderRadius:8, fontWeight:700, fontSize:13, cursor:"pointer" };
 const btnExcel   = { padding:"8px 16px", background:"linear-gradient(135deg,#0f7b3f,#16a34a)", color:"white", border:"none", borderRadius:8, fontWeight:700, fontSize:13, cursor:"pointer" };
 const btnWord    = { padding:"8px 16px", background:"linear-gradient(135deg,#1e3a6e,#2b579a)", color:"white", border:"none", borderRadius:8, fontWeight:700, fontSize:13, cursor:"pointer" };
+const btnPdf     = { padding:"8px 16px", background:"linear-gradient(135deg,#b91c1c,#ef4444)", color:"white", border:"none", borderRadius:8, fontWeight:700, fontSize:13, cursor:"pointer" };
+const btnPdfBusy = { ...btnPdf, opacity:0.65, cursor:"not-allowed" };
 function Sel({ label, value, onChange, opts }) {
   return (
     <div>
@@ -1571,85 +1648,4 @@ function MarkEntry({ students, termMarks, setTermMarks, updateTermMark, requestO
       const subjectCols = {};
       curSubjects.forEach(sub => {
         if (isLower) {
-          const idx = headers.findIndex(h=>h===sub||h===sub.replace(" ","_"));
-          if (idx !== -1) subjectCols[sub] = { markIdx: idx };
-        } else {
-          const caIdx = headers.findIndex(h=>h===`${sub}_CA`||h===`${sub} CA`||h===`${sub}CA`);
-          const exIdx = headers.findIndex(h=>h===`${sub}_EXAM`||h===`${sub} EXAM`||h===`${sub}EXAM`||h===`${sub}_EX`||h===`${sub} EX`);
-          if (caIdx !== -1 || exIdx !== -1) subjectCols[sub] = { caIdx, examIdx: exIdx };
-        }
-      });
-      const rows = lines.slice(1).map((line, i) => {
-        const cells = line.split(",").map(c=>c.trim());
-        const rawName = toUpper(cells[nameIdx] || "");
-        const matched = students.find(s =>
-          s.className === cls && (
-            s.name === rawName ||
-            s.name.toLowerCase().includes(rawName.toLowerCase().split(" ")[0]) ||
-            rawName.toLowerCase().includes(s.name.toLowerCase().split(" ")[0])
-          )
-        );
-        const marks = {};
-        curSubjects.forEach(sub => {
-          const col = subjectCols[sub];
-          if (!col) return;
-          if (isLower) {
-            const v = cells[col.markIdx];
-            marks[sub] = { mk: v !== undefined && v !== "" ? Number(v) : null };
-          } else {
-            const ca = col.caIdx !== undefined && col.caIdx !== -1 && cells[col.caIdx] !== "" ? Number(cells[col.caIdx]) : null;
-            const exam = col.examIdx !== undefined && col.examIdx !== -1 && cells[col.examIdx] !== "" ? Number(cells[col.examIdx]) : null;
-            marks[sub] = { ca, exam };
-          }
-        });
-        return { id:`bmr_${i}`, rawName, studentId: matched?.id || null, include: true, marks };
-      }).filter(r => r.rawName);
-      if (rows.length === 0) { setBulkMarkError("No data rows found in the file."); return; }
-      setBulkMarkPreview({ rows, subjectCols, headers });
-    } catch(err) {
-      setBulkMarkError("Could not read file: " + err.message);
-    }
-    if (bulkMarkFileRef.current) bulkMarkFileRef.current.value = "";
-  };
-  const confirmBulkMarks = () => {
-    if (!bulkMarkPreview) return;
-    const curSubjects = isLower ? LOWER_SUBJECTS : UPPER_SUBJECTS;
-    bulkMarkPreview.rows.forEach(row => {
-      if (!row.include || !row.studentId) return;
-      const studentName = students.find(s=>s.id===row.studentId)?.name || row.rawName;
-      curSubjects.forEach(sub => {
-        const m = row.marks[sub];
-        if (!m) return;
-        const existing = termMarks[row.studentId]?.[tk]?.[sub] || {};
-        if (isLower) {
-          if (m.mk !== null && m.mk !== undefined) requestOrApplyTermMark(row.studentId, studentName, tk, sub, "exam", clampMark(m.mk, lowerSubjectMax(sub)), existing.exam);
-        } else {
-          if (m.ca !== null && m.ca !== undefined) requestOrApplyTermMark(row.studentId, studentName, tk, sub, "ca", clampMark(m.ca), existing.ca);
-          if (m.exam !== null && m.exam !== undefined) requestOrApplyTermMark(row.studentId, studentName, tk, sub, "exam", clampMark(m.exam), existing.exam);
-        }
-      });
-    });
-    setBulkMarkPreview(null);
-    setShowBulkMark(false);
-  };
-  // Generate a template CSV download
-  const downloadMarkTemplate = () => {
-    const curSubjects = isLower ? LOWER_SUBJECTS : UPPER_SUBJECTS;
-    let header = "NAME";
-    curSubjects.forEach(sub => {
-      if (isLower) header += `,${sub}`;
-      else header += `,${sub}_CA,${sub}_EXAM`;
-    });
-    const rows = classStudents.map(s => {
-      let row = s.name;
-      curSubjects.forEach(() => { if (isLower) row += ","; else row += ",,"; });
-      return row;
-    });
-    const csv = [header, ...rows].join("\n");
-    const blob = new Blob([csv], { type: "text/csv" });
-    triggerBlobDownload(blob, `${cls}_${term.replace(" ","_")}_${year}_mark_template.csv`);
-  };
-  return (
-    <div>
-      {pendingToast && (
-        <div style={{position:"fixed",top:16,right:16,zIndex:3000,background:"#1e3a6e",color:"white",padding:"12px 18px",borderRadius:10,fontSize:13,fontWeight:600,boxShadow:"0 8px 24px rgba(0,0,
+          const idx = headers.fin
