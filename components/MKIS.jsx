@@ -173,25 +173,23 @@ async function verifyPassword(plain, stored) {
 // ─── ACCOUNTS (two roles: teacher + admin) ────────────────────────────────────
 // mkis_accounts is a shared object keyed by lowercase username:
 //   { [usernameLower]: { username, passwordHash, role: "teacher"|"admin" } }
-// Each teacher has their own individual, distinctive login (no shared
-// "Teacher" account); the admin account is a separate, more privileged
-// login. Defaults match the school's requested credentials and are only
-// used the very first time the app runs (i.e. when no accounts have been
-// saved to shared storage yet).
-const DEFAULT_ACCOUNTS_PLAIN = {
-  "gerald": { username: "Gerald", password: "GOODTOGO11", role: "admin" },
-  "omiita01": { username: "OMIITA01", password: "OMIITA01172", role: "teacher" },
-  "emuron10": { username: "EMURON10", password: "EMURON10172", role: "teacher" },
-  "ijang11": { username: "IJANG11", password: "IJANG11172", role: "teacher" },
-  "odoi31": { username: "ODOI31", password: "ODOI31172", role: "teacher" },
-  "immaculate71": { username: "IMMACULATE71", password: "IMMACULATE71172", role: "teacher" },
-  "akoth33": { username: "AKOTH33", password: "AKOTH33172", role: "teacher" },
-  "maryg0001": { username: "MARYG0001", password: "MARYG0001172", role: "teacher" },
-  "anyango45": { username: "ANYANGO45", password: "ANYANGO45172", role: "teacher" },
-  "igari89": { username: "IGARI89", password: "IGARI89172", role: "teacher" },
-  "jakisa23": { username: "JAKISA23", password: "JAKISA23172", role: "teacher" },
-  "nyachwo": { username: "NYACHWO", password: "NYACHWO172", role: "teacher" },
-};
+// The teacher account is the everyday login everyone already knows; the admin
+// account is a separate, more privileged login. Defaults match the school's
+// requested credentials and are only used the very first time the app runs
+// (i.e. when no accounts have been saved to shared storage yet).
+const TEACHER_USERNAMES = [
+  "OMIITA01","EMURON10","IJANG11","ODOI31","IMMACULATE71","AKOTH33",
+  "MARYG0001","ANYANGO45","IGARI89","JAKISA23","NYACHWO",
+];
+const DEFAULT_ACCOUNTS_PLAIN = (() => {
+  const out = {
+    "gerald": { username: "Gerald", password: "GOODTOGO11", role: "admin" },
+  };
+  for (const u of TEACHER_USERNAMES) {
+    out[u.toLowerCase()] = { username: u, password: `${u}172`, role: "teacher" };
+  }
+  return out;
+})();
 async function buildDefaultAccounts() {
   const out = {};
   for (const key of Object.keys(DEFAULT_ACCOUNTS_PLAIN)) {
@@ -844,33 +842,12 @@ export default function App() {
       ]);
       if (!mounted) return;
       setStudents(s); setTermMarks(tm); setMonthlyMarks(mm);
-      // First run ever: no accounts saved yet, so seed the default admin
-      // login and each teacher's individual login, then persist them.
+      // First run ever: no accounts saved yet, so seed the two default
+      // logins (Teacher / admin) and persist them.
       let finalAccounts = acc;
       if (!finalAccounts || Object.keys(finalAccounts).length === 0) {
         finalAccounts = await buildDefaultAccounts();
         await saveShared("mkis_accounts", finalAccounts);
-      } else {
-        // Existing install (accounts already saved from before this update):
-        // add any of the required teacher logins that aren't there yet, and
-        // drop the old shared "teacher" account -- without touching any
-        // account that already exists (e.g. a password the admin already
-        // changed via Manage Teacher Passwords is left exactly as-is).
-        let migrated = false;
-        for (const key of Object.keys(DEFAULT_ACCOUNTS_PLAIN)) {
-          if (key === "gerald") continue;
-          if (!finalAccounts[key]) {
-            const a = DEFAULT_ACCOUNTS_PLAIN[key];
-            finalAccounts[key] = { username: a.username, passwordHash: await hashPassword(a.password), role: a.role };
-            migrated = true;
-          }
-        }
-        if (finalAccounts.teacher) {
-          const { teacher, ...rest } = finalAccounts;
-          finalAccounts = rest;
-          migrated = true;
-        }
-        if (migrated) await saveShared("mkis_accounts", finalAccounts);
       }
       setBands(b); setDivisions(d); setSchool(sc); setAccounts(finalAccounts); setChangeRequests(reqs || []); setInitials(ini);
       setLockedTerm(lt || {}); setLockedMonthly(lm || {});
@@ -1111,13 +1088,6 @@ export default function App() {
     if (d.school)        setSchool(d.school);
     if (d.accounts) {
       setAccounts(d.accounts);
-    } else if (d.password) {
-      // Legacy single-password backup (pre-multi-account format): keep the
-      // restored value as the teacher login and leave the admin login as-is.
-      (async () => {
-        const hash = isHashed(d.password) ? d.password : await hashPassword(d.password);
-        setAccounts(prev => ({ ...prev, teacher: { username: "Teacher", passwordHash: hash, role: "teacher" } }));
-      })();
     }
     deletedStudentIdsRef.current = new Set();
   }, []);
@@ -1639,4 +1609,47 @@ function MarkEntry({ students, termMarks, setTermMarks, updateTermMark, requestO
     } catch(err) {
       setBulkMarkError("Could not read file: " + err.message);
     }
-    if (bulkMarkFil
+    if (bulkMarkFileRef.current) bulkMarkFileRef.current.value = "";
+  };
+  const confirmBulkMarks = () => {
+    if (!bulkMarkPreview) return;
+    const curSubjects = isLower ? LOWER_SUBJECTS : UPPER_SUBJECTS;
+    bulkMarkPreview.rows.forEach(row => {
+      if (!row.include || !row.studentId) return;
+      const studentName = students.find(s=>s.id===row.studentId)?.name || row.rawName;
+      curSubjects.forEach(sub => {
+        const m = row.marks[sub];
+        if (!m) return;
+        const existing = termMarks[row.studentId]?.[tk]?.[sub] || {};
+        if (isLower) {
+          if (m.mk !== null && m.mk !== undefined) requestOrApplyTermMark(row.studentId, studentName, tk, sub, "exam", clampMark(m.mk, lowerSubjectMax(sub)), existing.exam);
+        } else {
+          if (m.ca !== null && m.ca !== undefined) requestOrApplyTermMark(row.studentId, studentName, tk, sub, "ca", clampMark(m.ca), existing.ca);
+          if (m.exam !== null && m.exam !== undefined) requestOrApplyTermMark(row.studentId, studentName, tk, sub, "exam", clampMark(m.exam), existing.exam);
+        }
+      });
+    });
+    setBulkMarkPreview(null);
+    setShowBulkMark(false);
+  };
+  // Generate a template CSV download
+  const downloadMarkTemplate = () => {
+    const curSubjects = isLower ? LOWER_SUBJECTS : UPPER_SUBJECTS;
+    let header = "NAME";
+    curSubjects.forEach(sub => {
+      if (isLower) header += `,${sub}`;
+      else header += `,${sub}_CA,${sub}_EXAM`;
+    });
+    const rows = classStudents.map(s => {
+      let row = s.name;
+      curSubjects.forEach(() => { if (isLower) row += ","; else row += ",,"; });
+      return row;
+    });
+    const csv = [header, ...rows].join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    triggerBlobDownload(blob, `${cls}_${term.replace(" ","_")}_${year}_mark_template.csv`);
+  };
+  return (
+    <div>
+      {pendingToast && (
+        <div style={{position:"fixed",top:16,right:16,zIndex:3000,background:"#1e3a6e",color:"white",padding:"12px 18px",borderRadius:10,fontSize:13,fontWeight:600,boxShadow:"0 8px 24px rgba(0,0,
