@@ -243,6 +243,173 @@ function remarkFor(score) {
   if (score >= 25) return "Weak";
   return "Fail";
 }
+// ── Auto-generated Class Teacher's / Head Teacher's comments ──────────────
+// Picked automatically from a bank of stock phrases based on the pupil's
+// Division (P4-P7) or total marks (P1-P3). Nothing here is stored or
+// editable -- it's recomputed fresh every time from the marks already
+// entered. A stable per-pupil "seed" (e.g. pupil id + term + year) makes
+// the same phrase come up every time for that pupil/period, so it stays
+// identical on screen, in the printed copy, in Word, and in the PDF,
+// instead of changing on every reload.
+function commentHash(seed) {
+  const str = String(seed);
+  let h = 0;
+  for (let i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) >>> 0;
+  return h;
+}
+function pickFrom(bank, seed) {
+  if (!bank || !bank.length) return "";
+  return bank[commentHash(seed) % bank.length];
+}
+// Class Teacher's comments -- upper classes (P4-P7), keyed by Division.
+// (Division III isn't covered by name in the school's own wording, so it
+// borrows a sensible middle-ground tone between Division II and IV.)
+const TEACHER_COMMENTS_DIVISION = {
+  U: [
+    "Improve in all subjects steadily.",
+    "Work for good results.",
+    "Pull up in all subjects.",
+    "Double your efforts next term.",
+    "Aim at good results.",
+  ],
+  IV: [
+    "Work harder next term.",
+    "Improve steadily.",
+    "Keep trying; you can improve.",
+    "Work hard and aim at good results.",
+    "More effort is required for good results.",
+  ],
+  III: [
+    "Increase effort in the weak subjects.",
+    "Work consistently to improve your grades.",
+    "Aim higher next term.",
+    "You can do better with more effort.",
+    "Focus more on the subjects you find weak.",
+  ],
+  II: [
+    "Aim at better results.",
+    "Work harder for better grades.",
+    "Pull up in the weak subjects.",
+    "Continue trying hard next term.",
+    "Remain focused next term.",
+    "You are capable of doing better than this.",
+  ],
+  I: [
+    "Good effort seen; continue working hard.",
+    "Aim higher next term.",
+  ],
+};
+// Class Teacher's comments -- lower classes (P1-P3), keyed by total marks.
+// (300-399 wasn't specified, so it borrows a middle-ground tone between
+// the "below 300" and "400 and above" bands.)
+const TEACHER_COMMENTS_LOWER = {
+  low: [ // below 300
+    "Work harder next term.",
+    "Can do better than this next term.",
+    "Keep working hard.",
+    "You're capable of doing better.",
+    "Keep trying; you'll improve.",
+  ],
+  mid: [ // 300 - 399
+    "Improving steadily; keep working hard.",
+    "Continue working hard to improve further.",
+    "Fair effort; aim higher next term.",
+    "Keep trying; you are improving.",
+  ],
+  high: [ // 400 and above
+    "Good effort seen.",
+    "Don't relax, continue working hard.",
+  ],
+};
+// Head Teacher's comments -- shared across all classes, split by whether
+// the pupil's performance needs more effort or is already doing well.
+const HEAD_COMMENTS_NEEDS_EFFORT = [
+  "Needs to put more effort into class work.",
+  "Performance is below expectation; more practice is needed.",
+  "Shows potential but needs to work harder.",
+  "Needs closer supervision and regular revision.",
+  "Must improve concentration in class.",
+  "Should complete assignments on time.",
+  "Needs to develop better study habits.",
+  "More effort is required to improve performance.",
+  "Progress is slow; consistent practice is needed.",
+  "Needs to participate more in lessons.",
+  "Must improve reading and writing skills.",
+  "Requires more support in weak areas.",
+  "Should avoid distractions during lessons.",
+  "Needs to revise regularly at home.",
+  "Can do better with increased commitment.",
+  "Needs encouragement to build confidence.",
+  "Academic progress needs urgent attention.",
+  "Must take learning more seriously.",
+  "Requires continuous guidance and monitoring.",
+  "Improvement is expected next term.",
+  "Keep trying; you can improve.",
+  "Believe in yourself and work harder.",
+  "More effort will lead to better results.",
+  "I encourage you to remain focused.",
+  "Keep practising to improve your skills.",
+];
+const HEAD_COMMENTS_DOING_WELL = [
+  "Good performance. Keep it up.",
+  "Shows good understanding of concepts.",
+  "Works hard and maintains good progress.",
+  "A focused and hardworking learner.",
+  "Participates actively in class.",
+  "Good effort and positive attitude.",
+  "Making steady academic progress.",
+  "Performs well in most areas.",
+  "Shows commitment to learning.",
+  "Keep maintaining this good standard.",
+  "A responsible and disciplined learner.",
+  "Demonstrates good study habits.",
+  "Excellent improvement. Keep going.",
+  "Confident and active in lessons.",
+  "Consistently produces good work.",
+  "Has great potential for further improvement.",
+  "Good achievement this term.",
+  "Continues to work hard.",
+  "Shows good cooperation with others.",
+  "Keep aiming higher.",
+];
+// Builds { teacher, head } comment text for one pupil/period.
+// isLower: P1-P3 (marks-based) vs P4-P7 (division-based).
+// totMk: pupil's total marks (used directly for P1-P3, and to detect
+// "nothing entered yet" for both). div: "I"/"II"/"III"/"IV"/"U" (P4-P7
+// only). hasX: pupil missed a paper. seed: anything stable per
+// pupil+period (e.g. student id + term + year) for a consistent pick.
+function autoComments({ isLower, totMk, div, hasX, seed }) {
+  if (hasX) {
+    return {
+      teacher: "Missed paper(s) -- please ensure full attendance for all examinations.",
+      head: "Incomplete examination record. Attendance must improve.",
+    };
+  }
+  if (!totMk) return { teacher: "", head: "" }; // nothing entered yet -- leave blank
+  let teacherBank, doingWell;
+  if (isLower) {
+    const tier = totMk < 300 ? "low" : totMk < 400 ? "mid" : "high";
+    teacherBank = TEACHER_COMMENTS_LOWER[tier];
+    doingWell = tier === "high";
+  } else {
+    teacherBank = TEACHER_COMMENTS_DIVISION[div] || TEACHER_COMMENTS_DIVISION.U;
+    doingWell = div === "I" || div === "II";
+  }
+  const headBank = doingWell ? HEAD_COMMENTS_DOING_WELL : HEAD_COMMENTS_NEEDS_EFFORT;
+  return {
+    teacher: pickFrom(teacherBank, seed + ":t"),
+    head: pickFrom(headBank, seed + ":h"),
+  };
+}
+// For Monthly Report Cards (which cover several months at once): bases the
+// comment on the most recent month that actually has marks entered, since
+// that reflects the pupil's current standing best.
+function monthlyCardAutoComments(monthData, isLower, seed) {
+  const entered = (monthData || []).filter(m => m.totMk > 0);
+  if (!entered.length) return { teacher: "", head: "" };
+  const latest = entered[entered.length - 1];
+  return autoComments({ isLower, totMk: latest.totMk, div: latest.div, hasX: latest.hasX, seed });
+}
 // Rank with ties. When `aggs` is supplied, ties on total marks are broken by
 // lower aggregate (better aggregate = better position). Pupils only share a
 // position when BOTH their total marks AND their aggregate match exactly.
@@ -530,6 +697,7 @@ function exportMonthlyWord({ school, cls, term, year, isLower, subjects, monthsD
 function exportMonthlyCardsWord({ school, cls, term, year, isLower, subjects, cardData, totalInClass }) {
   let body = titleBlockHtml(school, `MONTHLY TESTS REPORT CARDS - ${term.toUpperCase()} ${year} - ${cls}`);
   cardData.forEach(({ s, monthData }) => {
+    const comments = monthlyCardAutoComments(monthData, isLower, `${s.id}-${term}-${year}-monthly`);
     // Student header
     body += `<div style="page-break-before:always;margin-top:20px;">`;
     body += `<table style="width:100%;border-collapse:collapse;margin-bottom:6px;">
@@ -574,8 +742,8 @@ function exportMonthlyCardsWord({ school, cls, term, year, isLower, subjects, ca
     body += `<tr><td colspan="100" style="border:1px solid #999;padding:4px;font-size:9pt;color:#6b7280;">Total pupils in class: <b>${totalInClass}</b></td></tr>`;
     body += `</tbody></table>`;
     body += `<p style="font-size:11pt;line-height:2;">
-      <b>Class Teacher's Comment:</b> .............................................................................. <b>Sign:</b> ......................</p>
-      <p style="font-size:11pt;line-height:2;"><b>Head Teacher's Comment:</b> .............................................................................. <b>Sign:</b> ......................</p>`;
+      <b>Class Teacher's Comment:</b> ${escapeHtml(comments.teacher) || ".............................................................................."} <b>Sign:</b> ......................</p>
+      <p style="font-size:11pt;line-height:2;"><b>Head Teacher's Comment:</b> ${escapeHtml(comments.head) || ".............................................................................."} <b>Sign:</b> ......................</p>`;
     body += `</div>`;
   });
   downloadWordHtml(`${cls} ${term} ${year} Monthly Report Cards`, body, `${safeFileName(cls)}_${safeFileName(term)}_${year}_Monthly_Report_Cards.doc`);
@@ -586,6 +754,7 @@ function exportReportCardsWord({ school, cls, term, year, isLower, rows, allPosi
   rows.forEach((r, idx) => {
     const { s, perSub, totMk, totAgg, div, hasX } = r;
     const position = allPositions[s.id];
+    const comments = autoComments({ isLower, totMk, div, hasX, seed: `${s.id}-${term}-${year}` });
     // Each pupil's page carries its own school-details header (matching the
     // on-screen preview) plus their pupil info, marks table, and comments,
     // all inside one report-card-block so nothing is split apart. Only
@@ -643,8 +812,8 @@ function exportReportCardsWord({ school, cls, term, year, isLower, rows, allPosi
     if (!isLower) body += `<b>DIVISION:</b> ${hasX ? "X" : totMk ? div : "-"}&nbsp;&nbsp;&nbsp;`;
     body += `</p>`;
     body += `<p style="font-size:11pt;line-height:2;"><b>CONDUCT:</b> ...........................................................................................</p>
-      <p style="font-size:11pt;line-height:2;"><b>Class Teacher's Comment:</b> .............................................................................. <b>Sign:</b> ......................</p>
-      <p style="font-size:11pt;line-height:2;"><b>Head Teacher's Comment:</b> .............................................................................. <b>Sign:</b> ......................</p>
+      <p style="font-size:11pt;line-height:2;"><b>Class Teacher's Comment:</b> ${escapeHtml(comments.teacher) || ".............................................................................."} <b>Sign:</b> ......................</p>
+      <p style="font-size:11pt;line-height:2;"><b>Head Teacher's Comment:</b> ${escapeHtml(comments.head) || ".............................................................................."} <b>Sign:</b> ......................</p>
       <p style="font-size:11pt;line-height:2;"><b>Next Term begins on</b> ....................... <b>Ends on</b> .......................</p>
       <p style="font-size:11pt;line-height:2;"><b>Requirements:</b> ${escapeHtml(school.requirements || "...........................................................................................")}</p>
       <p style="font-size:11pt;line-height:2;"><b>Parent's Signature after reading:</b> ...................................................................</p>`;
@@ -2425,6 +2594,7 @@ function MonthlyCards({ students, monthlyMarks, bands, divisions, school }) {
 }
 function TermlyMonthlyCard({ school, student, monthData, term, year, cls, isLower, subjects, totalInClass }) {
   const s = student;
+  const comments = monthlyCardAutoComments(monthData, isLower, `${s.id}-${term}-${year}-monthly`);
   return (
     <div className="page-break" style={{background:"white",border:"2px solid #1e3a6e",borderRadius:10,overflow:"hidden",maxWidth:900,margin:"0 auto",boxShadow:"0 4px 20px rgba(0,0,0,0.08)",pageBreakAfter:"always"}}>
       <div style={{background:"linear-gradient(135deg,#1e3a6e 0%,#1e40af 100%)",color:"white",padding:"12px 20px",textAlign:"center"}}>
@@ -2503,8 +2673,8 @@ function TermlyMonthlyCard({ school, student, monthData, term, year, cls, isLowe
         </table>
       </div>
       <div style={{borderTop:"2px solid #e5e7eb",padding:"10px 16px",background:"#f8fafc",fontSize:13,lineHeight:2}}>
-        <div><b>Class Teacher's Comment:</b> .............................................................................. <b>Sign:</b> ......................</div>
-        <div><b>Head Teacher's Comment:</b> .............................................................................. <b>Sign:</b> ......................</div>
+        <div><b>Class Teacher's Comment:</b> {comments.teacher || ".............................................................................."} <b>Sign:</b> ......................</div>
+        <div><b>Head Teacher's Comment:</b> {comments.head || ".............................................................................."} <b>Sign:</b> ......................</div>
       </div>
     </div>
   );
@@ -2788,6 +2958,7 @@ function ReportCards({ students, termMarks, bands, divisions, school, initials }
 }
 function ReportCard({ school, r, term, year, cls, position, totalInClass, isLower, bands, initials }) {
   const { s, perSub, totMk, totAgg, div, hasX } = r;
+  const comments = autoComments({ isLower, totMk, div, hasX, seed: `${s.id}-${term}-${year}` });
   return (
     <div className="report-card-sheet" style={{width:"210mm",minHeight:"297mm",maxWidth:"210mm",boxSizing:"border-box",padding:"10mm",background:"white"}}>
       <div style={{background:"white",border:"3px solid #1e3a6e",borderRadius:12,overflow:"hidden",boxShadow:"0 4px 20px rgba(0,0,0,0.1)"}}>
@@ -2844,8 +3015,8 @@ function ReportCard({ school, r, term, year, cls, position, totalInClass, isLowe
       <div style={{padding:"12px 4px 0",fontSize:13,lineHeight:2}}>
         {!isLower&&<div><b>DIVISION:</b> <span style={{color:"#1e40af",fontWeight:700}}>{hasX?"X":totMk?div:"-"}</span></div>}
         <div><b>CONDUCT:</b> ...........................................................................................</div>
-        <div><b>Class Teacher's Comment:</b> .............................................................................. <b>Sign:</b> ......................</div>
-        <div><b>Head Teacher's Comment:</b> .............................................................................. <b>Sign:</b> ......................</div>
+        <div><b>Class Teacher's Comment:</b> {comments.teacher || ".............................................................................."} <b>Sign:</b> ......................</div>
+        <div><b>Head Teacher's Comment:</b> {comments.head || ".............................................................................."} <b>Sign:</b> ......................</div>
         <div><b>Next Term begins on</b> ....................... <b>Ends on</b> .......................</div>
         <div><b>Requirements:</b> {school.requirements||"..........................................................................................."}</div>
         <div><b>Parent's Signature after reading:</b> ...................................................................</div>
