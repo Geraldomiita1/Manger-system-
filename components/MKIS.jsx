@@ -742,8 +742,8 @@ function exportMonthlyCardsWord({ school, cls, term, year, isLower, subjects, ca
     body += `<tr><td colspan="100" style="border:1px solid #999;padding:4px;font-size:9pt;color:#6b7280;">Total pupils in class: <b>${totalInClass}</b></td></tr>`;
     body += `</tbody></table>`;
     body += `<p style="font-size:11pt;line-height:2;">
-      <b>Class Teacher's Comment:</b> ${escapeHtml(comments.teacher) || ".............................................................................."} <b>Sign:</b> ......................</p>
-      <p style="font-size:11pt;line-height:2;"><b>Head Teacher's Comment:</b> ${escapeHtml(comments.head) || ".............................................................................."} <b>Sign:</b> ......................</p>`;
+      <b>Class Teacher's Comment:</b> <span style="font-weight:bold;color:#1d4ed8;">${escapeHtml(comments.teacher) || ".............................................................................."}</span> <b>Sign:</b> ......................</p>
+      <p style="font-size:11pt;line-height:2;"><b>Head Teacher's Comment:</b> <span style="font-weight:bold;font-style:italic;color:#dc2626;">${escapeHtml(comments.head) || ".............................................................................."}</span> <b>Sign:</b> ......................</p>`;
     body += `</div>`;
   });
   downloadWordHtml(`${cls} ${term} ${year} Monthly Report Cards`, body, `${safeFileName(cls)}_${safeFileName(term)}_${year}_Monthly_Report_Cards.doc`);
@@ -812,8 +812,8 @@ function exportReportCardsWord({ school, cls, term, year, isLower, rows, allPosi
     if (!isLower) body += `<b>DIVISION:</b> ${hasX ? "X" : totMk ? div : "-"}&nbsp;&nbsp;&nbsp;`;
     body += `</p>`;
     body += `<p style="font-size:11pt;line-height:2;"><b>CONDUCT:</b> ...........................................................................................</p>
-      <p style="font-size:11pt;line-height:2;"><b>Class Teacher's Comment:</b> ${escapeHtml(comments.teacher) || ".............................................................................."} <b>Sign:</b> ......................</p>
-      <p style="font-size:11pt;line-height:2;"><b>Head Teacher's Comment:</b> ${escapeHtml(comments.head) || ".............................................................................."} <b>Sign:</b> ......................</p>
+      <p style="font-size:11pt;line-height:2;"><b>Class Teacher's Comment:</b> <span style="font-weight:bold;color:#1d4ed8;">${escapeHtml(comments.teacher) || ".............................................................................."}</span> <b>Sign:</b> ......................</p>
+      <p style="font-size:11pt;line-height:2;"><b>Head Teacher's Comment:</b> <span style="font-weight:bold;font-style:italic;color:#dc2626;">${escapeHtml(comments.head) || ".............................................................................."}</span> <b>Sign:</b> ......................</p>
       <p style="font-size:11pt;line-height:2;"><b>Next Term begins on</b> ....................... <b>Ends on</b> .......................</p>
       <p style="font-size:11pt;line-height:2;"><b>Requirements:</b> ${escapeHtml(school.requirements || "...........................................................................................")}</p>
       <p style="font-size:11pt;line-height:2;"><b>Parent's Signature after reading:</b> ...................................................................</p>`;
@@ -2673,8 +2673,8 @@ function TermlyMonthlyCard({ school, student, monthData, term, year, cls, isLowe
         </table>
       </div>
       <div style={{borderTop:"2px solid #e5e7eb",padding:"10px 16px",background:"#f8fafc",fontSize:13,lineHeight:2}}>
-        <div><b>Class Teacher's Comment:</b> {comments.teacher || ".............................................................................."} <b>Sign:</b> ......................</div>
-        <div><b>Head Teacher's Comment:</b> {comments.head || ".............................................................................."} <b>Sign:</b> ......................</div>
+        <div><b>Class Teacher's Comment:</b> <span style={{fontWeight:700,color:"#1d4ed8"}}>{comments.teacher || ".............................................................................."}</span> <b>Sign:</b> ......................</div>
+        <div><b>Head Teacher's Comment:</b> <span style={{fontWeight:700,fontStyle:"italic",color:"#dc2626"}}>{comments.head || ".............................................................................."}</span> <b>Sign:</b> ......................</div>
       </div>
     </div>
   );
@@ -3015,8 +3015,8 @@ function ReportCard({ school, r, term, year, cls, position, totalInClass, isLowe
       <div style={{padding:"12px 4px 0",fontSize:13,lineHeight:2}}>
         {!isLower&&<div><b>DIVISION:</b> <span style={{color:"#1e40af",fontWeight:700}}>{hasX?"X":totMk?div:"-"}</span></div>}
         <div><b>CONDUCT:</b> ...........................................................................................</div>
-        <div><b>Class Teacher's Comment:</b> {comments.teacher || ".............................................................................."} <b>Sign:</b> ......................</div>
-        <div><b>Head Teacher's Comment:</b> {comments.head || ".............................................................................."} <b>Sign:</b> ......................</div>
+        <div><b>Class Teacher's Comment:</b> <span style={{fontWeight:700,color:"#1d4ed8"}}>{comments.teacher || ".............................................................................."}</span> <b>Sign:</b> ......................</div>
+        <div><b>Head Teacher's Comment:</b> <span style={{fontWeight:700,fontStyle:"italic",color:"#dc2626"}}>{comments.head || ".............................................................................."}</span> <b>Sign:</b> ......................</div>
         <div><b>Next Term begins on</b> ....................... <b>Ends on</b> .......................</div>
         <div><b>Requirements:</b> {school.requirements||"..........................................................................................."}</div>
         <div><b>Parent's Signature after reading:</b> ...................................................................</div>
