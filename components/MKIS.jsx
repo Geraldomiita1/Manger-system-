@@ -1493,12 +1493,60 @@ export default function App() {
   );
 }
 // ─── DASHBOARD ───────────────────────────────────────────────────────────────
-function Dashboard({ students, school }) {
+function Dashboard({ students, school, termMarks, bands }) {
+  const [perfTerm, setPerfTerm] = useState("Term I");
+  const [perfYear, setPerfYear] = useState(school.year||String(new Date().getFullYear()));
+  const perfTk = `${perfTerm}__${perfYear}`;
   const active = students.filter(s=>s.className!=="Completed");
   const total = active.length;
   const boys = active.filter(s=>s.gender==="M").length;
   const girls = active.filter(s=>s.gender==="F").length;
   const classCounts = ALL_CLASSES.map(c => ({ cls:c, count: students.filter(s=>s.className===c).length }));
+  // Pulls a pupil's per-subject average mark (CA+EXAM average, or whichever
+  // single one is entered) the same way Mark Entry / Result Sheets do, then
+  // expresses it as a % of that subject's max so lower-class subjects with a
+  // max below 100 (e.g. Reading/Writing /50) compare fairly with everything
+  // else. Returns undefined if nothing has been entered for that subject.
+  const subjectPct = (s, sub, isLower) => {
+    const m = termMarks[s.id]?.[perfTk] || {};
+    const ca = m[sub]?.ca, exam = m[sub]?.exam;
+    const hasBoth = typeof ca==="number" && typeof exam==="number";
+    const av = hasBoth ? Math.round((ca+exam)/2) : (typeof exam==="number"?exam:typeof ca==="number"?ca:undefined);
+    if (av === undefined) return undefined;
+    return (av / (isLower ? lowerSubjectMax(sub) : 100)) * 100;
+  };
+  // General Performance by Class: each class's overall average % across all
+  // its pupils and subjects, for the selected term/year.
+  const classPerformance = useMemo(() => ALL_CLASSES.map(cls => {
+    const isLower = LOWER_CLASSES.includes(cls);
+    const subjects = isLower ? LOWER_SUBJECTS : UPPER_SUBJECTS;
+    const classStudents = active.filter(s => s.className === cls);
+    let sumPct = 0, count = 0;
+    classStudents.forEach(s => subjects.forEach(sub => {
+      const pct = subjectPct(s, sub, isLower);
+      if (pct !== undefined) { sumPct += pct; count++; }
+    }));
+    return { cls, avgPct: count ? Math.round(sumPct / count) : null, pupils: classStudents.length };
+  }), [active, termMarks, perfTk]);
+  // Subject Performance (whole school): each subject's average % across
+  // every pupil who studies it (lower and upper classes use different
+  // subject lists, so each subject is only counted for the classes that
+  // actually offer it).
+  const subjectPerformance = useMemo(() => {
+    const allSubjects = [...new Set([...UPPER_SUBJECTS, ...LOWER_SUBJECTS])];
+    return allSubjects.map(sub => {
+      let sumPct = 0, count = 0;
+      active.forEach(s => {
+        const isLower = LOWER_CLASSES.includes(s.className);
+        const subjList = isLower ? LOWER_SUBJECTS : UPPER_SUBJECTS;
+        if (!subjList.includes(sub)) return;
+        const pct = subjectPct(s, sub, isLower);
+        if (pct !== undefined) { sumPct += pct; count++; }
+      });
+      return { sub, avgPct: count ? Math.round(sumPct / count) : null, entries: count };
+    }).filter(r => r.entries > 0);
+  }, [active, termMarks, perfTk]);
+  const perfBarColor = (pct) => pct>=65 ? "linear-gradient(90deg,#15803d,#22c55e)" : pct>=45 ? "linear-gradient(90deg,#b45309,#f59e0b)" : "linear-gradient(90deg,#b91c1c,#ef4444)";
   return (
     <div>
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:16,marginBottom:24}}>
@@ -1533,6 +1581,40 @@ function Dashboard({ students, school }) {
             v ? <div key={k} style={{fontSize:13,marginBottom:8,display:"flex",gap:8}}><span style={{fontWeight:600,color:"#374151",minWidth:90}}>{k}:</span><span style={{color:"#6b7280"}}>{v}</span></div> : null
           )}
         </div>
+      </div>
+      <div style={{background:"white",borderRadius:12,padding:20,border:"1px solid #e5e7eb",marginTop:16}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end",flexWrap:"wrap",gap:10,marginBottom:16}}>
+          <h3 style={{margin:0,color:"#1e3a6e",fontSize:15}}>📈 General Performance by Class</h3>
+          <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"flex-end"}}>
+            <Sel label="Term" value={perfTerm} onChange={v=>setPerfTerm(v)} opts={TERMS}/>
+            <div><label style={lbl}>Year</label><input type="number" value={perfYear} onChange={e=>setPerfYear(e.target.value)} style={{...inp,width:90}}/></div>
+          </div>
+        </div>
+        {classPerformance.every(c=>c.avgPct===null) ? (
+          <div style={{color:"#9ca3af",fontSize:13,textAlign:"center",padding:20}}>No marks entered yet for {perfTerm} {perfYear}.</div>
+        ) : classPerformance.map(({cls,avgPct,pupils}) => (
+          <div key={cls} style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
+            <div style={{width:40,fontWeight:700,color:"#1e3a6e",fontSize:13}}>{cls}</div>
+            <div style={{flex:1,background:"#f1f5f9",borderRadius:4,height:22,overflow:"hidden"}}>
+              {avgPct!==null && <div style={{width:`${avgPct}%`,background:perfBarColor(avgPct),height:"100%",borderRadius:4}}/>}
+            </div>
+            <div style={{width:54,textAlign:"right",fontSize:13,fontWeight:700,color:"#1e3a6e"}}>{avgPct===null?"-":`${avgPct}%`}</div>
+          </div>
+        ))}
+      </div>
+      <div style={{background:"white",borderRadius:12,padding:20,border:"1px solid #e5e7eb",marginTop:16}}>
+        <h3 style={{margin:"0 0 16px",color:"#1e3a6e",fontSize:15}}>📚 Subject Performance - Whole School ({perfTerm} {perfYear})</h3>
+        {subjectPerformance.length===0 ? (
+          <div style={{color:"#9ca3af",fontSize:13,textAlign:"center",padding:20}}>No marks entered yet for {perfTerm} {perfYear}.</div>
+        ) : subjectPerformance.map(({sub,avgPct}) => (
+          <div key={sub} style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
+            <div style={{width:70,fontWeight:700,color:"#1e3a6e",fontSize:12}}>{sub}</div>
+            <div style={{flex:1,background:"#f1f5f9",borderRadius:4,height:22,overflow:"hidden"}}>
+              <div style={{width:`${avgPct}%`,background:perfBarColor(avgPct),height:"100%",borderRadius:4}}/>
+            </div>
+            <div style={{width:54,textAlign:"right",fontSize:13,fontWeight:700,color:"#1e3a6e"}}>{avgPct}%</div>
+          </div>
+        ))}
       </div>
     </div>
   );
