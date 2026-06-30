@@ -851,7 +851,9 @@ function expandOverflowForCapture(root) {
 // Renders one DOM node to a canvas, then slices that canvas into as many
 // A4-width "pages" as its height needs -- so tall tables/lists flow cleanly
 // onto additional pages instead of getting cut off.
-async function nodeToPdfPageSlices(node, scale = 2) {
+async function nodeToPdfPageSlices(node, scale = 2, orientation = "portrait") {
+  const pageWmm = orientation === "landscape" ? PDF_PAGE_H_MM : PDF_PAGE_W_MM;
+  const pageHmm = orientation === "landscape" ? PDF_PAGE_W_MM : PDF_PAGE_H_MM;
   const restore = expandOverflowForCapture(node);
   let canvas;
   try {
@@ -859,8 +861,8 @@ async function nodeToPdfPageSlices(node, scale = 2) {
   } finally {
     restore();
   }
-  const pxPerMm = canvas.width / PDF_PAGE_W_MM;
-  const pageHeightPx = Math.max(1, Math.floor(pxPerMm * PDF_PAGE_H_MM));
+  const pxPerMm = canvas.width / pageWmm;
+  const pageHeightPx = Math.max(1, Math.floor(pxPerMm * pageHmm));
   const slices = [];
   let offset = 0;
   while (offset < canvas.height) {
@@ -869,24 +871,26 @@ async function nodeToPdfPageSlices(node, scale = 2) {
     sliceCanvas.width = canvas.width;
     sliceCanvas.height = sliceHeightPx;
     sliceCanvas.getContext("2d").drawImage(canvas, 0, offset, canvas.width, sliceHeightPx, 0, 0, canvas.width, sliceHeightPx);
-    slices.push({ dataUrl: sliceCanvas.toDataURL("image/jpeg", 0.95), heightMm: sliceHeightPx / pxPerMm });
+    slices.push({ dataUrl: sliceCanvas.toDataURL("image/jpeg", 0.95), widthMm: pageWmm, heightMm: sliceHeightPx / pxPerMm });
     offset += sliceHeightPx;
   }
   return slices;
 }
 // Builds and downloads a single multi-page PDF from an ordered list of DOM
 // nodes (e.g. one node per pupil's report card, or [table, analysis] for a
-// result sheet). Each node starts on a fresh page; tall nodes span more.
-async function downloadNodesAsPdf(nodes, filename) {
+// result sheet, or one node per 3x3 page of Monthly Slips). Each node
+// starts on a fresh page; tall nodes span more. orientation applies to
+// every page in the PDF (mixed-orientation documents aren't needed here).
+async function downloadNodesAsPdf(nodes, filename, orientation = "portrait") {
   const validNodes = nodes.filter(Boolean);
   if (!validNodes.length) return;
-  const pdf = new jsPDF({ unit: "mm", format: "a4", orientation: "portrait" });
+  const pdf = new jsPDF({ unit: "mm", format: "a4", orientation });
   let started = false;
   for (const node of validNodes) {
-    const slices = await nodeToPdfPageSlices(node);
+    const slices = await nodeToPdfPageSlices(node, 2, orientation);
     for (const slice of slices) {
       if (started) pdf.addPage();
-      pdf.addImage(slice.dataUrl, "JPEG", 0, 0, PDF_PAGE_W_MM, slice.heightMm);
+      pdf.addImage(slice.dataUrl, "JPEG", 0, 0, slice.widthMm, slice.heightMm);
       started = true;
     }
   }
@@ -1006,7 +1010,7 @@ function SchoolCrest({ size = 64, ink = "#0f1115", paper = "#ffffff" }) {
     </svg>
   );
 }
-const PAGES = ["Dashboard","Mark Entry","Monthly Exams","Monthly Cards","Result Sheets","Report Cards","Students","Manage Requests","Settings","Audit Log","Download Centre"];
+const PAGES = ["Dashboard","Mark Entry","Monthly Exams","Monthly Cards","Monthly Slips","Result Sheets","Report Cards","Students","Manage Requests","Settings","Audit Log","Download Centre"];
 // Pages only the admin account can see/use. Teachers never see these in the sidebar.
 const ADMIN_ONLY_PAGES = ["Manage Requests", "Settings", "Audit Log"];
 // ─── APP ─────────────────────────────────────────────────────────────────────
@@ -1408,7 +1412,7 @@ export default function App() {
         </div>
         <nav style={{flex:1,padding:"8px 0"}}>
           {PAGES.filter(p => !ADMIN_ONLY_PAGES.includes(p) || role==="admin").map(p => {
-            const icons = {"Dashboard":"📊","Mark Entry":"📝","Monthly Exams":"📅","Monthly Cards":"🗂️","Result Sheets":"📋","Report Cards":"🎓","Students":"👥","Manage Requests":"🛂","Settings":"⚙️","Audit Log":"🕓","Download Centre":"📥"};
+            const icons = {"Dashboard":"📊","Mark Entry":"📝","Monthly Exams":"📅","Monthly Cards":"🗂️","Monthly Slips":"🎫","Result Sheets":"📋","Report Cards":"🎓","Students":"👥","Manage Requests":"🛂","Settings":"⚙️","Audit Log":"🕓","Download Centre":"📥"};
             const pendingCount = p==="Manage Requests" ? changeRequests.filter(r=>r.status==="pending").length : 0;
             return (
               <button key={p} onClick={()=>setPage(p)}
@@ -1440,6 +1444,7 @@ export default function App() {
           {page==="Mark Entry" && <MarkEntry {...props} />}
           {page==="Monthly Exams" && <MonthlyExams {...props} />}
           {page==="Monthly Cards" && <MonthlyCards {...props} />}
+          {page==="Monthly Slips" && <MonthlySlips {...props} />}
           {page==="Result Sheets" && <ResultSheets {...props} />}
           {page==="Report Cards" && <ReportCards {...props} />}
           {page==="Students" && <Students {...props} />}
@@ -1476,6 +1481,30 @@ export default function App() {
             page-break-inside: avoid;
             break-inside: avoid;
           }
+          /* Monthly Slips: each "page" of up to 9 slips (3x3) prints as one
+             landscape A4 sheet -- a fixed 8cm x 6cm slip needs a wider page
+             than portrait A4 to fit 3 across, so this page only switches
+             orientation for these specific sheets, not the whole document. */
+          .monthly-slip-page {
+            page: monthly-slips-landscape;
+            page-break-after: always;
+            break-after: page;
+            page-break-inside: avoid;
+            break-inside: avoid;
+          }
+          .monthly-slip-page:last-child {
+            page-break-after: auto;
+            break-after: auto;
+          }
+        }
+        @page monthly-slips-landscape { size: A4 landscape; margin: 5mm; }
+        .monthly-slip-page {
+          display: grid;
+          grid-template-columns: repeat(3, 8cm);
+          grid-auto-rows: 6cm;
+          gap: 3mm;
+          justify-content: center;
+          margin: 0 auto 10mm;
         }
         /* Screen preview: stack report cards as plain blocks (not flex) so
            the same page-break rules above apply predictably when printed. */
@@ -2757,6 +2786,209 @@ function TermlyMonthlyCard({ school, student, monthData, term, year, cls, isLowe
       <div style={{borderTop:"2px solid #e5e7eb",padding:"10px 16px",background:"#f8fafc",fontSize:13,lineHeight:2}}>
         <div><b>Class Teacher's Comment:</b> <span style={{fontWeight:700,color:"#1d4ed8"}}>{comments.teacher || ".............................................................................."}</span> <b>Sign:</b> ......................</div>
         <div><b>Head Teacher's Comment:</b> <span style={{fontWeight:700,fontStyle:"italic",color:"#dc2626"}}>{comments.head || ".............................................................................."}</span> <b>Sign:</b> ......................</div>
+      </div>
+    </div>
+  );
+}
+// ─── MONTHLY SLIPS ───────────────────────────────────────────────────────────
+// A pocket-sized version of the Monthly Card -- same school header, pupil
+// info, and full months/subjects table, just without the two comment lines,
+// printed at an exact 8cm x 6cm so many can be cut out per pupil per page.
+function MonthlySlips({ students, monthlyMarks, bands, divisions, school }) {
+  const [cls, setCls] = useState("P4");
+  const [term, setTerm] = useState("Term I");
+  const [year, setYear] = useState(school.year||String(new Date().getFullYear()));
+  const [search, setSearch] = useState("");
+  const [pdfBusy, setPdfBusy] = useState(false);
+  const pagesWrapRef = useRef(null);
+  const isLower = LOWER_CLASSES.includes(cls);
+  const subjects = isLower ? LOWER_MONTHLY_SUBJECTS : MONTHLY_SUBJECTS;
+  const tk = `${term}__${year}`;
+  const months = TERM_MONTHS[term] || [];
+  const classStudents = useMemo(()=>
+    students.filter(s=>s.className===cls&&s.name.toLowerCase().includes(search.toLowerCase())).sort((a,b)=>a.name.localeCompare(b.name)),
+    [students, cls, search]
+  );
+  const allClassStudents = useMemo(()=>students.filter(s=>s.className===cls),[students,cls]);
+  // Identical computation to Monthly Cards (same source data, same months/
+  // subjects/positions) so the slip's numbers always match the full card.
+  const allMonthPositions = useMemo(()=>{
+    const result = {};
+    months.forEach(month => {
+      const allRows = allClassStudents.map(s=>{
+        const m = monthlyMarks[s.id]?.[tk]?.[month] || {};
+        const totMk = subjects.reduce((a,sub)=>a+(m[sub]?.mk??0),0);
+        let totAgg = null;
+        if (!isLower) {
+          const perSub = subjects.map(sub=>{
+            const mk = m[sub]?.mk;
+            const isX = (mk===undefined||mk===null);
+            return { mk, isX, agg: isX ? undefined : aggOf(mk, bands) };
+          });
+          const hasX = perSub.some(p=>p.isX);
+          totAgg = hasX ? null : perSub.reduce((a,p)=>a+(p.agg??0),0);
+        }
+        return { id:s.id, totMk, totAgg };
+      });
+      const ranks = rankWithTies(allRows.map(r=>r.totMk>0?r.totMk:null), allRows.map(r=>typeof r.totAgg==="number"?r.totAgg:null));
+      result[month] = {};
+      allRows.forEach((r,i)=>{ result[month][r.id] = ranks[i]; });
+    });
+    return result;
+  }, [allClassStudents, monthlyMarks, tk, months, subjects, isLower, bands]);
+  const cardData = useMemo(()=> classStudents.map(s=>{
+    const monthData = months.map(month=>{
+      const m = monthlyMarks[s.id]?.[tk]?.[month] || {};
+      const perSub = subjects.map(sub=>{
+        const mk = m[sub]?.mk;
+        const isX = (mk===undefined||mk===null);
+        const agg = (!isLower && !isX) ? aggOf(mk, bands) : undefined;
+        return { sub, mk, agg, isX };
+      });
+      const anyEntered = perSub.some(p => !p.isX);
+      const hasX = !isLower && anyEntered && perSub.some(p => p.isX);
+      const totMk = perSub.reduce((a,p)=>a+(p.mk??0),0);
+      const totAgg = isLower ? null : (hasX ? "X" : perSub.reduce((a,p)=>a+(p.agg??0),0));
+      const div = (!isLower && !hasX && totAgg!==null) ? divisionOf(totAgg, 4, divisions) : (hasX ? "X" : null);
+      const pos = allMonthPositions[month]?.[s.id];
+      return { month, perSub, totMk, totAgg, div, pos, hasX };
+    });
+    return { s, monthData };
+  }), [classStudents, months, monthlyMarks, tk, subjects, bands, divisions, isLower, allMonthPositions]);
+  // Split into pages of 9 (3x3) so print and PDF download both produce
+  // exactly the same fixed layout: one landscape A4 sheet per 9 pupils.
+  const slipPages = useMemo(() => {
+    const pages = [];
+    for (let i = 0; i < cardData.length; i += 9) pages.push(cardData.slice(i, i + 9));
+    return pages;
+  }, [cardData]);
+  return (
+    <div>
+      <div className="no-print" style={{display:"flex",gap:10,marginBottom:16,flexWrap:"wrap",alignItems:"flex-end",justifyContent:"space-between"}}>
+        <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"flex-end"}}>
+          <Sel label="Class" value={cls} onChange={v=>setCls(v)} opts={ALL_CLASSES}/>
+          <Sel label="Term" value={term} onChange={v=>setTerm(v)} opts={TERMS}/>
+          <div><label style={lbl}>Year</label><input type="number" value={year} onChange={e=>setYear(e.target.value)} style={{...inp,width:90}}/></div>
+          <div><label style={lbl}>Search Pupil</label><input value={search} onChange={e=>setSearch(e.target.value)} style={{...inp,width:160}} placeholder="Filter by name..."/></div>
+        </div>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+          <button disabled={pdfBusy} onClick={async()=>{
+            setPdfBusy(true);
+            try {
+              const pageNodes = Array.from(pagesWrapRef.current?.querySelectorAll(".monthly-slip-page") || []);
+              await downloadNodesAsPdf(pageNodes, `${safeFileName(cls)}_${safeFileName(term)}_${year}_Monthly_Slips.pdf`, "landscape");
+            } finally { setPdfBusy(false); }
+          }} style={pdfBusy?btnPdfBusy:btnPdf}>{pdfBusy?"⏳ Generating...":"📕 Download PDF"}</button>
+          <button onClick={()=>window.print()} style={btnPrimary}>🖨️ Print All Slips</button>
+        </div>
+      </div>
+      <div className="no-print" style={{fontSize:12,color:"#6b7280",marginBottom:14}}>
+        Each slip is exactly 8cm x 6cm -- the same months/subjects/marks as the Monthly Card, just without the comment lines. 9 slips (3x3) print per landscape A4 page, ready to cut out.
+      </div>
+      {classStudents.length===0 && (
+        <div style={{background:"white",borderRadius:12,padding:40,textAlign:"center",color:"#9ca3af",border:"1px solid #e5e7eb"}}>No students in {cls}.</div>
+      )}
+      <div ref={pagesWrapRef}>
+        {slipPages.map((pageItems, pIdx) => (
+          <div key={pIdx} className="monthly-slip-page">
+            {pageItems.map(({s, monthData})=>(
+              <MonthlySlip key={s.id} school={school} student={s} monthData={monthData}
+                term={term} year={year} cls={cls} isLower={isLower} subjects={subjects}/>
+            ))}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+function MonthlySlip({ school, student, monthData, term, year, cls, isLower, subjects }) {
+  const s = student;
+  const outerRef = useRef(null);
+  const innerRef = useRef(null);
+  const [scale, setScale] = useState(1);
+  // The slip's content is laid out at its own natural size first, then
+  // measured and shrunk (uniformly, so nothing looks stretched) to fit
+  // exactly inside the fixed 8cm x 6cm box -- re-measured whenever the
+  // pupil's data changes, since a different number of months/subjects
+  // changes the table's natural size.
+  useEffect(() => {
+    const outer = outerRef.current, inner = innerRef.current;
+    if (!outer || !inner) return;
+    const fit = () => {
+      const ow = outer.clientWidth, oh = outer.clientHeight;
+      const iw = inner.scrollWidth, ih = inner.scrollHeight;
+      if (ow && oh && iw && ih) setScale(Math.min(ow / iw, oh / ih, 1));
+    };
+    const raf = requestAnimationFrame(fit);
+    return () => cancelAnimationFrame(raf);
+  }, [monthData, subjects, isLower, term, year, s.name, cls]);
+  return (
+    <div ref={outerRef} className="monthly-slip" style={{width:"8cm",height:"6cm",overflow:"hidden",background:"white",border:"1px dashed #1e3a6e",borderRadius:4,display:"flex",alignItems:"center",justifyContent:"center"}}>
+      <div ref={innerRef} style={{transform:`scale(${scale})`,transformOrigin:"center center",width:"max-content"}}>
+        <div style={{background:"linear-gradient(135deg,#1e3a6e 0%,#1e40af 100%)",color:"white",padding:"5px 10px",textAlign:"center"}}>
+          <div style={{fontWeight:800,fontSize:12,letterSpacing:0.5,whiteSpace:"nowrap"}}>{school.name}</div>
+          {school.motto && <div style={{fontSize:8,opacity:0.75,fontStyle:"italic",whiteSpace:"nowrap"}}>"{school.motto}"</div>}
+          <div style={{marginTop:3,display:"inline-block",background:"rgba(255,255,255,0.18)",borderRadius:10,padding:"2px 10px",fontSize:8,fontWeight:700,whiteSpace:"nowrap"}}>
+            MONTHLY TESTS - {term.toUpperCase()} {year}
+          </div>
+        </div>
+        <div style={{background:"#fefce8",borderBottom:"1px solid #fde68a",padding:"4px 10px",display:"flex",gap:10,fontSize:9,whiteSpace:"nowrap"}}>
+          <div><b>NAME:</b> {s.name}</div>
+          <div><b>CLASS:</b> {cls}</div>
+          <div><b>YEAR:</b> {year}</div>
+        </div>
+        <table style={{fontSize:8,borderCollapse:"collapse"}}>
+          <thead>
+            <tr style={{background:"#1e3a6e",color:"white"}}>
+              <th style={{...td,color:"white",background:"#1e3a6e",textAlign:"left",verticalAlign:"middle",fontSize:7,padding:"2px 4px"}} rowSpan={2}>MONTH</th>
+              {subjects.map(sub=>(
+                <th key={sub} style={{...td,color:"white",background:"#1e3a6e",fontSize:7,padding:"2px 4px"}} colSpan={isLower?1:2}>
+                  {sub}{isLower&&lowerSubjectMax(sub)!==100?` /${lowerSubjectMax(sub)}`:""}
+                </th>
+              ))}
+              <th style={{...td,color:"white",background:"#1e3a6e",verticalAlign:"middle",fontSize:7,padding:"2px 4px"}} rowSpan={2}>TOT MK</th>
+              {!isLower && <>
+                <th style={{...td,color:"white",background:"#1e3a6e",verticalAlign:"middle",fontSize:7,padding:"2px 4px"}} rowSpan={2}>AGG</th>
+                <th style={{...td,color:"white",background:"#1e3a6e",verticalAlign:"middle",fontSize:7,padding:"2px 4px"}} rowSpan={2}>DIV</th>
+              </>}
+              <th style={{...td,color:"white",background:"#1e3a6e",verticalAlign:"middle",fontSize:7,padding:"2px 4px"}} rowSpan={2}>POS</th>
+            </tr>
+            <tr style={{background:"#2563eb",color:"white"}}>
+              {subjects.map(sub=>(
+                isLower
+                  ? <th key={sub+"mk"} style={{...td,background:"#3b82f6",color:"white",fontSize:6,padding:"2px 3px"}}>MK</th>
+                  : <React.Fragment key={sub}>
+                      <th style={{...td,background:"#3b82f6",color:"white",fontSize:6,padding:"2px 3px"}}>MK</th>
+                      <th style={{...td,background:"#60a5fa",color:"white",fontSize:6,padding:"2px 3px"}}>AGG</th>
+                    </React.Fragment>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {monthData.map(({ month, perSub, totMk, totAgg, div, pos, hasX }, mIdx)=>{
+              const rowBg = mIdx%2===0?"#ffffff":"#f8fafc";
+              return (
+                <tr key={month} style={{background:rowBg}}>
+                  <td style={{...td,fontWeight:800,fontSize:7,background:rowBg,color:"#1e3a6e",textAlign:"left",padding:"2px 4px",whiteSpace:"nowrap"}}>{month}</td>
+                  {perSub.map(p=>(
+                    isLower
+                      ? <td key={p.sub+"mk"} style={{...td,background:rowBg,fontWeight:p.mk!==undefined?600:400,color:p.mk!==undefined?"#1f2937":"#9ca3af",fontSize:7,padding:"2px 3px"}}>{p.mk!==undefined?p.mk:"-"}</td>
+                      : <React.Fragment key={p.sub}>
+                          <td style={{...td,background:rowBg,fontWeight:p.mk!==undefined?600:400,color:p.mk!==undefined?"#1f2937":"#9ca3af",fontSize:7,padding:"2px 3px"}}>{p.mk!==undefined?p.mk:"-"}</td>
+                          <td style={{...td,background:"#fff7ed",fontWeight:(p.isX||p.agg!==undefined)?700:400,color:p.isX?"#dc2626":(p.agg!==undefined?"#92400e":"#9ca3af"),fontSize:6,padding:"2px 3px"}}>{hasX&&p.isX?"X":(p.agg!==undefined?p.agg:"-")}</td>
+                        </React.Fragment>
+                  ))}
+                  <td style={{...td,fontWeight:700,background:"#ede9fe",color:"#4c1d95",fontSize:7,padding:"2px 4px"}}>{totMk>0?totMk:"-"}</td>
+                  {!isLower && <>
+                    <td style={{...td,background:"#ede9fe",fontWeight:700,color:hasX?"#dc2626":"#4c1d95",fontSize:7,padding:"2px 3px"}}>{hasX?"X":(totAgg>0?totAgg:"-")}</td>
+                    <td style={{...td,fontWeight:700,color:hasX?"#dc2626":"#1e40af",fontSize:7,padding:"2px 3px"}}>{hasX?"X":(totMk>0?div:"-")}</td>
+                  </>}
+                  <td style={{...td,fontSize:7,padding:"2px 3px"}}>{pos!=="-"&&pos?pos:"-"}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
       </div>
     </div>
   );
