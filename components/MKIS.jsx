@@ -850,8 +850,11 @@ function expandOverflowForCapture(root) {
 }
 // Renders one DOM node to a canvas, then slices that canvas into as many
 // A4-width "pages" as its height needs -- so tall tables/lists flow cleanly
-// onto additional pages instead of getting cut off.
-async function nodeToPdfPageSlices(node, scale = 2, orientation = "portrait") {
+// onto additional pages instead of getting cut off. scale=3 (rather than
+// the default 1x) oversamples the capture so small table text and digits
+// stay sharp once placed into the PDF, instead of looking soft/blurry when
+// the page is zoomed in or printed at full size.
+async function nodeToPdfPageSlices(node, scale = 3, orientation = "portrait") {
   const pageWmm = orientation === "landscape" ? PDF_PAGE_H_MM : PDF_PAGE_W_MM;
   const pageHmm = orientation === "landscape" ? PDF_PAGE_W_MM : PDF_PAGE_H_MM;
   const restore = expandOverflowForCapture(node);
@@ -878,7 +881,11 @@ async function nodeToPdfPageSlices(node, scale = 2, orientation = "portrait") {
     sliceCanvas.width = canvas.width;
     sliceCanvas.height = sliceHeightPx;
     sliceCanvas.getContext("2d").drawImage(canvas, 0, offset, canvas.width, sliceHeightPx, 0, 0, canvas.width, sliceHeightPx);
-    slices.push({ dataUrl: sliceCanvas.toDataURL("image/jpeg", 0.95), widthMm: pageWmm, heightMm: sliceHeightPx / pxPerMm });
+    // PNG instead of JPEG: this content is almost entirely flat-colour text,
+    // lines and table borders rather than photos, so a lossless format keeps
+    // edges crisp -- JPEG's compression was the main thing softening/blurring
+    // small digits and thin borders in the downloaded PDF before.
+    slices.push({ dataUrl: sliceCanvas.toDataURL("image/png"), widthMm: pageWmm, heightMm: sliceHeightPx / pxPerMm });
     offset += sliceHeightPx;
   }
   return slices;
@@ -891,13 +898,13 @@ async function nodeToPdfPageSlices(node, scale = 2, orientation = "portrait") {
 async function downloadNodesAsPdf(nodes, filename, orientation = "portrait") {
   const validNodes = nodes.filter(Boolean);
   if (!validNodes.length) return;
-  const pdf = new jsPDF({ unit: "mm", format: "a4", orientation });
+  const pdf = new jsPDF({ unit: "mm", format: "a4", orientation, compress: true });
   let started = false;
   for (const node of validNodes) {
-    const slices = await nodeToPdfPageSlices(node, 2, orientation);
+    const slices = await nodeToPdfPageSlices(node, 3, orientation);
     for (const slice of slices) {
       if (started) pdf.addPage();
-      pdf.addImage(slice.dataUrl, "JPEG", 0, 0, slice.widthMm, slice.heightMm);
+      pdf.addImage(slice.dataUrl, "PNG", 0, 0, slice.widthMm, slice.heightMm);
       started = true;
     }
   }
@@ -2960,9 +2967,9 @@ function MonthlySlip({ school, student, monthData, term, year, cls, isLower, sub
         </div>
       </div>
       <div style={{height:16,background:"#fefce8",borderBottom:"1px solid #fde68a",padding:"1px 8px",display:"flex",alignItems:"center",gap:8,fontSize:9,whiteSpace:"nowrap",overflow:"hidden"}}>
-        <div style={{overflow:"hidden",textOverflow:"ellipsis",flexShrink:1,minWidth:0}}><b>NAME:</b> {s.name}</div>
-        <div style={{flexShrink:0}}><b>CLASS:</b> {cls}</div>
-        <div style={{flexShrink:0}}><b>YR:</b> {year}</div>
+        <div style={{overflow:"hidden",textOverflow:"ellipsis",flexShrink:1,minWidth:0}}><b>NAME:</b> <b>{s.name}</b></div>
+        <div style={{flexShrink:0}}><b>CLASS:</b> <b>{cls}</b></div>
+        <div style={{flexShrink:0}}><b>YR:</b> <b>{year}</b></div>
       </div>
       <table style={{width:"100%",borderCollapse:"collapse"}}>
         <thead>
