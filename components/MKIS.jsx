@@ -857,7 +857,14 @@ async function nodeToPdfPageSlices(node, scale = 2, orientation = "portrait") {
   const restore = expandOverflowForCapture(node);
   let canvas;
   try {
-    canvas = await html2canvas(node, { scale, useCORS: true, backgroundColor: "#ffffff" });
+    canvas = await html2canvas(node, {
+      scale, useCORS: true, backgroundColor: "#ffffff",
+      // Some captured sections (e.g. Monthly Exams) embed their own on-screen
+      // toolbar buttons (Save/Lock, sort toggle) right inside the block being
+      // captured. Hide anything marked .no-print in the captured clone only,
+      // so the PDF shows just the data, matching what window.print() shows.
+      onclone: (doc) => { doc.querySelectorAll(".no-print").forEach(el => { el.style.display = "none"; }); },
+    });
   } finally {
     restore();
   }
@@ -2206,6 +2213,8 @@ function MonthlyExams({ students, monthlyMarks, updateMonthlyMark, requestOrAppl
   const [term, setTerm] = useState("Term I");
   const [year, setYear] = useState(school.year||String(new Date().getFullYear()));
   const [pendingToast, setPendingToast] = useState("");
+  const [pdfBusy, setPdfBusy] = useState(false);
+  const monthBlocksRef = useRef(null);
   const months = TERM_MONTHS[term];
   const tk = `${term}__${year}`;
   const isLower = LOWER_CLASSES.includes(cls);
@@ -2357,6 +2366,13 @@ function MonthlyExams({ students, monthlyMarks, updateMonthlyMark, requestOrAppl
           <button onClick={()=>setShowBulkMonthly(v=>!v)} style={btnWarning}>📋 Bulk Mark Sheet</button>
           <button onClick={()=>exportMonthlyExcel({ school, cls, term, year, isLower, subjects, monthsData: getMonthsData() })} style={btnExcel}>📊 Download Excel</button>
           <button onClick={()=>exportMonthlyWord({ school, cls, term, year, isLower, subjects, monthsData: getMonthsData() })} style={btnWord}>📄 Download Word</button>
+          <button disabled={pdfBusy} onClick={async()=>{
+            setPdfBusy(true);
+            try {
+              const nodes = Array.from(monthBlocksRef.current?.querySelectorAll(".month-block-sheet") || []);
+              await downloadNodesAsPdf(nodes, `${safeFileName(cls)}_${safeFileName(term)}_${year}_Monthly_Results.pdf`);
+            } finally { setPdfBusy(false); }
+          }} style={pdfBusy?btnPdfBusy:btnPdf}>{pdfBusy?"⏳ Generating...":"📕 Download PDF"}</button>
           <button onClick={()=>window.print()} style={btnPrimary}>🖨️ Print</button>
         </div>
       </div>
@@ -2456,13 +2472,15 @@ function MonthlyExams({ students, monthlyMarks, updateMonthlyMark, requestOrAppl
           })()}
         </div>
       )}
-      {months.map(month=>(
-        <MonthBlock key={month} month={month} term={term} year={year} cls={cls}
-          classStudents={classStudents} monthlyMarks={monthlyMarks} role={role}
-          updateMonthlyMark={updateMonthlyMark} requestOrApplyMonthlyMark={handleMarkChange} bands={bands} divisions={divisions} tk={tk}
-          lockedMonthly={lockedMonthly} lockMonthlyEntry={lockMonthlyEntry} unlockMonthlyEntry={unlockMonthlyEntry}
-          changeRequests={changeRequests} requestUnlockMonthly={requestUnlockMonthly} />
-      ))}
+      <div ref={monthBlocksRef}>
+        {months.map(month=>(
+          <MonthBlock key={month} month={month} term={term} year={year} cls={cls}
+            classStudents={classStudents} monthlyMarks={monthlyMarks} role={role}
+            updateMonthlyMark={updateMonthlyMark} requestOrApplyMonthlyMark={handleMarkChange} bands={bands} divisions={divisions} tk={tk}
+            lockedMonthly={lockedMonthly} lockMonthlyEntry={lockMonthlyEntry} unlockMonthlyEntry={unlockMonthlyEntry}
+            changeRequests={changeRequests} requestUnlockMonthly={requestUnlockMonthly} />
+        ))}
+      </div>
     </div>
   );
 }
@@ -2508,7 +2526,7 @@ function MonthBlock({ month, cls, classStudents, monthlyMarks, updateMonthlyMark
   const handleRequestUnlock = () => requestUnlockMonthly(cls, tk, month);
   const [sortByPos, setSortByPos] = useState(false);
   return (
-    <div style={{marginBottom:24}}>
+    <div className="month-block-sheet" style={{marginBottom:24}}>
       <div style={{background:"#1e3a6e",color:"white",padding:"10px 16px",borderRadius:"8px 8px 0 0",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
         <span style={{fontWeight:700,fontSize:14}}>{month} - {term} {year}</span>
         <div className="no-print" style={{display:"flex",alignItems:"center",gap:8}}>
@@ -2901,95 +2919,88 @@ function MonthlySlips({ students, monthlyMarks, bands, divisions, school }) {
     </div>
   );
 }
+// Short labels for the slip's subject-header row -- the full subject names
+// (especially "READING"/"WRITING"/"LIT I"/"LIT II") are too wide to fit
+// across a 8cm-wide card alongside every other column, so the slip shows a
+// compact code here while every number underneath is still looked up from
+// the real subject key, so the data itself is unaffected.
+const SLIP_SUBJECT_LABEL = { "LIT I":"L1", "LIT II":"L2", "READING":"RD", "WRITING":"WR", "MATHS":"MTH" };
+const slipSubjectLabel = (sub) => SLIP_SUBJECT_LABEL[sub] || sub;
 function MonthlySlip({ school, student, monthData, term, year, cls, isLower, subjects }) {
   const s = student;
-  const outerRef = useRef(null);
-  const innerRef = useRef(null);
-  const [scale, setScale] = useState(1);
-  // The slip's content is laid out at its own natural size first, then
-  // measured and shrunk (uniformly, so nothing looks stretched) to fit
-  // exactly inside the fixed 8cm x 6cm box -- re-measured whenever the
-  // pupil's data changes, since a different number of months/subjects
-  // changes the table's natural size.
-  useEffect(() => {
-    const outer = outerRef.current, inner = innerRef.current;
-    if (!outer || !inner) return;
-    const fit = () => {
-      const ow = outer.clientWidth, oh = outer.clientHeight;
-      const iw = inner.scrollWidth, ih = inner.scrollHeight;
-      if (ow && oh && iw && ih) setScale(Math.min(ow / iw, oh / ih, 1));
-    };
-    const raf = requestAnimationFrame(fit);
-    return () => cancelAnimationFrame(raf);
-  }, [monthData, subjects, isLower, term, year, s.name, cls]);
+  // Deliberately no motto and no JS-measured/transform-scaled content here:
+  // every size below is a fixed value chosen to fit the real 8cm x 6cm card
+  // (worst case being an upper-class card with 13 columns) so the same
+  // markup renders identically on screen, in print, and in the PDF capture
+  // -- a dynamic CSS transform was tried before and produced a different,
+  // sometimes clipped result specifically when html2canvas captured it for
+  // PDF download, since canvas-based screenshot tools don't always resolve
+  // CSS transforms the same way the live browser paints them.
   return (
-    <div ref={outerRef} className="monthly-slip" style={{width:"8cm",height:"6cm",overflow:"hidden",background:"white",border:"1px dashed #1e3a6e",borderRadius:4,display:"flex",alignItems:"center",justifyContent:"center"}}>
-      <div ref={innerRef} style={{transform:`scale(${scale})`,transformOrigin:"center center",width:"max-content"}}>
-        <div style={{background:"linear-gradient(135deg,#1e3a6e 0%,#1e40af 100%)",color:"white",padding:"5px 10px",textAlign:"center"}}>
-          <div style={{fontWeight:800,fontSize:12,letterSpacing:0.5,whiteSpace:"nowrap"}}>{school.name}</div>
-          {school.motto && <div style={{fontSize:8,opacity:0.75,fontStyle:"italic",whiteSpace:"nowrap"}}>"{school.motto}"</div>}
-          <div style={{marginTop:3,display:"inline-block",background:"rgba(255,255,255,0.18)",borderRadius:10,padding:"2px 10px",fontSize:8,fontWeight:700,whiteSpace:"nowrap"}}>
-            MONTHLY TESTS - {term.toUpperCase()} {year}
-          </div>
+    <div className="monthly-slip" style={{width:"8cm",height:"6cm",overflow:"hidden",background:"white",border:"1px dashed #1e3a6e",borderRadius:4}}>
+      <div style={{background:"linear-gradient(135deg,#1e3a6e 0%,#1e40af 100%)",color:"white",padding:"3px 8px",textAlign:"center"}}>
+        <div style={{fontWeight:800,fontSize:11,letterSpacing:0.3,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{school.name}</div>
+        <div style={{marginTop:2,display:"inline-block",background:"rgba(255,255,255,0.18)",borderRadius:8,padding:"1px 8px",fontSize:8,fontWeight:700,whiteSpace:"nowrap"}}>
+          MONTHLY TESTS - {term.toUpperCase()} {year}
         </div>
-        <div style={{background:"#fefce8",borderBottom:"1px solid #fde68a",padding:"4px 10px",display:"flex",gap:10,fontSize:9,whiteSpace:"nowrap"}}>
-          <div><b>NAME:</b> {s.name}</div>
-          <div><b>CLASS:</b> {cls}</div>
-          <div><b>YEAR:</b> {year}</div>
-        </div>
-        <table style={{fontSize:8,borderCollapse:"collapse"}}>
-          <thead>
-            <tr style={{background:"#1e3a6e",color:"white"}}>
-              <th style={{...td,color:"white",background:"#1e3a6e",textAlign:"left",verticalAlign:"middle",fontSize:7,padding:"2px 4px"}} rowSpan={2}>MONTH</th>
-              {subjects.map(sub=>(
-                <th key={sub} style={{...td,color:"white",background:"#1e3a6e",fontSize:7,padding:"2px 4px"}} colSpan={isLower?1:2}>
-                  {sub}{isLower&&lowerSubjectMax(sub)!==100?` /${lowerSubjectMax(sub)}`:""}
-                </th>
-              ))}
-              <th style={{...td,color:"white",background:"#1e3a6e",verticalAlign:"middle",fontSize:7,padding:"2px 4px"}} rowSpan={2}>TOT MK</th>
-              {!isLower && <>
-                <th style={{...td,color:"white",background:"#1e3a6e",verticalAlign:"middle",fontSize:7,padding:"2px 4px"}} rowSpan={2}>AGG</th>
-                <th style={{...td,color:"white",background:"#1e3a6e",verticalAlign:"middle",fontSize:7,padding:"2px 4px"}} rowSpan={2}>DIV</th>
-              </>}
-              <th style={{...td,color:"white",background:"#1e3a6e",verticalAlign:"middle",fontSize:7,padding:"2px 4px"}} rowSpan={2}>POS</th>
-            </tr>
-            <tr style={{background:"#2563eb",color:"white"}}>
-              {subjects.map(sub=>(
-                isLower
-                  ? <th key={sub+"mk"} style={{...td,background:"#3b82f6",color:"white",fontSize:6,padding:"2px 3px"}}>MK</th>
-                  : <React.Fragment key={sub}>
-                      <th style={{...td,background:"#3b82f6",color:"white",fontSize:6,padding:"2px 3px"}}>MK</th>
-                      <th style={{...td,background:"#60a5fa",color:"white",fontSize:6,padding:"2px 3px"}}>AGG</th>
-                    </React.Fragment>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {monthData.map(({ month, perSub, totMk, totAgg, div, pos, hasX }, mIdx)=>{
-              const rowBg = mIdx%2===0?"#ffffff":"#f8fafc";
-              return (
-                <tr key={month} style={{background:rowBg}}>
-                  <td style={{...td,fontWeight:800,fontSize:7,background:rowBg,color:"#1e3a6e",textAlign:"left",padding:"2px 4px",whiteSpace:"nowrap"}}>{month}</td>
-                  {perSub.map(p=>(
-                    isLower
-                      ? <td key={p.sub+"mk"} style={{...td,background:rowBg,fontWeight:p.mk!==undefined?600:400,color:p.mk!==undefined?"#1f2937":"#9ca3af",fontSize:7,padding:"2px 3px"}}>{p.mk!==undefined?p.mk:"-"}</td>
-                      : <React.Fragment key={p.sub}>
-                          <td style={{...td,background:rowBg,fontWeight:p.mk!==undefined?600:400,color:p.mk!==undefined?"#1f2937":"#9ca3af",fontSize:7,padding:"2px 3px"}}>{p.mk!==undefined?p.mk:"-"}</td>
-                          <td style={{...td,background:"#fff7ed",fontWeight:(p.isX||p.agg!==undefined)?700:400,color:p.isX?"#dc2626":(p.agg!==undefined?"#92400e":"#9ca3af"),fontSize:6,padding:"2px 3px"}}>{hasX&&p.isX?"X":(p.agg!==undefined?p.agg:"-")}</td>
-                        </React.Fragment>
-                  ))}
-                  <td style={{...td,fontWeight:700,background:"#ede9fe",color:"#4c1d95",fontSize:7,padding:"2px 4px"}}>{totMk>0?totMk:"-"}</td>
-                  {!isLower && <>
-                    <td style={{...td,background:"#ede9fe",fontWeight:700,color:hasX?"#dc2626":"#4c1d95",fontSize:7,padding:"2px 3px"}}>{hasX?"X":(totAgg>0?totAgg:"-")}</td>
-                    <td style={{...td,fontWeight:700,color:hasX?"#dc2626":"#1e40af",fontSize:7,padding:"2px 3px"}}>{hasX?"X":(totMk>0?div:"-")}</td>
-                  </>}
-                  <td style={{...td,fontSize:7,padding:"2px 3px"}}>{pos!=="-"&&pos?pos:"-"}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
       </div>
+      <div style={{background:"#fefce8",borderBottom:"1px solid #fde68a",padding:"2px 8px",display:"flex",gap:8,fontSize:9,whiteSpace:"nowrap",overflow:"hidden"}}>
+        <div style={{overflow:"hidden",textOverflow:"ellipsis",flexShrink:1,minWidth:0}}><b>NAME:</b> {s.name}</div>
+        <div style={{flexShrink:0}}><b>CLS:</b> {cls}</div>
+        <div style={{flexShrink:0}}><b>YR:</b> {year}</div>
+      </div>
+      <table style={{width:"100%",fontSize:9,borderCollapse:"collapse",tableLayout:"fixed"}}>
+        <thead>
+          <tr style={{background:"#1e3a6e",color:"white"}}>
+            <th style={{...td,color:"white",background:"#1e3a6e",textAlign:"left",verticalAlign:"middle",fontSize:8,padding:"1px 3px"}} rowSpan={2}>MTH</th>
+            {subjects.map(sub=>(
+              <th key={sub} style={{...td,color:"white",background:"#1e3a6e",fontSize:8,padding:"1px 2px"}} colSpan={isLower?1:2}>
+                {slipSubjectLabel(sub)}
+              </th>
+            ))}
+            <th style={{...td,color:"white",background:"#1e3a6e",verticalAlign:"middle",fontSize:8,padding:"1px 2px"}} rowSpan={2}>TOT</th>
+            {!isLower && <>
+              <th style={{...td,color:"white",background:"#1e3a6e",verticalAlign:"middle",fontSize:8,padding:"1px 2px"}} rowSpan={2}>AGG</th>
+              <th style={{...td,color:"white",background:"#1e3a6e",verticalAlign:"middle",fontSize:8,padding:"1px 2px"}} rowSpan={2}>DIV</th>
+            </>}
+            <th style={{...td,color:"white",background:"#1e3a6e",verticalAlign:"middle",fontSize:8,padding:"1px 2px"}} rowSpan={2}>POS</th>
+          </tr>
+          <tr style={{background:"#2563eb",color:"white"}}>
+            {subjects.map(sub=>(
+              isLower
+                ? <th key={sub+"mk"} style={{...td,background:"#3b82f6",color:"white",fontSize:7,padding:"1px 2px"}}>MK</th>
+                : <React.Fragment key={sub}>
+                    <th style={{...td,background:"#3b82f6",color:"white",fontSize:7,padding:"1px 2px"}}>MK</th>
+                    <th style={{...td,background:"#60a5fa",color:"white",fontSize:7,padding:"1px 2px"}}>AG</th>
+                  </React.Fragment>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {monthData.map(({ month, perSub, totMk, totAgg, div, pos, hasX }, mIdx)=>{
+            const rowBg = mIdx%2===0?"#ffffff":"#f8fafc";
+            return (
+              <tr key={month} style={{background:rowBg}}>
+                <td style={{...td,fontWeight:800,fontSize:8,background:rowBg,color:"#1e3a6e",textAlign:"left",padding:"1px 3px"}}>{month}</td>
+                {perSub.map(p=>(
+                  isLower
+                    ? <td key={p.sub+"mk"} style={{...td,background:rowBg,fontWeight:p.mk!==undefined?700:400,color:p.mk!==undefined?"#1f2937":"#9ca3af",fontSize:9,padding:"1px 2px"}}>{p.mk!==undefined?p.mk:"-"}</td>
+                    : <React.Fragment key={p.sub}>
+                        <td style={{...td,background:rowBg,fontWeight:p.mk!==undefined?700:400,color:p.mk!==undefined?"#1f2937":"#9ca3af",fontSize:9,padding:"1px 2px"}}>{p.mk!==undefined?p.mk:"-"}</td>
+                        <td style={{...td,background:"#fff7ed",fontWeight:(p.isX||p.agg!==undefined)?700:400,color:p.isX?"#dc2626":(p.agg!==undefined?"#92400e":"#9ca3af"),fontSize:8,padding:"1px 2px"}}>{hasX&&p.isX?"X":(p.agg!==undefined?p.agg:"-")}</td>
+                      </React.Fragment>
+                ))}
+                <td style={{...td,fontWeight:700,background:"#ede9fe",color:"#4c1d95",fontSize:9,padding:"1px 2px"}}>{totMk>0?totMk:"-"}</td>
+                {!isLower && <>
+                  <td style={{...td,background:"#ede9fe",fontWeight:700,color:hasX?"#dc2626":"#4c1d95",fontSize:8,padding:"1px 2px"}}>{hasX?"X":(totAgg>0?totAgg:"-")}</td>
+                  <td style={{...td,fontWeight:700,color:hasX?"#dc2626":"#1e40af",fontSize:8,padding:"1px 2px"}}>{hasX?"X":(totMk>0?div:"-")}</td>
+                </>}
+                <td style={{...td,fontWeight:700,color:"#1e3a6e",fontSize:8,padding:"1px 2px"}}>{pos!=="-"&&pos?ordinal(pos):"-"}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
     </div>
   );
 }
