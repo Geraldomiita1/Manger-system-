@@ -1408,9 +1408,9 @@ export default function App() {
   }
   const props = { students, setStudents, termMarks, setTermMarks, monthlyMarks, setMonthlyMarks, bands, setBands, divisions, setDivisions, school, setSchool, accounts, setAccounts, initials, setInitials, updateTermMark, updateMonthlyMark, requestOrApplyTermMark, requestOrApplyMonthlyMark, addStudent, deleteStudent, forceRestoreData, promoteStudents, role, currentUser, changeRequests, submitChangeRequest, approveChangeRequest, rejectChangeRequest, lockedTerm, lockTermEntry, unlockTermEntry, lockedMonthly, lockMonthlyEntry, unlockMonthlyEntry, requestUnlockTerm, requestUnlockMonthly };
   return (
-    <div style={{display:"flex",minHeight:"100vh",fontFamily:"'Segoe UI',system-ui,sans-serif",background:"#f1f5f9"}}>
+    <div className="app-shell" style={{display:"flex",minHeight:"100vh",fontFamily:"'Segoe UI',system-ui,sans-serif",background:"#f1f5f9"}}>
       {/* SIDEBAR */}
-      <div style={{width:sideOpen?230:60,background:"linear-gradient(180deg,#1e3a6e 0%,#1e40af 100%)",color:"white",transition:"width 0.2s",overflow:"hidden",flexShrink:0,display:"flex",flexDirection:"column"}}>
+      <div className="no-print" style={{width:sideOpen?230:60,background:"linear-gradient(180deg,#1e3a6e 0%,#1e40af 100%)",color:"white",transition:"width 0.2s",overflow:"hidden",flexShrink:0,display:"flex",flexDirection:"column"}}>
         <div style={{padding:"16px 12px",borderBottom:"1px solid rgba(255,255,255,0.1)",display:"flex",alignItems:"center",gap:10}}>
           <div style={{width:36,height:36,borderRadius:"50%",background:"rgba(255,255,255,0.92)",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,padding:3,boxSizing:"border-box"}}>
             <SchoolCrest size={30} ink="#1e3a6e" paper="#ffffff"/>
@@ -1440,8 +1440,8 @@ export default function App() {
         </button>
       </div>
       {/* MAIN */}
-      <div style={{flex:1,overflow:"auto"}}>
-        <div style={{background:"white",padding:"12px 20px",borderBottom:"1px solid #e5e7eb",display:"flex",alignItems:"center",gap:12,position:"sticky",top:0,zIndex:10}}>
+      <div className="app-main" style={{flex:1,overflow:"auto"}}>
+        <div className="no-print" style={{background:"white",padding:"12px 20px",borderBottom:"1px solid #e5e7eb",display:"flex",alignItems:"center",gap:12,position:"sticky",top:0,zIndex:10}}>
           <button onClick={()=>setSideOpen(v=>!v)} style={{background:"none",border:"none",cursor:"pointer",fontSize:20,color:"#374151"}}>☰</button>
           <h1 style={{fontSize:18,fontWeight:700,color:"#1e3a6e",margin:0}}>{page}</h1>
           <div style={{marginLeft:"auto",fontSize:12,color:"#6b7280"}}>{school.name} - {school.year}</div>
@@ -1466,6 +1466,19 @@ export default function App() {
           @page { size: A4 portrait; margin: 8mm; }
           .no-print { display: none !important; }
           .page-break { page-break-after: always; }
+          /* The app's on-screen layout is a flex shell with the sidebar +
+             header pinned and the content area set to overflow:auto so it
+             scrolls independently. Browsers only reliably print whatever is
+             currently VISIBLE inside an overflow:auto container -- not the
+             rest of the content the user would otherwise have to scroll to
+             see -- which is exactly why printing used to produce what
+             looked like a screenshot of just the on-screen portion instead
+             of the full Marksheet/Report Card/etc. Switching to plain block
+             layout with overflow visible here lets the full content flow
+             and paginate normally across as many physical pages as it
+             needs, the way printing actually works. */
+          .app-shell { display: block !important; min-height: auto !important; }
+          .app-main { overflow: visible !important; }
           /* Report Card: every pupil's full card (school details, pupil
              info, subjects, grades, comments, signatures) stays together
              as one unbroken block, and each card starts a fresh page --
