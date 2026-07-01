@@ -2967,11 +2967,27 @@ function MonthlySlip({ school, student, monthData, term, year, cls, isLower, sub
       {/* Name / class / year strip */}
       <div style={{flexShrink:0,background:"#fefce8",borderBottom:"1px solid #fde68a",padding:"1px 8px",display:"flex",alignItems:"center",gap:6,whiteSpace:"nowrap",overflow:"hidden"}}>
         <span style={{flexShrink:1,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",fontSize:10}}>NAME: <span style={{fontWeight:800,fontStyle:"italic",fontSize:12}}>{s.name}</span></span>
-        <span style={{flexShrink:0,fontSize:9}}>CLASS: <span style={{fontWeight:700,fontStyle:"italic"}}>{cls}</span></span>
-        <span style={{flexShrink:0,fontSize:9}}>YR: <span style={{fontWeight:700,fontStyle:"italic"}}>{year}</span></span>
+        <span style={{flexShrink:0,fontSize:10}}>CLASS: <span style={{fontWeight:700,fontStyle:"italic"}}>{cls}</span></span>
+        <span style={{flexShrink:0,fontSize:10}}>YR: <span style={{fontWeight:700,fontStyle:"italic"}}>{year}</span></span>
       </div>
       {/* Marks table — flex:1 stretches it to fill all remaining height */}
       <table style={{flex:1,width:"100%",borderCollapse:"collapse",tableLayout:"fixed",display:"flex",flexDirection:"column"}}>
+        <colgroup>
+          {/* MTH column: wide enough for "February" at fontSize 8 */}
+          <col style={{width:"17%"}}/>
+          {/* subject columns split the middle */}
+          {subjects.map(sub=>(
+            isLower
+              ? <col key={sub} style={{width:`${52/subjects.length}%`}}/>
+              : <React.Fragment key={sub}><col style={{width:`${44/subjects.length}%`}}/><col style={{width:`${44/subjects.length}%`}}/></React.Fragment>
+          ))}
+          {/* TOT */}
+          <col style={{width:"8%"}}/>
+          {/* AGG + DIV (upper only) */}
+          {!isLower && <><col style={{width:"7%"}}/><col style={{width:"7%"}}/></>}
+          {/* POS: wide enough for "1st" suffix badge */}
+          <col style={{width:"11%"}}/>
+        </colgroup>
         <thead style={{display:"table",width:"100%",tableLayout:"fixed",flexShrink:0}}>
           <tr style={{background:"#1e3a6e",color:"white"}}>
             <th style={{...td,color:"white",background:"#1e3a6e",textAlign:"left",verticalAlign:"middle",fontSize:8,padding:"1px 2px",lineHeight:1}} rowSpan={2}>MTH</th>
@@ -3003,7 +3019,8 @@ function MonthlySlip({ school, student, monthData, term, year, cls, isLower, sub
             const rowBg = mIdx%2===0?"#ffffff":"#f0f4ff";
             return (
               <tr key={month} style={{background:rowBg,height:"33%"}}>
-                <td style={{...td,fontWeight:800,fontSize:12,background:mIdx%2===0?"#dbeafe":"#bfdbfe",color:"#1e3a6e",textAlign:"left",padding:"0 3px",verticalAlign:"middle"}}>{month}</td>
+                {/* Month name: smaller font so long names like "February" fit */}
+                <td style={{...td,fontWeight:800,fontSize:8,background:mIdx%2===0?"#dbeafe":"#bfdbfe",color:"#1e3a6e",textAlign:"left",padding:"0 2px",verticalAlign:"middle",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{month}</td>
                 {perSub.map(p=>(
                   isLower
                     ? <td key={p.sub+"mk"} style={{...td,background:rowBg,fontWeight:p.mk!==undefined?800:400,color:p.mk!==undefined?"#111827":"#9ca3af",fontSize:12,padding:"0 2px",verticalAlign:"middle"}}>{p.mk!==undefined?p.mk:"-"}</td>
@@ -3017,8 +3034,9 @@ function MonthlySlip({ school, student, monthData, term, year, cls, isLower, sub
                   <td style={{...td,background:mIdx%2===0?"#ede9fe":"#ddd6fe",fontWeight:800,color:hasX?"#dc2626":"#4c1d95",fontSize:12,padding:"0 2px",verticalAlign:"middle"}}>{hasX?"X":(totAgg>0?totAgg:"-")}</td>
                   <td style={{...td,fontWeight:800,color:hasX?"#dc2626":"#1e40af",fontSize:12,padding:"0 2px",verticalAlign:"middle"}}>{hasX?"X":(totMk>0?div:"-")}</td>
                 </>}
-                <td style={{...td,padding:"0 2px",verticalAlign:"middle"}}>
-                  <PositionBadge pos={pos} color="#1e3a6e" size={12}/>
+                {/* POS: badge with suffix (e.g. "1st") at smaller size so it fits */}
+                <td style={{...td,padding:"0 1px",verticalAlign:"middle"}}>
+                  <PositionBadge pos={pos} color="#1e3a6e" size={9}/>
                 </td>
               </tr>
             );
