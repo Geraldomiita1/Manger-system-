@@ -702,7 +702,7 @@ function exportMonthlyCardsWord({ school, cls, term, year, isLower, subjects, ca
     body += `<div style="page-break-before:always;margin-top:20px;">`;
     body += `<table style="width:100%;border-collapse:collapse;margin-bottom:6px;">
       <tr>
-        <td style="padding:4px 8px;font-size:12pt;"><b>NAME:</b> ${escapeHtml(s.name)}</td>
+        <td style="padding:4px 8px;font-size:12pt;"><b>NAME:</b> <b><i>${escapeHtml(s.name)}</i></b></td>
         <td style="padding:4px 8px;font-size:12pt;"><b>CLASS:</b> ${escapeHtml(cls)}</td>
         <td style="padding:4px 8px;font-size:12pt;"><b>YEAR:</b> ${escapeHtml(year)}</td>
       </tr>
@@ -763,17 +763,14 @@ function exportReportCardsWord({ school, cls, term, year, isLower, rows, allPosi
     body += titleBlockHtml(school, `PUPIL'S ACADEMIC REPORT CARD - END OF ${term.toUpperCase()} ${year} - ${cls}`);
     body += `<table style="width:100%;border-collapse:collapse;margin-bottom:6px;">
       <tr>
-        <td style="padding:4px 8px;font-size:12pt;"><b>NAME:</b> ${escapeHtml(s.name)}</td>
+        <td style="padding:4px 8px;font-size:12pt;"><b>NAME:</b> <b><i>${escapeHtml(s.name)}</i></b></td>
         <td style="padding:4px 8px;font-size:12pt;"><b>CLASS:</b> ${escapeHtml(cls)}</td>
         <td style="padding:4px 8px;font-size:12pt;"><b>TERM:</b> ${escapeHtml(term)}</td>
-      </tr>
-      <tr>
-        <td style="padding:4px 8px;font-size:12pt;"><b>YEAR:</b> ${escapeHtml(year)}</td>
         <td colspan="2" style="padding:4px 8px;font-size:12pt;"><b>POSITION:</b> ${position && position !== "-" ? ordinal(position) : "-"} out of ${totalInClass}</td>
       </tr>
     </table>`;
     const subHead = isLower
-      ? `<th style="border:1px solid #999;padding:5px;background:#1e3a6e;color:white;">AVERAGE</th>`
+      ? `<th style="border:1px solid #999;padding:5px;background:#1e3a6e;color:white;">MARK</th>`
       : `<th style="border:1px solid #999;padding:5px;background:#1e3a6e;color:white;">CA</th><th style="border:1px solid #999;padding:5px;background:#1e3a6e;color:white;">EXAM</th><th style="border:1px solid #999;padding:5px;background:#1e3a6e;color:white;">AVERAGE</th><th style="border:1px solid #999;padding:5px;background:#1e3a6e;color:white;">AGG</th>`;
     body += `<table style="width:100%;border-collapse:collapse;font-size:10pt;margin-bottom:6px;">
       <thead>
@@ -1025,12 +1022,12 @@ function SchoolCrest({ size = 64, ink = "#0f1115", paper = "#ffffff" }) {
     </svg>
   );
 }
-const PAGES = ["Dashboard","Mark Entry","Monthly Exams","Monthly Cards","Monthly Slips","Result Sheets","Report Cards","Students","Manage Requests","Settings","Audit Log","Download Centre"];
+const PAGES = ["DASHBOARD","MARK ENTRY","MONTHLY EXAMS","MONTHLY CARDS","MONTHLY SLIPS","RESULT SHEETS","REPORT CARDS","LEARNERS","MANAGE REQUESTS","SETTINGS","AUDIT LOG","DOWNLOAD CENTRE"];
 // Pages only the admin account can see/use. Teachers never see these in the sidebar.
-const ADMIN_ONLY_PAGES = ["Manage Requests", "Settings", "Audit Log"];
+const ADMIN_ONLY_PAGES = ["MANAGE REQUESTS", "SETTINGS", "AUDIT LOG"];
 // ─── APP ─────────────────────────────────────────────────────────────────────
 export default function App() {
-  const [page, setPage] = useState("Dashboard");
+  const [page, setPage] = useState("DASHBOARD");
   const [students, setStudents] = useState([]);
   const [termMarks, setTermMarks] = useState({});
   const [monthlyMarks, setMonthlyMarks] = useState({});
@@ -1431,8 +1428,8 @@ export default function App() {
         </div>
         <nav style={{flex:1,padding:"8px 0"}}>
           {PAGES.filter(p => !ADMIN_ONLY_PAGES.includes(p) || role==="admin").map(p => {
-            const icons = {"Dashboard":"📊","Mark Entry":"📝","Monthly Exams":"📅","Monthly Cards":"🗂️","Monthly Slips":"🎫","Result Sheets":"📋","Report Cards":"🎓","Students":"👥","Manage Requests":"🛂","Settings":"⚙️","Audit Log":"🕓","Download Centre":"📥"};
-            const pendingCount = p==="Manage Requests" ? changeRequests.filter(r=>r.status==="pending").length : 0;
+            const icons = {"DASHBOARD":"📊","MARK ENTRY":"📝","MONTHLY EXAMS":"📅","MONTHLY CARDS":"🗂️","MONTHLY SLIPS":"🎫","RESULT SHEETS":"📋","REPORT CARDS":"🎓","LEARNERS":"👥","MANAGE REQUESTS":"🛂","SETTINGS":"⚙️","AUDIT LOG":"🕓","DOWNLOAD CENTRE":"📥"};
+            const pendingCount = p==="MANAGE REQUESTS" ? changeRequests.filter(r=>r.status==="pending").length : 0;
             return (
               <button key={p} onClick={()=>setPage(p)}
                 style={{width:"100%",padding:"10px 14px",background:page===p?"rgba(255,255,255,0.2)":"transparent",border:"none",color:"white",textAlign:"left",cursor:"pointer",display:"flex",alignItems:"center",gap:10,fontSize:13,fontWeight:page===p?700:400,borderLeft:page===p?"3px solid #60a5fa":"3px solid transparent"}}>
@@ -1447,7 +1444,7 @@ export default function App() {
             Signed in as <b style={{color:"white"}}>{currentUser}</b> ({role === "admin" ? "Admin" : "Teacher"})
           </div>
         )}
-        <button onClick={()=>{ setAuthed(false); setRole(null); setCurrentUser(null); setLoginUser(""); setPage("Dashboard"); }} style={{padding:"12px 14px",background:"transparent",border:"none",color:"rgba(255,255,255,0.6)",textAlign:"left",cursor:"pointer",fontSize:13,display:"flex",alignItems:"center",gap:10}}>
+        <button onClick={()=>{ setAuthed(false); setRole(null); setCurrentUser(null); setLoginUser(""); setPage("DASHBOARD"); }} style={{padding:"12px 14px",background:"transparent",border:"none",color:"rgba(255,255,255,0.6)",textAlign:"left",cursor:"pointer",fontSize:13,display:"flex",alignItems:"center",gap:10}}>
           <span>🚪</span>{sideOpen && "Logout"}
         </button>
       </div>
@@ -1459,18 +1456,18 @@ export default function App() {
           <div style={{marginLeft:"auto",fontSize:12,color:"#6b7280"}}>{school.name} - {school.year}</div>
         </div>
         <div style={{padding:20}}>
-          {page==="Dashboard" && <Dashboard {...props} />}
-          {page==="Mark Entry" && <MarkEntry {...props} />}
-          {page==="Monthly Exams" && <MonthlyExams {...props} />}
-          {page==="Monthly Cards" && <MonthlyCards {...props} />}
-          {page==="Monthly Slips" && <MonthlySlips {...props} />}
-          {page==="Result Sheets" && <ResultSheets {...props} />}
-          {page==="Report Cards" && <ReportCards {...props} />}
-          {page==="Students" && <Students {...props} />}
-          {page==="Manage Requests" && role==="admin" && <ManageRequests {...props} />}
-          {page==="Settings" && role==="admin" && <Settings {...props} />}
-          {page==="Audit Log" && role==="admin" && <AuditLog />}
-          {page==="Download Centre" && <DownloadCentre {...props} />}
+          {page==="DASHBOARD" && <Dashboard {...props} />}
+          {page==="MARK ENTRY" && <MarkEntry {...props} />}
+          {page==="MONTHLY EXAMS" && <MonthlyExams {...props} />}
+          {page==="MONTHLY CARDS" && <MonthlyCards {...props} />}
+          {page==="MONTHLY SLIPS" && <MonthlySlips {...props} />}
+          {page==="RESULT SHEETS" && <ResultSheets {...props} />}
+          {page==="REPORT CARDS" && <ReportCards {...props} />}
+          {page==="LEARNERS" && <Students {...props} />}
+          {page==="MANAGE REQUESTS" && role==="admin" && <ManageRequests {...props} />}
+          {page==="SETTINGS" && role==="admin" && <Settings {...props} />}
+          {page==="AUDIT LOG" && role==="admin" && <AuditLog />}
+          {page==="DOWNLOAD CENTRE" && <DownloadCentre {...props} />}
         </div>
       </div>
       <style>{`
@@ -2760,7 +2757,7 @@ function TermlyMonthlyCard({ school, student, monthData, term, year, cls, isLowe
         </div>
       </div>
       <div style={{background:"#fefce8",borderBottom:"2px solid #fde68a",padding:"8px 16px",display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6,fontSize:13}}>
-        <div><b>NAME:</b> {s.name}</div>
+        <div><b>NAME:</b> <span style={{fontWeight:800,fontStyle:"italic"}}>{s.name}</span></div>
         <div><b>CLASS:</b> {cls}</div>
         <div><b>YEAR:</b> {year}</div>
       </div>
@@ -2968,10 +2965,10 @@ function MonthlySlip({ school, student, monthData, term, year, cls, isLower, sub
         </div>
       </div>
       {/* Name / class / year strip */}
-      <div style={{flexShrink:0,background:"#fefce8",borderBottom:"1px solid #fde68a",padding:"1px 8px",display:"flex",alignItems:"center",gap:6,fontSize:9,whiteSpace:"nowrap",overflow:"hidden"}}>
-        <span style={{fontWeight:700,flexShrink:1,minWidth:0,overflow:"hidden",textOverflow:"ellipsis"}}><b>NAME:</b> {s.name}</span>
-        <span style={{flexShrink:0,fontWeight:700}}><b>CLASS:</b> {cls}</span>
-        <span style={{flexShrink:0,fontWeight:700}}><b>YEAR:</b> {year}</span>
+      <div style={{flexShrink:0,background:"#fefce8",borderBottom:"1px solid #fde68a",padding:"1px 8px",display:"flex",alignItems:"center",gap:6,whiteSpace:"nowrap",overflow:"hidden"}}>
+        <span style={{flexShrink:1,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",fontSize:10}}>NAME: <span style={{fontWeight:800,fontStyle:"italic",fontSize:12}}>{s.name}</span></span>
+        <span style={{flexShrink:0,fontSize:9}}>CLASS: <span style={{fontWeight:700,fontStyle:"italic"}}>{cls}</span></span>
+        <span style={{flexShrink:0,fontSize:9}}>YR: <span style={{fontWeight:700,fontStyle:"italic"}}>{year}</span></span>
       </div>
       {/* Marks table — flex:1 stretches it to fill all remaining height */}
       <table style={{flex:1,width:"100%",borderCollapse:"collapse",tableLayout:"fixed",display:"flex",flexDirection:"column"}}>
@@ -2979,7 +2976,7 @@ function MonthlySlip({ school, student, monthData, term, year, cls, isLower, sub
           <tr style={{background:"#1e3a6e",color:"white"}}>
             <th style={{...td,color:"white",background:"#1e3a6e",textAlign:"left",verticalAlign:"middle",fontSize:8,padding:"1px 2px",lineHeight:1}} rowSpan={2}>MTH</th>
             {subjects.map(sub=>(
-              <th key={sub} style={{...td,color:"white",background:"#1e3a6e",fontSize:8,padding:"1px 2px",lineHeight:1,verticalAlign:"middle"}} colSpan={isLower?1:2}>
+              <th key={sub} style={{...td,color:"white",background:"#1e3a6e",fontSize:9,padding:"1px 2px",lineHeight:1,verticalAlign:"middle"}} colSpan={isLower?1:2}>
                 {slipSubjectLabel(sub)}{isLower&&lowerSubjectMax(sub)!==100?<span style={{fontSize:6}}>/{lowerSubjectMax(sub)}</span>:""}
               </th>
             ))}
@@ -3322,11 +3319,9 @@ function ReportCard({ school, r, term, year, cls, position, totalInClass, isLowe
           </div>
         </div>
         <div style={{background:"#fefce8",borderBottom:"2px solid #fde68a",padding:"10px 16px",display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,fontSize:13,alignItems:"center"}}>
-          <div><b>NAME:</b> {s.name}</div>
+          <div><b>NAME:</b> <span style={{fontWeight:800,fontStyle:"italic"}}>{s.name}</span></div>
           <div><b>CLASS:</b> {cls}</div>
           <div><b>TERM:</b> {term}</div>
-          <div><b>YEAR:</b> {year}</div>
-          <div style={{display:"flex",alignItems:"center",gap:6}}><b>POSITION:</b> <PositionBadge pos={position} size={14}/> <span>out of {totalInClass}</span></div>
         </div>
         <div style={{padding:"12px 16px"}}>
           <table style={{width:"100%",fontSize:13}}>
@@ -3334,7 +3329,7 @@ function ReportCard({ school, r, term, year, cls, position, totalInClass, isLowe
               <tr style={{background:"#1e3a6e",color:"white"}}>
                 <th style={{...th,textAlign:"left",color:"white"}}>SUBJECT</th>
                 {!isLower&&<><th style={{...th,color:"white"}}>CA</th><th style={{...th,color:"white"}}>EXAM</th></>}
-                <th style={{...th,color:"white"}}>AVERAGE</th>
+                <th style={{...th,color:"white"}}>{isLower?"MARK":"AVERAGE"}</th>
                 {!isLower&&<th style={{...th,color:"white"}}>AGG</th>}
                 <th style={{...th,color:"white"}}>REMARKS</th>
                 <th style={{...th,color:"white"}}>INITIALS</th>
@@ -4098,7 +4093,7 @@ export default function Page() {
     });
   };
   const stats = [
-    { label: "Students", value: students.length, icon: "👥", color: "#1e40af", bg: "#dbeafe" },
+    { label: "Learners", value: students.length, icon: "👥", color: "#1e40af", bg: "#dbeafe" },
     { label: "Term Mark Records", value: Object.keys(termMarks).length, icon: "📝", color: "#065f46", bg: "#d1fae5" },
     { label: "Monthly Mark Records", value: Object.keys(monthlyMarks).length, icon: "📅", color: "#92400e", bg: "#fef3c7" },
     { label: "Grade Bands", value: bands.length, icon: "🎯", color: "#6b21a8", bg: "#f3e8ff" },
