@@ -812,9 +812,10 @@ function exportReportCardsWord({ school, cls, term, year, isLower, rows, allPosi
     if (!isLower) body += `<b>DIVISION:</b> ${hasX ? "X" : totMk ? div : "-"}&nbsp;&nbsp;&nbsp;`;
     body += `</p>`;
     body += `<p style="font-size:11pt;line-height:2;"><b>CONDUCT:</b> ...........................................................................................</p>
-      <p style="font-size:11pt;line-height:2;"><b>Class Teacher's Comment:</b> <span style="font-weight:bold;color:#1d4ed8;">${escapeHtml(comments.teacher) || ".............................................................................."}</span> <b>Sign:</b> ......................</p>
+      <p style="font-size:11pt;line-height:2;"><b>Class Teacher's Comment:</b> <span style="font-weight:bold;font-style:italic;color:#1d4ed8;">${escapeHtml(comments.teacher) || ".............................................................................."}</span> <b>Sign:</b> ......................</p>
       <p style="font-size:11pt;line-height:2;"><b>Head Teacher's Comment:</b> <span style="font-weight:bold;font-style:italic;color:#dc2626;">${escapeHtml(comments.head) || ".............................................................................."}</span> <b>Sign:</b> ......................</p>
-      <p style="font-size:11pt;line-height:2;"><b>Next Term begins on</b> ....................... <b>Ends on</b> .......................</p>
+      <p style="font-size:11pt;line-height:2;"><b>Next Term begins on</b> <span style="font-weight:bold;font-style:italic;color:#1d4ed8;">${escapeHtml(school.nextOpens||".......................")}</span> <b>Ends on</b> <span style="font-weight:bold;font-style:italic;color:#1d4ed8;">${escapeHtml(school.nextEnds||".......................")}</span></p>
+      <p style="font-size:11pt;line-height:2;"><b>Requirements:</b> <span style="font-weight:bold;font-style:italic;color:#15803d;">${escapeHtml(school.requirements||"...........................................................................................")}</span></p>
       <p style="font-size:11pt;line-height:2;"><b>Requirements:</b> ${escapeHtml(school.requirements || "...........................................................................................")}</p>
       <p style="font-size:11pt;line-height:2;"><b>Parent's Signature after reading:</b> ...................................................................</p>`;
     body += `</div>`;
@@ -1113,7 +1114,11 @@ export default function App() {
         finalAccounts = await buildDefaultAccounts();
         await saveShared("mkis_accounts", finalAccounts);
       }
-      setBands(b); setDivisions(d); setSchool(sc); setAccounts(finalAccounts); setChangeRequests(reqs || []); setInitials(ini);
+      setBands(b); setDivisions(d);
+      // Always spread DEFAULT_SCHOOL first so any new fields added since
+      // the last save (e.g. nextOpens, nextEnds, requirements) are never
+      // missing if an older save predates them being added.
+      setSchool({ ...DEFAULT_SCHOOL, ...sc }); setAccounts(finalAccounts); setChangeRequests(reqs || []); setInitials(ini);
       setLockedTerm(lt || {}); setLockedMonthly(lm || {});
       lastSeenRef.current = { mkis_students: JSON.stringify(s), mkis_termmarks: JSON.stringify(tm),
         mkis_monthlymarks: JSON.stringify(mm), mkis_bands: JSON.stringify(b), mkis_divisions: JSON.stringify(d),
@@ -1413,7 +1418,7 @@ export default function App() {
       </div>
     );
   }
-  const props = { students, setStudents, termMarks, setTermMarks, monthlyMarks, setMonthlyMarks, bands, setBands, divisions, setDivisions, school, setSchool, accounts, setAccounts, initials, setInitials, updateTermMark, updateMonthlyMark, requestOrApplyTermMark, requestOrApplyMonthlyMark, addStudent, deleteStudent, forceRestoreData, promoteStudents, role, currentUser, changeRequests, submitChangeRequest, approveChangeRequest, rejectChangeRequest, lockedTerm, lockTermEntry, unlockTermEntry, lockedMonthly, lockMonthlyEntry, unlockMonthlyEntry, requestUnlockTerm, requestUnlockMonthly };
+  const props = { students, setStudents, termMarks, setTermMarks, monthlyMarks, setMonthlyMarks, bands, setBands, divisions, setDivisions, school, setSchool, accounts, setAccounts, initials, setInitials, updateTermMark, updateMonthlyMark, requestOrApplyTermMark, requestOrApplyMonthlyMark, addStudent, deleteStudent, forceRestoreData, promoteStudents, role, currentUser, changeRequests, submitChangeRequest, approveChangeRequest, rejectChangeRequest, lockedTerm, lockTermEntry, unlockTermEntry, lockedMonthly, lockMonthlyEntry, unlockMonthlyEntry, requestUnlockTerm, requestUnlockMonthly, markEditing };
   return (
     <div className="app-shell" style={{display:"flex",minHeight:"100vh",fontFamily:"'Segoe UI',system-ui,sans-serif",background:"#f1f5f9"}}>
       {/* SIDEBAR */}
@@ -2948,77 +2953,75 @@ const SLIP_SUBJECT_LABEL = { "LIT I":"L1", "LIT II":"L2", "READING":"RD", "WRITI
 const slipSubjectLabel = (sub) => SLIP_SUBJECT_LABEL[sub] || sub;
 function MonthlySlip({ school, student, monthData, term, year, cls, isLower, subjects }) {
   const s = student;
-  // No motto, and no JS-measured/transform-scaled content -- every height
-  // and font size below is a fixed value chosen so the header, name line,
-  // and table rows together add up to comfortably less than a real 6cm
-  // (worst case being an upper-class card with 13 columns across 8cm), so
-  // the same markup renders identically on screen, in print, and in the
-  // PDF capture. Each table row gets an explicit height (rather than
-  // hoping the table stretches to fill the card on its own) specifically
-  // so the 3 data rows expand to actually use the card's full height --
-  // that's what leaves real room for the figures to sit large and bold,
-  // instead of being squeezed into a short strip with blank space below.
+  // The outer box is a fixed 8cm × 6cm flex column. The table inside it
+  // has flex:1 so it stretches to fill every remaining pixel after the two
+  // fixed-height header strips -- this eliminates the blank space at the
+  // bottom. Row heights are NOT hardcoded; the browser distributes the
+  // available tbody height evenly across the 3 data rows automatically.
   return (
-    <div className="monthly-slip" style={{width:"8cm",height:"6cm",overflow:"hidden",background:"white",border:"1px dashed #1e3a6e",borderRadius:4}}>
-      <div style={{background:"linear-gradient(135deg,#1e3a6e 0%,#1e40af 100%)",color:"white",padding:"3px 8px",textAlign:"center"}}>
-        <div style={{fontWeight:800,fontSize:12,letterSpacing:0.3,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{school.name}</div>
-        <div style={{marginTop:2,display:"inline-block",background:"rgba(255,255,255,0.18)",borderRadius:8,padding:"1px 8px",fontSize:8,fontWeight:700,whiteSpace:"nowrap"}}>
-          MONTHLY TESTS - {term.toUpperCase()} {year}
+    <div className="monthly-slip" style={{width:"8cm",height:"6cm",overflow:"hidden",background:"white",border:"1px solid #1e3a6e",borderRadius:4,display:"flex",flexDirection:"column"}}>
+      {/* School name + term strip */}
+      <div style={{flexShrink:0,background:"linear-gradient(135deg,#1e3a6e 0%,#1e40af 100%)",color:"white",padding:"2px 8px",textAlign:"center"}}>
+        <div style={{fontWeight:800,fontSize:11,letterSpacing:0.3,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",lineHeight:1.2}}>{school.name}</div>
+        <div style={{display:"inline-block",background:"rgba(255,255,255,0.18)",borderRadius:6,padding:"0 6px",fontSize:7.5,fontWeight:700,whiteSpace:"nowrap",lineHeight:1.5}}>
+          MONTHLY TESTS — {term.toUpperCase()} {year}
         </div>
       </div>
-      <div style={{height:16,background:"#fefce8",borderBottom:"1px solid #fde68a",padding:"1px 8px",display:"flex",alignItems:"center",gap:8,fontSize:9,whiteSpace:"nowrap",overflow:"hidden"}}>
-        <div style={{overflow:"hidden",textOverflow:"ellipsis",flexShrink:1,minWidth:0}}><b>NAME:</b> <b>{s.name}</b></div>
-        <div style={{flexShrink:0}}><b>CLASS:</b> <b>{cls}</b></div>
-        <div style={{flexShrink:0}}><b>YR:</b> <b>{year}</b></div>
+      {/* Name / class / year strip */}
+      <div style={{flexShrink:0,background:"#fefce8",borderBottom:"1px solid #fde68a",padding:"1px 8px",display:"flex",alignItems:"center",gap:6,fontSize:9,whiteSpace:"nowrap",overflow:"hidden"}}>
+        <span style={{fontWeight:700,flexShrink:1,minWidth:0,overflow:"hidden",textOverflow:"ellipsis"}}><b>NAME:</b> {s.name}</span>
+        <span style={{flexShrink:0,fontWeight:700}}><b>CLASS:</b> {cls}</span>
+        <span style={{flexShrink:0,fontWeight:700}}><b>YEAR:</b> {year}</span>
       </div>
-      <table style={{width:"100%",borderCollapse:"collapse"}}>
-        <thead>
-          <tr style={{background:"#1e3a6e",color:"white",height:13}}>
-            <th style={{...td,color:"white",background:"#1e3a6e",textAlign:"left",verticalAlign:"middle",fontSize:8,padding:"0 3px"}} rowSpan={2}>MTH</th>
+      {/* Marks table — flex:1 stretches it to fill all remaining height */}
+      <table style={{flex:1,width:"100%",borderCollapse:"collapse",tableLayout:"fixed",display:"flex",flexDirection:"column"}}>
+        <thead style={{display:"table",width:"100%",tableLayout:"fixed",flexShrink:0}}>
+          <tr style={{background:"#1e3a6e",color:"white"}}>
+            <th style={{...td,color:"white",background:"#1e3a6e",textAlign:"left",verticalAlign:"middle",fontSize:8,padding:"1px 2px",lineHeight:1}} rowSpan={2}>MTH</th>
             {subjects.map(sub=>(
-              <th key={sub} style={{...td,color:"white",background:"#1e3a6e",fontSize:8,padding:"0 2px"}} colSpan={isLower?1:2}>
-                {slipSubjectLabel(sub)}
+              <th key={sub} style={{...td,color:"white",background:"#1e3a6e",fontSize:8,padding:"1px 2px",lineHeight:1,verticalAlign:"middle"}} colSpan={isLower?1:2}>
+                {slipSubjectLabel(sub)}{isLower&&lowerSubjectMax(sub)!==100?<span style={{fontSize:6}}>/{lowerSubjectMax(sub)}</span>:""}
               </th>
             ))}
-            <th style={{...td,color:"white",background:"#1e3a6e",verticalAlign:"middle",fontSize:8,padding:"0 2px"}} rowSpan={2}>TOT</th>
+            <th style={{...td,color:"white",background:"#1e3a6e",verticalAlign:"middle",fontSize:8,padding:"1px 2px",lineHeight:1}} rowSpan={2}>TOT</th>
             {!isLower && <>
-              <th style={{...td,color:"white",background:"#1e3a6e",verticalAlign:"middle",fontSize:8,padding:"0 2px"}} rowSpan={2}>AGG</th>
-              <th style={{...td,color:"white",background:"#1e3a6e",verticalAlign:"middle",fontSize:8,padding:"0 2px"}} rowSpan={2}>DIV</th>
+              <th style={{...td,color:"white",background:"#1e3a6e",verticalAlign:"middle",fontSize:8,padding:"1px 2px",lineHeight:1}} rowSpan={2}>AGG</th>
+              <th style={{...td,color:"white",background:"#1e3a6e",verticalAlign:"middle",fontSize:8,padding:"1px 2px",lineHeight:1}} rowSpan={2}>DIV</th>
             </>}
-            <th style={{...td,color:"white",background:"#1e3a6e",verticalAlign:"middle",fontSize:8,padding:"0 2px"}} rowSpan={2}>POS</th>
+            <th style={{...td,color:"white",background:"#1e3a6e",verticalAlign:"middle",fontSize:8,padding:"1px 2px",lineHeight:1}} rowSpan={2}>POS</th>
           </tr>
-          <tr style={{background:"#2563eb",color:"white",height:13}}>
+          <tr style={{background:"#2563eb",color:"white"}}>
             {subjects.map(sub=>(
               isLower
-                ? <th key={sub+"mk"} style={{...td,background:"#3b82f6",color:"white",fontSize:7,padding:"0 2px"}}>MK</th>
+                ? <th key={sub+"mk"} style={{...td,background:"#3b82f6",color:"white",fontSize:7,padding:"1px 2px"}}>MK</th>
                 : <React.Fragment key={sub}>
-                    <th style={{...td,background:"#3b82f6",color:"white",fontSize:7,padding:"0 2px"}}>MK</th>
-                    <th style={{...td,background:"#60a5fa",color:"white",fontSize:7,padding:"0 2px"}}>AG</th>
+                    <th style={{...td,background:"#3b82f6",color:"white",fontSize:7,padding:"1px 2px"}}>MK</th>
+                    <th style={{...td,background:"#60a5fa",color:"white",fontSize:7,padding:"1px 2px"}}>AG</th>
                   </React.Fragment>
             ))}
           </tr>
         </thead>
-        <tbody>
+        <tbody style={{display:"table",width:"100%",tableLayout:"fixed",flex:1}}>
           {monthData.map(({ month, perSub, totMk, totAgg, div, pos, hasX }, mIdx)=>{
-            const rowBg = mIdx%2===0?"#ffffff":"#f8fafc";
+            const rowBg = mIdx%2===0?"#ffffff":"#f0f4ff";
             return (
-              <tr key={month} style={{background:rowBg,height:46}}>
-                <td style={{...td,fontWeight:800,fontSize:12,background:rowBg,color:"#1e3a6e",textAlign:"left",padding:"0 3px",verticalAlign:"middle"}}>{month}</td>
+              <tr key={month} style={{background:rowBg,height:"33%"}}>
+                <td style={{...td,fontWeight:800,fontSize:12,background:mIdx%2===0?"#dbeafe":"#bfdbfe",color:"#1e3a6e",textAlign:"left",padding:"0 3px",verticalAlign:"middle"}}>{month}</td>
                 {perSub.map(p=>(
                   isLower
-                    ? <td key={p.sub+"mk"} style={{...td,background:rowBg,fontWeight:p.mk!==undefined?800:400,color:p.mk!==undefined?"#1f2937":"#9ca3af",fontSize:12,padding:"0 2px",verticalAlign:"middle"}}>{p.mk!==undefined?p.mk:"-"}</td>
+                    ? <td key={p.sub+"mk"} style={{...td,background:rowBg,fontWeight:p.mk!==undefined?800:400,color:p.mk!==undefined?"#111827":"#9ca3af",fontSize:12,padding:"0 2px",verticalAlign:"middle"}}>{p.mk!==undefined?p.mk:"-"}</td>
                     : <React.Fragment key={p.sub}>
-                        <td style={{...td,background:rowBg,fontWeight:p.mk!==undefined?800:400,color:p.mk!==undefined?"#1f2937":"#9ca3af",fontSize:12,padding:"0 2px",verticalAlign:"middle"}}>{p.mk!==undefined?p.mk:"-"}</td>
-                        <td style={{...td,background:"#fff7ed",fontWeight:(p.isX||p.agg!==undefined)?800:400,color:p.isX?"#dc2626":(p.agg!==undefined?"#92400e":"#9ca3af"),fontSize:12,padding:"0 2px",verticalAlign:"middle"}}>{hasX&&p.isX?"X":(p.agg!==undefined?p.agg:"-")}</td>
+                        <td style={{...td,background:rowBg,fontWeight:p.mk!==undefined?800:400,color:p.mk!==undefined?"#111827":"#9ca3af",fontSize:12,padding:"0 2px",verticalAlign:"middle"}}>{p.mk!==undefined?p.mk:"-"}</td>
+                        <td style={{...td,background:mIdx%2===0?"#fff7ed":"#fef3c7",fontWeight:(p.isX||p.agg!==undefined)?800:400,color:p.isX?"#dc2626":(p.agg!==undefined?"#92400e":"#9ca3af"),fontSize:12,padding:"0 2px",verticalAlign:"middle"}}>{hasX&&p.isX?"X":(p.agg!==undefined?p.agg:"-")}</td>
                       </React.Fragment>
                 ))}
-                <td style={{...td,fontWeight:800,background:"#ede9fe",color:"#4c1d95",fontSize:12,padding:"0 2px",verticalAlign:"middle"}}>{totMk>0?totMk:"-"}</td>
+                <td style={{...td,fontWeight:800,background:mIdx%2===0?"#ede9fe":"#ddd6fe",color:"#4c1d95",fontSize:12,padding:"0 2px",verticalAlign:"middle"}}>{totMk>0?totMk:"-"}</td>
                 {!isLower && <>
-                  <td style={{...td,background:"#ede9fe",fontWeight:800,color:hasX?"#dc2626":"#4c1d95",fontSize:12,padding:"0 2px",verticalAlign:"middle"}}>{hasX?"X":(totAgg>0?totAgg:"-")}</td>
+                  <td style={{...td,background:mIdx%2===0?"#ede9fe":"#ddd6fe",fontWeight:800,color:hasX?"#dc2626":"#4c1d95",fontSize:12,padding:"0 2px",verticalAlign:"middle"}}>{hasX?"X":(totAgg>0?totAgg:"-")}</td>
                   <td style={{...td,fontWeight:800,color:hasX?"#dc2626":"#1e40af",fontSize:12,padding:"0 2px",verticalAlign:"middle"}}>{hasX?"X":(totMk>0?div:"-")}</td>
                 </>}
                 <td style={{...td,padding:"0 2px",verticalAlign:"middle"}}>
-                  {pos!=="-"&&pos ? <PositionBadge pos={pos} color="#1e3a6e" size={12}/> : <span style={{fontSize:12,fontWeight:800,color:"#1e3a6e"}}>-</span>}
+                  <PositionBadge pos={pos} color="#1e3a6e" size={12}/>
                 </td>
               </tr>
             );
@@ -3364,10 +3367,10 @@ function ReportCard({ school, r, term, year, cls, position, totalInClass, isLowe
       <div style={{padding:"12px 4px 0",fontSize:13,lineHeight:2}}>
         {!isLower&&<div><b>DIVISION:</b> <span style={{color:"#1e40af",fontWeight:700}}>{hasX?"X":totMk?div:"-"}</span></div>}
         <div><b>CONDUCT:</b> ...........................................................................................</div>
-        <div><b>Class Teacher's Comment:</b> <span style={{fontWeight:700,color:"#1d4ed8"}}>{comments.teacher || ".............................................................................."}</span> <b>Sign:</b> ......................</div>
+        <div><b>Class Teacher's Comment:</b> <span style={{fontWeight:700,fontStyle:"italic",color:"#1d4ed8"}}>{comments.teacher || ".............................................................................."}</span> <b>Sign:</b> ......................</div>
         <div><b>Head Teacher's Comment:</b> <span style={{fontWeight:700,fontStyle:"italic",color:"#dc2626"}}>{comments.head || ".............................................................................."}</span> <b>Sign:</b> ......................</div>
-        <div><b>Next Term begins on</b> ....................... <b>Ends on</b> .......................</div>
-        <div><b>Requirements:</b> {school.requirements||"..........................................................................................."}</div>
+        <div><b>Next Term begins on</b> <span style={{fontWeight:700,fontStyle:"italic",color:"#1d4ed8"}}>{school.nextOpens||"......................."}</span> <b>Ends on</b> <span style={{fontWeight:700,fontStyle:"italic",color:"#1d4ed8"}}>{school.nextEnds||"......................."}</span></div>
+        <div><b>Requirements:</b> <span style={{fontWeight:700,fontStyle:"italic",color:"#15803d"}}>{school.requirements||"..........................................................................................."}</span></div>
         <div><b>Parent's Signature after reading:</b> ...................................................................</div>
       </div>
     </div>
@@ -3635,7 +3638,7 @@ function ManageTeacherPasswords({ accounts, setAccounts, currentUser }) {
   );
 }
 // ─── SETTINGS ────────────────────────────────────────────────────────────────
-function Settings({ school, setSchool, bands, setBands, divisions, setDivisions, accounts, setAccounts, role, currentUser, students, setStudents, setTermMarks, setMonthlyMarks, initials, setInitials }) {
+function Settings({ school, setSchool, bands, setBands, divisions, setDivisions, accounts, setAccounts, role, currentUser, students, setStudents, setTermMarks, setMonthlyMarks, initials, setInitials, markEditing }) {
   const [curPw, setCurPw] = useState("");
   const [newPw, setNewPw] = useState("");
   const [confirmPw, setConfirmPw] = useState("");
@@ -3719,12 +3722,12 @@ function Settings({ school, setSchool, bands, setBands, divisions, setDivisions,
           {[["name","School Name"],["motto","School Motto"],["poBox","P.O. Box"],["district","District"],["email","Email"],["headTeacher","Head Teacher"],["year","Academic Year"],["nextOpens","Next Term Opens"],["nextEnds","Next Term Ends"]].map(([k,label])=>(
             <div key={k}>
               <label style={lbl}>{label}</label>
-              <input value={school[k]||""} onChange={e=>setSchool(prev=>({...prev,[k]:e.target.value}))} style={{...inp,width:"100%"}} placeholder={label}/>
+              <input value={school[k]||""} onChange={e=>{ markEditing(); setSchool(prev=>({...prev,[k]:e.target.value})); }} style={{...inp,width:"100%"}} placeholder={label}/>
             </div>
           ))}
           <div style={{gridColumn:"1/-1"}}>
             <label style={lbl}>Requirements / What to Bring Next Term</label>
-            <input value={school.requirements||""} onChange={e=>setSchool(prev=>({...prev,requirements:e.target.value}))} style={{...inp,width:"100%"}} placeholder="e.g. Fees: 150,000, Exercise books x10, Uniform"/>
+            <input value={school.requirements||""} onChange={e=>{ markEditing(); setSchool(prev=>({...prev,requirements:e.target.value})); }} style={{...inp,width:"100%"}} placeholder="e.g. Fees: 150,000, Exercise books x10, Uniform"/>
           </div>
         </div>
       </div>
