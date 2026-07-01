@@ -1554,128 +1554,279 @@ export default function App() {
   );
 }
 // ─── DASHBOARD ───────────────────────────────────────────────────────────────
+// Colour palettes shared across all charts
+const BAR_COLORS = ["#6366f1","#0ea5e9","#10b981","#f59e0b","#ef4444","#a855f7","#ec4899"];
+const SUB_COLORS = {"ENG":"#6366f1","MATH":"#0ea5e9","SST":"#10b981","SCI":"#f59e0b","RE":"#a855f7","MTC":"#ec4899","MATHS":"#0ea5e9","LIT I":"#10b981","LIT II":"#6366f1","READING":"#f59e0b","WRITING":"#ef4444","CRE":"#a855f7"};
+const subColor = (sub,i) => SUB_COLORS[sub] || BAR_COLORS[i%BAR_COLORS.length];
+// Tiny SVG bar chart -- renders vertical bars inside a fixed-size SVG so it
+// works reliably in print and PDF capture (no canvas, no dependencies).
+function BarChart({ data, height=140, barColor, showLabels=true, valueLabel=(v)=>`${v}%`, emptyMsg="No data yet" }) {
+  const W = 300, H = height, PAD_L=28, PAD_B=28, PAD_T=8, PAD_R=8;
+  const plotW = W - PAD_L - PAD_R, plotH = H - PAD_T - PAD_B;
+  const maxVal = Math.max(...data.map(d=>d.value||0), 1);
+  const bw = Math.max(4, Math.floor(plotW/data.length) - 4);
+  const gap = Math.floor(plotW/data.length);
+  if (!data.length) return <div style={{color:"#9ca3af",fontSize:12,textAlign:"center",padding:20}}>{emptyMsg}</div>;
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} style={{width:"100%",maxWidth:W,height:"auto",display:"block"}}>
+      {/* Y gridlines */}
+      {[0,25,50,75,100].filter(g=>g<=maxVal+5).map(g=>{
+        const y = PAD_T + plotH - (g/maxVal)*plotH;
+        return <g key={g}>
+          <line x1={PAD_L} y1={y} x2={W-PAD_R} y2={y} stroke="#e5e7eb" strokeWidth={0.8}/>
+          <text x={PAD_L-3} y={y+3.5} textAnchor="end" fontSize={8} fill="#9ca3af">{g}</text>
+        </g>;
+      })}
+      {/* Bars */}
+      {data.map((d,i)=>{
+        const x = PAD_L + i*gap + (gap-bw)/2;
+        const bh = (d.value||0)/maxVal*plotH;
+        const y = PAD_T + plotH - bh;
+        const col = barColor ? (typeof barColor==="function"?barColor(d,i):barColor) : subColor(d.label,i);
+        return <g key={i}>
+          <rect x={x} y={y} width={bw} height={bh} rx={2} fill={col} opacity={0.9}/>
+          {showLabels && d.value!==null && <text x={x+bw/2} y={y-3} textAnchor="middle" fontSize={8} fill={col} fontWeight="700">{valueLabel(d.value)}</text>}
+          <text x={x+bw/2} y={H-PAD_B+10} textAnchor="middle" fontSize={7.5} fill="#374151" fontWeight="600">{d.label}</text>
+        </g>;
+      })}
+      {/* Axes */}
+      <line x1={PAD_L} y1={PAD_T} x2={PAD_L} y2={PAD_T+plotH} stroke="#d1d5db" strokeWidth={1}/>
+      <line x1={PAD_L} y1={PAD_T+plotH} x2={W-PAD_R} y2={PAD_T+plotH} stroke="#d1d5db" strokeWidth={1}/>
+    </svg>
+  );
+}
+// Tiny SVG pie/donut chart -- slices rendered as SVG paths.
+function PieChart({ slices, size=160 }) {
+  const r = size/2, cx=r, cy=r, innerR=r*0.52;
+  const total = slices.reduce((s,x)=>s+x.value,0)||1;
+  let angle=-Math.PI/2;
+  const paths = slices.map((sl,i)=>{
+    const a = (sl.value/total)*2*Math.PI;
+    const x1=cx+r*Math.cos(angle), y1=cy+r*Math.sin(angle);
+    const x2=cx+r*Math.cos(angle+a), y2=cy+r*Math.sin(angle+a);
+    const mx=cx+(r+innerR)/2*Math.cos(angle+a/2), my=cy+(r+innerR)/2*Math.sin(angle+a/2);
+    const large=a>Math.PI?1:0;
+    const ix1=cx+innerR*Math.cos(angle+a), iy1=cy+innerR*Math.sin(angle+a);
+    const ix2=cx+innerR*Math.cos(angle), iy2=cy+innerR*Math.sin(angle);
+    const d=`M${x1},${y1} A${r},${r},0,${large},1,${x2},${y2} L${ix1},${iy1} A${innerR},${innerR},0,${large},0,${ix2},${iy2} Z`;
+    const pct=Math.round(sl.value/total*100);
+    const res={path:d,color:sl.color,label:sl.label,value:sl.value,pct,mx,my};
+    angle+=a;
+    return res;
+  });
+  return (
+    <svg viewBox={`0 0 ${size} ${size}`} style={{width:"100%",maxWidth:size,height:"auto",display:"block",overflow:"visible"}}>
+      {paths.map((p,i)=>(
+        <g key={i}>
+          <path d={p.path} fill={p.color} stroke="white" strokeWidth={1.5}/>
+          {p.pct>5&&<text x={p.mx} y={p.my} textAnchor="middle" dominantBaseline="middle" fontSize={9} fill="white" fontWeight="800">{p.pct}%</text>}
+        </g>
+      ))}
+      {/* Centre label */}
+      <text x={cx} y={cy-5} textAnchor="middle" fontSize={11} fill="#1e3a6e" fontWeight="800">{slices.reduce((s,x)=>s+x.value,0)}</text>
+      <text x={cx} y={cy+9} textAnchor="middle" fontSize={7} fill="#6b7280">LEARNERS</text>
+    </svg>
+  );
+}
 function Dashboard({ students, school, termMarks, bands }) {
   const [perfTerm, setPerfTerm] = useState("Term I");
   const [perfYear, setPerfYear] = useState(school.year||String(new Date().getFullYear()));
+  const [subjectClass, setSubjectClass] = useState("P4");
   const perfTk = `${perfTerm}__${perfYear}`;
   const active = students.filter(s=>s.className!=="Completed");
   const total = active.length;
   const boys = active.filter(s=>s.gender==="M").length;
   const girls = active.filter(s=>s.gender==="F").length;
-  const classCounts = ALL_CLASSES.map(c => ({ cls:c, count: students.filter(s=>s.className===c).length }));
-  // Pulls a pupil's per-subject average mark (CA+EXAM average, or whichever
-  // single one is entered) the same way Mark Entry / Result Sheets do, then
-  // expresses it as a % of that subject's max so lower-class subjects with a
-  // max below 100 (e.g. Reading/Writing /50) compare fairly with everything
-  // else. Returns undefined if nothing has been entered for that subject.
+  const classCounts = ALL_CLASSES.map(c=>({ cls:c, count:active.filter(s=>s.className===c).length }));
   const subjectPct = (s, sub, isLower) => {
     const m = termMarks[s.id]?.[perfTk] || {};
-    const ca = m[sub]?.ca, exam = m[sub]?.exam;
-    const hasBoth = typeof ca==="number" && typeof exam==="number";
-    const av = hasBoth ? Math.round((ca+exam)/2) : (typeof exam==="number"?exam:typeof ca==="number"?ca:undefined);
-    if (av === undefined) return undefined;
-    return (av / (isLower ? lowerSubjectMax(sub) : 100)) * 100;
+    const ca=m[sub]?.ca, exam=m[sub]?.exam;
+    const hasBoth=typeof ca==="number"&&typeof exam==="number";
+    const av=hasBoth?Math.round((ca+exam)/2):(typeof exam==="number"?exam:typeof ca==="number"?ca:undefined);
+    if (av===undefined) return undefined;
+    return (av/(isLower?lowerSubjectMax(sub):100))*100;
   };
-  // General Performance by Class: each class's overall average % across all
-  // its pupils and subjects, for the selected term/year.
-  const classPerformance = useMemo(() => ALL_CLASSES.map(cls => {
-    const isLower = LOWER_CLASSES.includes(cls);
-    const subjects = isLower ? LOWER_SUBJECTS : UPPER_SUBJECTS;
-    const classStudents = active.filter(s => s.className === cls);
-    let sumPct = 0, count = 0;
-    classStudents.forEach(s => subjects.forEach(sub => {
-      const pct = subjectPct(s, sub, isLower);
-      if (pct !== undefined) { sumPct += pct; count++; }
+  const classPerformance = useMemo(()=>ALL_CLASSES.map(cls=>{
+    const isLower=LOWER_CLASSES.includes(cls);
+    const subjects=isLower?LOWER_SUBJECTS:UPPER_SUBJECTS;
+    const classStudents=active.filter(s=>s.className===cls);
+    let sum=0,cnt=0;
+    classStudents.forEach(s=>subjects.forEach(sub=>{
+      const pct=subjectPct(s,sub,isLower);
+      if(pct!==undefined){sum+=pct;cnt++;}
     }));
-    return { cls, avgPct: count ? Math.round(sumPct / count) : null, pupils: classStudents.length };
-  }), [active, termMarks, perfTk]);
-  // Subject Performance (whole school): each subject's average % across
-  // every pupil who studies it (lower and upper classes use different
-  // subject lists, so each subject is only counted for the classes that
-  // actually offer it).
-  const subjectPerformance = useMemo(() => {
-    const allSubjects = [...new Set([...UPPER_SUBJECTS, ...LOWER_SUBJECTS])];
-    return allSubjects.map(sub => {
-      let sumPct = 0, count = 0;
-      active.forEach(s => {
-        const isLower = LOWER_CLASSES.includes(s.className);
-        const subjList = isLower ? LOWER_SUBJECTS : UPPER_SUBJECTS;
-        if (!subjList.includes(sub)) return;
-        const pct = subjectPct(s, sub, isLower);
-        if (pct !== undefined) { sumPct += pct; count++; }
+    return {cls,avgPct:cnt?Math.round(sum/cnt):null};
+  }),[active,termMarks,perfTk]);
+  const subjectPerformance = useMemo(()=>{
+    const allSubs=[...new Set([...UPPER_SUBJECTS,...LOWER_SUBJECTS])];
+    return allSubs.map(sub=>{
+      let sum=0,cnt=0;
+      active.forEach(s=>{
+        const isLower=LOWER_CLASSES.includes(s.className);
+        if(!(isLower?LOWER_SUBJECTS:UPPER_SUBJECTS).includes(sub))return;
+        const pct=subjectPct(s,sub,isLower);
+        if(pct!==undefined){sum+=pct;cnt++;}
       });
-      return { sub, avgPct: count ? Math.round(sumPct / count) : null, entries: count };
-    }).filter(r => r.entries > 0);
-  }, [active, termMarks, perfTk]);
-  const perfBarColor = (pct) => pct>=65 ? "linear-gradient(90deg,#15803d,#22c55e)" : pct>=45 ? "linear-gradient(90deg,#b45309,#f59e0b)" : "linear-gradient(90deg,#b91c1c,#ef4444)";
+      return {sub,avgPct:cnt?Math.round(sum/cnt):null,entries:cnt};
+    }).filter(r=>r.entries>0);
+  },[active,termMarks,perfTk]);
+  // Per-class subject performance for the selected single class
+  const classSubjectPerf = useMemo(()=>{
+    const isLower=LOWER_CLASSES.includes(subjectClass);
+    const subjects=isLower?LOWER_SUBJECTS:UPPER_SUBJECTS;
+    const classStudents=active.filter(s=>s.className===subjectClass);
+    return subjects.map(sub=>{
+      let sum=0,cnt=0;
+      classStudents.forEach(s=>{
+        const pct=subjectPct(s,sub,isLower);
+        if(pct!==undefined){sum+=pct;cnt++;}
+      });
+      return {sub,avgPct:cnt?Math.round(sum/cnt):null,entries:cnt};
+    }).filter(r=>r.entries>0);
+  },[active,termMarks,perfTk,subjectClass]);
+  const barColorFn=(d)=>d.value>=65?"#22c55e":d.value>=45?"#f59e0b":"#ef4444";
+  const CARD_COLORS=[
+    {bg:"linear-gradient(135deg,#1e40af,#3b82f6)",icon:"👨‍🎓",label:"Total Learners",value:total},
+    {bg:"linear-gradient(135deg,#065f46,#10b981)",icon:"👦",label:"Boys",value:boys},
+    {bg:"linear-gradient(135deg,#7c2d12,#ef4444)",icon:"👧",label:"Girls",value:girls},
+    {bg:"linear-gradient(135deg,#4c1d95,#a855f7)",icon:"🏫",label:"Classes",value:ALL_CLASSES.length},
+  ];
   return (
-    <div>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:16,marginBottom:24}}>
-        {[
-          { label:"Total Pupils", value:total, color:"#1e40af", bg:"#dbeafe" },
-          { label:"Boys", value:boys, color:"#065f46", bg:"#d1fae5" },
-          { label:"Girls", value:girls, color:"#7c2d12", bg:"#fee2e2" },
-          { label:"Classes", value:ALL_CLASSES.length, color:"#6b21a8", bg:"#f3e8ff" },
-        ].map(c => (
-          <div key={c.label} style={{background:c.bg,borderRadius:12,padding:20,borderLeft:`4px solid ${c.color}`}}>
-            <div style={{fontSize:32,fontWeight:800,color:c.color}}>{c.value}</div>
-            <div style={{fontSize:13,color:c.color,fontWeight:600}}>{c.label}</div>
+    <div style={{display:"flex",flexDirection:"column",gap:20}}>
+      {/* ── Stat cards ── */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:14}}>
+        {CARD_COLORS.map(c=>(
+          <div key={c.label} style={{background:c.bg,borderRadius:16,padding:"18px 20px",color:"white",boxShadow:"0 4px 18px rgba(0,0,0,0.13)"}}>
+            <div style={{fontSize:30}}>{c.icon}</div>
+            <div style={{fontSize:34,fontWeight:900,lineHeight:1.1,marginTop:4}}>{c.value}</div>
+            <div style={{fontSize:12,fontWeight:600,opacity:0.88,marginTop:4}}>{c.label}</div>
           </div>
         ))}
       </div>
+      {/* ── Row 2: Enrolment bar + Gender pie ── */}
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
-        <div style={{background:"white",borderRadius:12,padding:20,border:"1px solid #e5e7eb"}}>
-          <h3 style={{margin:"0 0 16px",color:"#1e3a6e",fontSize:15}}>Enrolment by Class</h3>
-          {classCounts.map(({cls,count}) => (
-            <div key={cls} style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
-              <div style={{width:40,fontWeight:700,color:"#1e3a6e",fontSize:13}}>{cls}</div>
-              <div style={{flex:1,background:"#f1f5f9",borderRadius:4,height:20,overflow:"hidden"}}>
-                <div style={{width:`${total?Math.round(count/total*100):0}%`,background:"linear-gradient(90deg,#1e40af,#3b82f6)",height:"100%",borderRadius:4}}/>
-              </div>
-              <div style={{width:30,textAlign:"right",fontSize:13,fontWeight:600}}>{count}</div>
-            </div>
-          ))}
+        <div style={{background:"white",borderRadius:16,padding:20,boxShadow:"0 2px 12px rgba(0,0,0,0.07)"}}>
+          <div style={{fontWeight:800,color:"#1e3a6e",fontSize:14,marginBottom:12}}>📊 Enrolment by Class</div>
+          <BarChart
+            data={classCounts.map((c,i)=>({label:c.cls,value:c.count}))}
+            barColor={(d,i)=>BAR_COLORS[i%BAR_COLORS.length]}
+            valueLabel={v=>String(v)}
+            height={150}
+            emptyMsg="No learners yet"
+          />
         </div>
-        <div style={{background:"white",borderRadius:12,padding:20,border:"1px solid #e5e7eb"}}>
-          <h3 style={{margin:"0 0 16px",color:"#1e3a6e",fontSize:15}}>School Info</h3>
-          {[["School",school.name],["Motto",school.motto],["P.O. Box",school.poBox],["District",school.district],["Head Teacher",school.headTeacher],["Year",school.year]].map(([k,v])=>
-            v ? <div key={k} style={{fontSize:13,marginBottom:8,display:"flex",gap:8}}><span style={{fontWeight:600,color:"#374151",minWidth:90}}>{k}:</span><span style={{color:"#6b7280"}}>{v}</span></div> : null
+        <div style={{background:"white",borderRadius:16,padding:20,boxShadow:"0 2px 12px rgba(0,0,0,0.07)"}}>
+          <div style={{fontWeight:800,color:"#1e3a6e",fontSize:14,marginBottom:8}}>🥧 Gender Distribution</div>
+          <div style={{display:"flex",alignItems:"center",gap:16}}>
+            <div style={{flex:1,maxWidth:160}}>
+              <PieChart size={140} slices={[
+                {label:"Boys",value:boys,color:"#3b82f6"},
+                {label:"Girls",value:girls,color:"#ec4899"},
+              ]}/>
+            </div>
+            <div style={{display:"flex",flexDirection:"column",gap:10}}>
+              {[{label:"Boys",value:boys,color:"#3b82f6"},{label:"Girls",value:girls,color:"#ec4899"}].map(s=>(
+                <div key={s.label} style={{display:"flex",alignItems:"center",gap:8}}>
+                  <div style={{width:12,height:12,borderRadius:3,background:s.color}}/>
+                  <div style={{fontSize:13,fontWeight:700,color:"#374151"}}>{s.label}</div>
+                  <div style={{fontSize:13,color:"#6b7280"}}>{s.value} ({total?Math.round(s.value/total*100):0}%)</div>
+                </div>
+              ))}
+              <div style={{marginTop:8,fontSize:11,color:"#9ca3af"}}>Total: {total}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      {/* ── School info card ── */}
+      <div style={{background:"linear-gradient(135deg,#fefce8,#fef9c3)",borderRadius:16,padding:20,boxShadow:"0 2px 12px rgba(0,0,0,0.07)"}}>
+        <div style={{fontWeight:800,color:"#1e3a6e",fontSize:14,marginBottom:12}}>🏫 School Info</div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:8}}>
+          {[["School",school.name],["Motto",school.motto],["P.O. Box",school.poBox],["District",school.district],["Head Teacher",school.headTeacher],["Academic Year",school.year]].map(([k,v])=>
+            v ? <div key={k} style={{fontSize:13}}><span style={{fontWeight:700,color:"#1e3a6e"}}>{k}:</span> <span style={{color:"#374151"}}>{v}</span></div> : null
           )}
         </div>
       </div>
-      <div style={{background:"white",borderRadius:12,padding:20,border:"1px solid #e5e7eb",marginTop:16}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end",flexWrap:"wrap",gap:10,marginBottom:16}}>
-          <h3 style={{margin:0,color:"#1e3a6e",fontSize:15}}>📈 General Performance by Class</h3>
-          <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"flex-end"}}>
-            <Sel label="Term" value={perfTerm} onChange={v=>setPerfTerm(v)} opts={TERMS}/>
-            <div><label style={lbl}>Year</label><input type="number" value={perfYear} onChange={e=>setPerfYear(e.target.value)} style={{...inp,width:90}}/></div>
+      {/* ── Term selector ── */}
+      <div style={{background:"linear-gradient(135deg,#1e3a6e,#1e40af)",borderRadius:16,padding:"14px 20px",display:"flex",gap:16,flexWrap:"wrap",alignItems:"flex-end",boxShadow:"0 4px 18px rgba(30,58,110,0.3)"}}>
+        <div style={{color:"white",fontWeight:800,fontSize:14,alignSelf:"center"}}>📅 Performance Period</div>
+        <div>
+          <label style={{color:"rgba(255,255,255,0.75)",fontSize:11,display:"block",marginBottom:3}}>Term</label>
+          <select value={perfTerm} onChange={e=>setPerfTerm(e.target.value)} style={{padding:"5px 10px",borderRadius:8,border:"none",fontWeight:700,fontSize:13}}>
+            {TERMS.map(t=><option key={t}>{t}</option>)}
+          </select>
+        </div>
+        <div>
+          <label style={{color:"rgba(255,255,255,0.75)",fontSize:11,display:"block",marginBottom:3}}>Year</label>
+          <input type="number" value={perfYear} onChange={e=>setPerfYear(e.target.value)} style={{padding:"5px 10px",borderRadius:8,border:"none",fontWeight:700,fontSize:13,width:90}}/>
+        </div>
+      </div>
+      {/* ── General class performance bar chart ── */}
+      <div style={{background:"white",borderRadius:16,padding:20,boxShadow:"0 2px 12px rgba(0,0,0,0.07)"}}>
+        <div style={{fontWeight:800,color:"#1e3a6e",fontSize:14,marginBottom:4}}>📈 Overall Performance by Class — {perfTerm} {perfYear}</div>
+        <div style={{fontSize:11,color:"#9ca3af",marginBottom:14}}>Average % across all subjects and learners per class</div>
+        {classPerformance.every(c=>c.avgPct===null)
+          ? <div style={{color:"#9ca3af",fontSize:13,textAlign:"center",padding:20}}>No marks entered yet for {perfTerm} {perfYear}.</div>
+          : <BarChart
+              data={classPerformance.map(c=>({label:c.cls,value:c.avgPct??0}))}
+              barColor={barColorFn}
+              height={160}
+              emptyMsg="No data"
+            />
+        }
+        <div style={{display:"flex",gap:16,flexWrap:"wrap",marginTop:10,fontSize:11}}>
+          {[{color:"#22c55e",label:"Good (65%+)"},{color:"#f59e0b",label:"Fair (45–64%)"},{color:"#ef4444",label:"Needs work (<45%)"}].map(l=>(
+            <div key={l.label} style={{display:"flex",alignItems:"center",gap:5}}><div style={{width:10,height:10,borderRadius:2,background:l.color}}/><span style={{color:"#6b7280"}}>{l.label}</span></div>
+          ))}
+        </div>
+      </div>
+      {/* ── Whole-school subject performance bar chart ── */}
+      <div style={{background:"white",borderRadius:16,padding:20,boxShadow:"0 2px 12px rgba(0,0,0,0.07)"}}>
+        <div style={{fontWeight:800,color:"#1e3a6e",fontSize:14,marginBottom:4}}>📚 Subject Performance — Whole School — {perfTerm} {perfYear}</div>
+        <div style={{fontSize:11,color:"#9ca3af",marginBottom:14}}>Average % per subject across all learners who study it</div>
+        {subjectPerformance.length===0
+          ? <div style={{color:"#9ca3af",fontSize:13,textAlign:"center",padding:20}}>No marks entered yet.</div>
+          : <BarChart
+              data={subjectPerformance.map(r=>({label:r.sub,value:r.avgPct??0}))}
+              barColor={(d,i)=>subColor(d.label,i)}
+              height={160}
+              emptyMsg="No data"
+            />
+        }
+      </div>
+      {/* ── Per-class subject breakdown bar chart ── */}
+      <div style={{background:"white",borderRadius:16,padding:20,boxShadow:"0 2px 12px rgba(0,0,0,0.07)"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end",flexWrap:"wrap",gap:10,marginBottom:14}}>
+          <div>
+            <div style={{fontWeight:800,color:"#1e3a6e",fontSize:14}}>🎯 Subject Breakdown for {subjectClass} — {perfTerm} {perfYear}</div>
+            <div style={{fontSize:11,color:"#9ca3af",marginTop:2}}>Average % per subject for this class only</div>
+          </div>
+          <div>
+            <label style={{fontSize:11,color:"#6b7280",display:"block",marginBottom:3}}>Select Class</label>
+            <select value={subjectClass} onChange={e=>setSubjectClass(e.target.value)} style={{padding:"5px 10px",borderRadius:8,border:"1px solid #d1d5db",fontWeight:700,fontSize:13}}>
+              {ALL_CLASSES.map(c=><option key={c}>{c}</option>)}
+            </select>
           </div>
         </div>
-        {classPerformance.every(c=>c.avgPct===null) ? (
-          <div style={{color:"#9ca3af",fontSize:13,textAlign:"center",padding:20}}>No marks entered yet for {perfTerm} {perfYear}.</div>
-        ) : classPerformance.map(({cls,avgPct,pupils}) => (
-          <div key={cls} style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
-            <div style={{width:40,fontWeight:700,color:"#1e3a6e",fontSize:13}}>{cls}</div>
-            <div style={{flex:1,background:"#f1f5f9",borderRadius:4,height:22,overflow:"hidden"}}>
-              {avgPct!==null && <div style={{width:`${avgPct}%`,background:perfBarColor(avgPct),height:"100%",borderRadius:4}}/>}
-            </div>
-            <div style={{width:54,textAlign:"right",fontSize:13,fontWeight:700,color:"#1e3a6e"}}>{avgPct===null?"-":`${avgPct}%`}</div>
+        {classSubjectPerf.length===0
+          ? <div style={{color:"#9ca3af",fontSize:13,textAlign:"center",padding:20}}>No marks entered for {subjectClass} this period.</div>
+          : <BarChart
+              data={classSubjectPerf.map(r=>({label:r.sub,value:r.avgPct??0}))}
+              barColor={(d,i)=>subColor(d.label,i)}
+              height={160}
+              emptyMsg="No data"
+            />
+        }
+        {classSubjectPerf.length>0&&(
+          <div style={{display:"flex",gap:10,flexWrap:"wrap",marginTop:12}}>
+            {classSubjectPerf.map((r,i)=>(
+              <div key={r.sub} style={{display:"flex",alignItems:"center",gap:5,fontSize:11}}>
+                <div style={{width:10,height:10,borderRadius:2,background:subColor(r.sub,i)}}/>
+                <span style={{fontWeight:700,color:"#374151"}}>{r.sub}</span>
+                <span style={{color:"#6b7280"}}>{r.avgPct}%</span>
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
-      <div style={{background:"white",borderRadius:12,padding:20,border:"1px solid #e5e7eb",marginTop:16}}>
-        <h3 style={{margin:"0 0 16px",color:"#1e3a6e",fontSize:15}}>📚 Subject Performance - Whole School ({perfTerm} {perfYear})</h3>
-        {subjectPerformance.length===0 ? (
-          <div style={{color:"#9ca3af",fontSize:13,textAlign:"center",padding:20}}>No marks entered yet for {perfTerm} {perfYear}.</div>
-        ) : subjectPerformance.map(({sub,avgPct}) => (
-          <div key={sub} style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
-            <div style={{width:70,fontWeight:700,color:"#1e3a6e",fontSize:12}}>{sub}</div>
-            <div style={{flex:1,background:"#f1f5f9",borderRadius:4,height:22,overflow:"hidden"}}>
-              <div style={{width:`${avgPct}%`,background:perfBarColor(avgPct),height:"100%",borderRadius:4}}/>
-            </div>
-            <div style={{width:54,textAlign:"right",fontSize:13,fontWeight:700,color:"#1e3a6e"}}>{avgPct}%</div>
-          </div>
-        ))}
+        )}
       </div>
     </div>
   );
