@@ -981,14 +981,17 @@ function Sel({ label, value, onChange, opts }) {
     </div>
   );
 }
-// ── Fixed PositionBadge: suffix sits inline to the RIGHT of the number ──
+// ── Fixed PositionBadge: suffix sits as a superscript to the RIGHT of the number ──
 function PositionBadge({ pos, color = "#dc2626", size = 15 }) {
   if (pos === "-" || !pos) return <span style={{color, fontWeight:700, fontSize:size}}>-</span>;
   const suffix = ordinalSuffix(pos);
+  // Use <sup> so the browser itself handles the vertical offset -- this works
+  // reliably at any font size, including the very small sizes used in slips,
+  // unlike a manual marginTop which can push the suffix onto the same baseline
+  // as the number when the container is too narrow to expand vertically.
   return (
-    <span style={{display:"inline-flex", alignItems:"flex-start", lineHeight:1, color, fontWeight:700}}>
-      <span style={{fontSize:size}}>{pos}</span>
-      <span style={{fontSize:Math.max(8, Math.round(size * 0.58)), marginTop:1, fontWeight:700}}>{suffix}</span>
+    <span style={{color, fontWeight:700, fontSize:size, whiteSpace:"nowrap"}}>
+      {pos}<sup style={{fontSize:Math.max(6, Math.round(size * 0.5)), fontWeight:700, verticalAlign:"super"}}>{suffix}</sup>
     </span>
   );
 }
