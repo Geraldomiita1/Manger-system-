@@ -87,8 +87,28 @@ async function loadShared(key, def) {
     return res && res.value != null ? JSON.parse(res.value) : def;
   } catch { return def; }
 }
+// The username of whoever is currently logged in -- set right after login
+// and cleared on logout. Every saveShared call stamps this into the
+// audit log so the Audit Log page shows the real username.
+let _currentAuditUser = "system";
+function setAuditUser(username) { _currentAuditUser = username || "system"; }
+// Append one audit entry to the shared audit log stored in window.storage.
+// We keep a rolling list (max 500 entries) so it doesn't grow forever.
+async function writeAuditEntry(key, action) {
+  try {
+    const res = await window.storage.get("mkis_audit_log", true).catch(()=>null);
+    const existing = res?.value ? JSON.parse(res.value) : [];
+    const entry = { at: new Date().toISOString(), who: _currentAuditUser, action, key };
+    const updated = [entry, ...existing].slice(0, 500);
+    await window.storage.set("mkis_audit_log", JSON.stringify(updated), true);
+  } catch {}
+}
 async function saveShared(key, val) {
-  try { await window.storage.set(key, JSON.stringify(val), true); } catch {}
+  try {
+    await window.storage.set(key, JSON.stringify(val), true);
+    // Write audit entry after every save so Audit Log shows real username
+    await writeAuditEntry(key, "UPDATE");
+  } catch {}
 }
 // ─── NO-DATA-LOSS WRITE LAYER ───────────────────────────────────────────────
 // Problem this solves: two devices can each hold a slightly different local
@@ -1380,7 +1400,7 @@ export default function App() {
     const doLogin = () => {
       verifyAccountLogin(accounts, loginUser, loginPw).then(acct => {
         if (acct) {
-          setAuthed(true); setRole(acct.role); setCurrentUser(acct.username); setLoginErr(""); setLoginPw("");
+          setAuthed(true); setRole(acct.role); setCurrentUser(acct.username); setAuditUser(acct.username); setLoginErr(""); setLoginPw("");
         } else {
           setLoginErr("Incorrect username or password");
         }
@@ -1447,7 +1467,7 @@ export default function App() {
             Signed in as <b style={{color:"white"}}>{currentUser}</b> ({role === "admin" ? "Admin" : "Teacher"})
           </div>
         )}
-        <button onClick={()=>{ setAuthed(false); setRole(null); setCurrentUser(null); setLoginUser(""); setPage("DASHBOARD"); }} style={{padding:"12px 14px",background:"transparent",border:"none",color:"rgba(255,255,255,0.6)",textAlign:"left",cursor:"pointer",fontSize:13,display:"flex",alignItems:"center",gap:10}}>
+        <button onClick={()=>{ setAuthed(false); setRole(null); setCurrentUser(null); setAuditUser(null); setLoginUser(""); setPage("DASHBOARD"); }} style={{padding:"12px 14px",background:"transparent",border:"none",color:"rgba(255,255,255,0.6)",textAlign:"left",cursor:"pointer",fontSize:13,display:"flex",alignItems:"center",gap:10}}>
           <span>🚪</span>{sideOpen && "Logout"}
         </button>
       </div>
@@ -4548,101 +4568,103 @@ export default function Page() {
 function AuditLog() {
   const [rows, setRows] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
-  const [err, setErr] = React.useState("");
   const [filter, setFilter] = React.useState("");
+  const [whoFilter, setWhoFilter] = React.useState("");
   const [limit, setLimit] = React.useState(200);
-  const [expanded, setExpanded] = React.useState(null);
 
   const load = React.useCallback(async () => {
-    setLoading(true); setErr("");
-    let q = supabase.from("kv_audit").select("*").order("changed_at", { ascending: false }).limit(limit);
-    if (filter.trim()) q = q.ilike("key", `%${filter.trim()}%`);
-    const { data, error } = await q;
-    if (error) setErr(error.message); else setRows(data || []);
+    setLoading(true);
+    try {
+      const res = await window.storage.get("mkis_audit_log", true).catch(()=>null);
+      const all = res?.value ? JSON.parse(res.value) : [];
+      setRows(all);
+    } catch { setRows([]); }
     setLoading(false);
-  }, [filter, limit]);
+  }, []);
 
   React.useEffect(() => { load(); }, [load]);
 
   const fmt = (s) => { try { return new Date(s).toLocaleString(); } catch { return s; } };
-  const preview = (v) => {
-    if (v == null) return <span style={{color:"#9ca3af"}}>—</span>;
-    const s = String(v);
-    return s.length > 120 ? s.slice(0,120) + "…" : s;
-  };
-  const actionColor = (a) => a === "INSERT" ? "#059669" : a === "DELETE" ? "#dc2626" : "#2563eb";
+  const keyLabel = (key) => ({
+    mkis_students:"Students", mkis_termmarks:"Term Marks", mkis_monthlymarks:"Monthly Marks",
+    mkis_bands:"Grade Bands", mkis_divisions:"Divisions", mkis_school:"School Settings",
+    mkis_accounts:"Accounts", mkis_changerequests:"Change Requests", mkis_initials:"Initials",
+    mkis_locked_term:"Term Lock", mkis_locked_monthly:"Monthly Lock",
+  }[key] || key);
+
+  const filtered = rows
+    .filter(r => !filter.trim() || (r.key||"").toLowerCase().includes(filter.trim().toLowerCase()))
+    .filter(r => !whoFilter.trim() || (r.who||"").toLowerCase().includes(whoFilter.trim().toLowerCase()))
+    .slice(0, limit);
 
   const exportCsv = () => {
-    const head = ["changed_at","changed_by_email","action","key","old_value","new_value"];
-    const esc = (v) => `"${String(v ?? "").replace(/"/g,'""')}"`;
-    const csv = [head.join(","), ...rows.map(r => head.map(h => esc(r[h])).join(","))].join("\n");
-    const blob = new Blob([csv], { type:"text/csv" });
+    const head = ["Date/Time","Who","Action","Data Key"];
+    const esc = (v) => `"${String(v??"").replace(/"/g,'""')}"`;
+    const csv = [head.join(","), ...filtered.map(r=>[r.at,r.who,r.action,r.key].map(esc).join(","))].join("\n");
+    const blob = new Blob([csv],{type:"text/csv"});
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
-    a.href = url; a.download = `audit_log_${new Date().toISOString().slice(0,19).replace(/[:T]/g,"-")}.csv`;
+    a.href=url; a.download=`audit_log_${new Date().toISOString().slice(0,10)}.csv`;
     a.click(); URL.revokeObjectURL(url);
   };
 
+  // Assign a consistent colour to each unique username
+  const palette = ["#dbeafe","#dcfce7","#fef9c3","#fce7f3","#ede9fe","#ffedd5","#cffafe"];
+  const whoColors = {};
+  let colorIdx = 0;
+  rows.forEach(r=>{ if(r.who&&!whoColors[r.who]){ whoColors[r.who]=palette[colorIdx%palette.length]; colorIdx++; } });
+
   return (
-    <div style={{background:"white",borderRadius:8,padding:20,boxShadow:"0 1px 3px rgba(0,0,0,0.1)"}}>
+    <div style={{background:"white",borderRadius:12,padding:20,boxShadow:"0 1px 3px rgba(0,0,0,0.1)"}}>
       <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap",marginBottom:16}}>
         <h2 style={{margin:0,fontSize:18,fontWeight:700,color:"#1e3a6e"}}>🕓 Audit Log</h2>
-        <span style={{fontSize:12,color:"#6b7280"}}>Every change made to results, students and settings — with who and when.</span>
+        <span style={{fontSize:12,color:"#6b7280"}}>Every save made — with who and when.</span>
+        <button onClick={load} style={{...btnPrimary,padding:"6px 14px",fontSize:12,marginLeft:"auto"}}>🔄 Refresh</button>
+        <button onClick={exportCsv} style={{...btnExcel,padding:"6px 14px",fontSize:12}}>📊 Export CSV</button>
       </div>
-      <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:12}}>
-        <input value={filter} onChange={e=>setFilter(e.target.value)} placeholder="Filter by key (e.g. termMarks, students)"
-          style={{flex:"1 1 220px",padding:"8px 10px",border:"1px solid #d1d5db",borderRadius:6,fontSize:13}} />
+      <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:14}}>
+        <input value={filter} onChange={e=>setFilter(e.target.value)} placeholder="Filter by data key…"
+          style={{flex:"1 1 180px",padding:"8px 10px",border:"1px solid #d1d5db",borderRadius:6,fontSize:13}}/>
+        <input value={whoFilter} onChange={e=>setWhoFilter(e.target.value)} placeholder="Filter by username…"
+          style={{flex:"1 1 160px",padding:"8px 10px",border:"1px solid #d1d5db",borderRadius:6,fontSize:13}}/>
         <select value={limit} onChange={e=>setLimit(Number(e.target.value))} style={{padding:"8px 10px",border:"1px solid #d1d5db",borderRadius:6,fontSize:13}}>
-          <option value={100}>Last 100</option>
-          <option value={200}>Last 200</option>
-          <option value={500}>Last 500</option>
-          <option value={1000}>Last 1000</option>
+          {[100,200,500].map(n=><option key={n} value={n}>Last {n}</option>)}
         </select>
-        <button onClick={load} style={{padding:"8px 14px",background:"#2563eb",color:"white",border:"none",borderRadius:6,cursor:"pointer",fontSize:13,fontWeight:600}}>🔄 Refresh</button>
-        <button onClick={exportCsv} disabled={!rows.length} style={{padding:"8px 14px",background:"#059669",color:"white",border:"none",borderRadius:6,cursor:"pointer",fontSize:13,fontWeight:600,opacity:rows.length?1:0.5}}>⬇️ Export CSV</button>
       </div>
-      {err && <div style={{padding:10,background:"#fef2f2",color:"#991b1b",borderRadius:6,fontSize:13,marginBottom:12}}>Error: {err}</div>}
-      {loading ? <div style={{padding:20,textAlign:"center",color:"#6b7280"}}>Loading…</div> : (
+      {loading ? (
+        <div style={{textAlign:"center",padding:40,color:"#6b7280"}}>Loading…</div>
+      ) : filtered.length === 0 ? (
+        <div style={{textAlign:"center",padding:40,color:"#9ca3af",fontSize:13}}>
+          {rows.length===0
+            ? "No audit entries yet. They appear here after any save is made while someone is logged in."
+            : "No entries match the filter."}
+        </div>
+      ) : (
         <div style={{overflowX:"auto"}}>
-          <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+          <table style={{width:"100%",fontSize:13,borderCollapse:"collapse"}}>
             <thead>
-              <tr style={{background:"#f9fafb",textAlign:"left"}}>
-                <th style={{padding:"8px 10px",borderBottom:"1px solid #e5e7eb"}}>When</th>
-                <th style={{padding:"8px 10px",borderBottom:"1px solid #e5e7eb"}}>Who</th>
-                <th style={{padding:"8px 10px",borderBottom:"1px solid #e5e7eb"}}>Action</th>
-                <th style={{padding:"8px 10px",borderBottom:"1px solid #e5e7eb"}}>Key</th>
-                <th style={{padding:"8px 10px",borderBottom:"1px solid #e5e7eb"}}>Change</th>
+              <tr style={{background:"#1e3a6e",color:"white"}}>
+                {["Date / Time","Who","Action","Data Changed"].map(h=>(
+                  <th key={h} style={{padding:"10px 12px",textAlign:"left",fontWeight:700,whiteSpace:"nowrap"}}>{h}</th>
+                ))}
               </tr>
             </thead>
             <tbody>
-              {rows.length === 0 && <tr><td colSpan={5} style={{padding:20,textAlign:"center",color:"#9ca3af"}}>No audit entries yet.</td></tr>}
-              {rows.map(r => (
-                <React.Fragment key={r.id}>
-                  <tr style={{borderBottom:"1px solid #f3f4f6",cursor:"pointer"}} onClick={()=>setExpanded(expanded===r.id?null:r.id)}>
-                    <td style={{padding:"8px 10px",whiteSpace:"nowrap"}}>{fmt(r.changed_at)}</td>
-                    <td style={{padding:"8px 10px"}}>{r.changed_by_email || <span style={{color:"#9ca3af"}}>system</span>}</td>
-                    <td style={{padding:"8px 10px"}}><span style={{color:actionColor(r.action),fontWeight:700}}>{r.action}</span></td>
-                    <td style={{padding:"8px 10px",fontFamily:"monospace",color:"#374151"}}>{r.key}</td>
-                    <td style={{padding:"8px 10px",color:"#6b7280"}}>{expanded===r.id ? "▲ hide" : "▼ view"}</td>
-                  </tr>
-                  {expanded===r.id && (
-                    <tr><td colSpan={5} style={{padding:"10px 14px",background:"#f9fafb"}}>
-                      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
-                        <div>
-                          <div style={{fontSize:11,fontWeight:700,color:"#6b7280",marginBottom:4}}>BEFORE</div>
-                          <pre style={{margin:0,padding:8,background:"#fff",border:"1px solid #e5e7eb",borderRadius:4,maxHeight:300,overflow:"auto",fontSize:11,whiteSpace:"pre-wrap",wordBreak:"break-all"}}>{r.old_value ?? "(none)"}</pre>
-                        </div>
-                        <div>
-                          <div style={{fontSize:11,fontWeight:700,color:"#6b7280",marginBottom:4}}>AFTER</div>
-                          <pre style={{margin:0,padding:8,background:"#fff",border:"1px solid #e5e7eb",borderRadius:4,maxHeight:300,overflow:"auto",fontSize:11,whiteSpace:"pre-wrap",wordBreak:"break-all"}}>{r.new_value ?? "(none)"}</pre>
-                        </div>
-                      </div>
-                    </td></tr>
-                  )}
-                </React.Fragment>
+              {filtered.map((r,i)=>(
+                <tr key={i} style={{background:i%2===0?"white":"#f8fafc",borderBottom:"1px solid #f1f5f9"}}>
+                  <td style={{padding:"8px 12px",color:"#374151",whiteSpace:"nowrap"}}>{fmt(r.at)}</td>
+                  <td style={{padding:"8px 12px"}}>
+                    <span style={{background:whoColors[r.who]||"#f1f5f9",borderRadius:8,padding:"2px 10px",fontWeight:700,fontSize:12,color:"#1e3a6e"}}>{r.who||"system"}</span>
+                  </td>
+                  <td style={{padding:"8px 12px"}}>
+                    <span style={{background:"#dbeafe",color:"#1e40af",borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:700}}>{r.action||"UPDATE"}</span>
+                  </td>
+                  <td style={{padding:"8px 12px",color:"#374151",fontWeight:600}}>{keyLabel(r.key)}</td>
+                </tr>
               ))}
             </tbody>
           </table>
+          <div style={{fontSize:12,color:"#9ca3af",marginTop:10,textAlign:"right"}}>Showing {filtered.length} of {rows.length} entries</div>
         </div>
       )}
     </div>
