@@ -3743,64 +3743,134 @@ function ManageRequests({ changeRequests, approveChangeRequest, rejectChangeRequ
   );
 }
 // ─── MANAGE TEACHER PASSWORDS (admin only) ───────────────────────────────────
-function ManageTeacherPasswords({ accounts, setAccounts, currentUser }) {
-  const [drafts, setDrafts] = useState({}); // { [key]: newPlainPw }
-  const [msg, setMsg] = useState({}); // { [key]: "✅..." | "⚠️..." }
-  const teacherEntries = Object.entries(accounts || {})
-    .filter(([, a]) => a && a.role === "teacher")
-    .sort((a, b) => (a[1].username || "").localeCompare(b[1].username || ""));
-  const updatePw = (key) => {
-    const newPw = (drafts[key] || "").trim();
-    if (!newPw) { setMsg(m => ({ ...m, [key]: "⚠️ Enter a new password." })); return; }
-    if (newPw.length < 4) { setMsg(m => ({ ...m, [key]: "⚠️ Use at least 4 characters." })); return; }
-    hashPassword(newPw).then(hashed => {
-      setAccounts(prev => ({ ...prev, [key]: { ...prev[key], passwordHash: hashed } }));
-      setDrafts(d => ({ ...d, [key]: "" }));
-      setMsg(m => ({ ...m, [key]: "✅ Updated" }));
-      setTimeout(() => setMsg(m => ({ ...m, [key]: "" })), 2500);
+function AccountManager({ accounts, setAccounts, currentUser }) {
+  const [newUser, setNewUser] = useState("");
+  const [newPw, setNewPw]   = useState("");
+  const [newRole, setNewRole] = useState("teacher");
+  const [addMsg, setAddMsg] = useState("");
+  const [drafts, setDrafts] = useState({});   // { key: newPw }
+  const [pwMsg, setPwMsg]   = useState({});   // { key: msg }
+  const [nameEdits, setNameEdits] = useState({}); // { key: newUsername }
+  const [nameMsg, setNameMsg] = useState({});
+  const [confirmDel, setConfirmDel] = useState(null); // key to delete
+  const entries = Object.entries(accounts || {}).sort((a,b)=>(a[1].username||"").localeCompare(b[1].username||""));
+  const addAccount = async () => {
+    const uTrim = newUser.trim();
+    const pTrim = newPw.trim();
+    if (!uTrim) return setAddMsg("⚠️ Enter a username.");
+    if (pTrim.length < 4) return setAddMsg("⚠️ Password must be at least 4 characters.");
+    const key = uTrim.toLowerCase();
+    if (accounts[key]) return setAddMsg(`⚠️ Username "${uTrim}" already exists.`);
+    const hash = await hashPassword(pTrim);
+    setAccounts(prev => ({ ...prev, [key]: { username: uTrim, passwordHash: hash, role: newRole } }));
+    setNewUser(""); setNewPw(""); setAddMsg("✅ Account created.");
+    setTimeout(() => setAddMsg(""), 3000);
+  };
+  const resetPw = (key) => {
+    const p = (drafts[key]||"").trim();
+    if (!p) return setPwMsg(m=>({...m,[key]:"⚠️ Enter a password."}));
+    if (p.length < 4) return setPwMsg(m=>({...m,[key]:"⚠️ Min 4 characters."}));
+    hashPassword(p).then(hash => {
+      setAccounts(prev=>({...prev,[key]:{...prev[key],passwordHash:hash}}));
+      setDrafts(d=>({...d,[key]:""}));
+      setPwMsg(m=>({...m,[key]:"✅ Password updated."}));
+      setTimeout(()=>setPwMsg(m=>({...m,[key]:""})),3000);
     });
   };
+  const renameUser = (key) => {
+    const u = (nameEdits[key]||"").trim();
+    if (!u) return setNameMsg(m=>({...m,[key]:"⚠️ Enter a name."}));
+    const newKey = u.toLowerCase();
+    if (newKey !== key && accounts[newKey]) return setNameMsg(m=>({...m,[key]:`⚠️ "${u}" already taken.`}));
+    setAccounts(prev => {
+      const next = {...prev};
+      const acct = {...next[key], username: u};
+      delete next[key];
+      next[newKey] = acct;
+      return next;
+    });
+    setNameMsg(m=>({...m,[key]:"✅ Username updated."}));
+    setTimeout(()=>setNameMsg(m=>({...m,[key]:""})),3000);
+  };
+  const deleteAccount = (key) => {
+    setAccounts(prev => { const next={...prev}; delete next[key]; return next; });
+    setConfirmDel(null);
+  };
+  const card = {background:"white",borderRadius:12,padding:20,border:"1px solid #e5e7eb",marginBottom:16};
   return (
-    <div style={{background:"white",borderRadius:12,padding:20,border:"1px solid #e5e7eb"}}>
-      <h3 style={{margin:"0 0 6px",color:"#1e3a6e",fontSize:15,fontWeight:700}}>👥 Manage Teacher Passwords</h3>
-      <div style={{fontSize:12,color:"#6b7280",marginBottom:14}}>
-        As the administrator ({currentUser}), you can reset any teacher's password here. The teacher will use the new password on their next login.
-      </div>
-      {teacherEntries.length === 0 ? (
-        <div style={{fontSize:13,color:"#6b7280"}}>No teacher accounts found.</div>
-      ) : (
-        <div style={{overflowX:"auto"}}>
-          <table style={{width:"100%",fontSize:13,borderCollapse:"collapse"}}>
-            <thead>
-              <tr style={{background:"#dbeafe"}}>
-                {["Username","New Password","",""].map((h,i)=>(
-                  <th key={i} style={{padding:"8px 10px",textAlign:"left",color:"#1e3a6e",fontWeight:700}}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {teacherEntries.map(([key, a], i) => (
-                <tr key={key} style={{background:i%2===0?"white":"#f8fafc"}}>
-                  <td style={{padding:"8px 10px",fontWeight:600,color:"#1e3a6e"}}>{a.username}</td>
-                  <td style={{padding:"6px 10px"}}>
-                    <input
-                      type="text"
-                      value={drafts[key]||""}
-                      onChange={e=>setDrafts(d=>({...d,[key]:e.target.value}))}
-                      placeholder="Enter new password"
-                      style={{...inp,width:"100%"}}
-                    />
-                  </td>
-                  <td style={{padding:"6px 10px"}}>
-                    <button onClick={()=>updatePw(key)} style={{...btnPrimary,padding:"6px 14px",fontSize:12}}>Set Password</button>
-                  </td>
-                  <td style={{padding:"6px 10px",fontSize:12,color:msg[key]&&msg[key].startsWith("✅")?"#16a34a":"#dc2626"}}>{msg[key]||""}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+    <div>
+      {/* ── Add new account ── */}
+      <div style={card}>
+        <h3 style={{margin:"0 0 4px",color:"#1e3a6e",fontSize:15,fontWeight:700}}>➕ Add New Account</h3>
+        <div style={{fontSize:12,color:"#6b7280",marginBottom:14}}>Create a unique username and password for each teacher.</div>
+        <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"flex-end"}}>
+          <div>
+            <label style={lbl}>Username</label>
+            <input value={newUser} onChange={e=>setNewUser(e.target.value)} placeholder="e.g. MsAkello" style={{...inp,width:140}}/>
+          </div>
+          <div>
+            <label style={lbl}>Password</label>
+            <input type="text" value={newPw} onChange={e=>setNewPw(e.target.value)} placeholder="e.g. Akello2024!" style={{...inp,width:150}}/>
+          </div>
+          <div>
+            <label style={lbl}>Role</label>
+            <select value={newRole} onChange={e=>setNewRole(e.target.value)} style={{...inp,width:110}}>
+              <option value="teacher">Teacher</option>
+              <option value="admin">Admin</option>
+            </select>
+          </div>
+          <button onClick={addAccount} style={{...btnPrimary,padding:"7px 18px"}}>Create Account</button>
         </div>
-      )}
+        {addMsg && <div style={{marginTop:10,fontSize:13,color:addMsg.startsWith("✅")?"#16a34a":"#dc2626",fontWeight:600}}>{addMsg}</div>}
+      </div>
+      {/* ── Existing accounts ── */}
+      <div style={card}>
+        <h3 style={{margin:"0 0 4px",color:"#1e3a6e",fontSize:15,fontWeight:700}}>👥 All Accounts</h3>
+        <div style={{fontSize:12,color:"#6b7280",marginBottom:14}}>Change usernames, reset passwords, or delete accounts. You cannot delete your own account.</div>
+        {entries.length === 0 && <div style={{fontSize:13,color:"#6b7280"}}>No accounts yet.</div>}
+        {entries.map(([key, a], idx) => {
+          const isSelf = key === currentUser?.toLowerCase();
+          return (
+            <div key={key} style={{background:idx%2===0?"#f8fafc":"white",borderRadius:8,padding:"12px 14px",marginBottom:8,border:"1px solid #e5e7eb"}}>
+              <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:8}}>
+                <span style={{fontWeight:800,color:"#1e3a6e",fontSize:14}}>{a.username}</span>
+                <span style={{background:a.role==="admin"?"#dbeafe":"#dcfce7",color:a.role==="admin"?"#1e40af":"#15803d",borderRadius:8,padding:"2px 8px",fontSize:11,fontWeight:700}}>{a.role}</span>
+                {isSelf && <span style={{background:"#fef3c7",color:"#92400e",borderRadius:8,padding:"2px 8px",fontSize:11,fontWeight:700}}>YOU</span>}
+              </div>
+              <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"flex-end"}}>
+                {/* Rename */}
+                <div>
+                  <label style={{...lbl,fontSize:10}}>New Username</label>
+                  <input value={nameEdits[key]||""} onChange={e=>setNameEdits(n=>({...n,[key]:e.target.value}))} placeholder={a.username} style={{...inp,width:130,fontSize:12}}/>
+                </div>
+                <button onClick={()=>renameUser(key)} style={{...btnPrimary,padding:"5px 12px",fontSize:11}}>Rename</button>
+                {nameMsg[key] && <span style={{fontSize:11,color:nameMsg[key].startsWith("✅")?"#16a34a":"#dc2626",fontWeight:600}}>{nameMsg[key]}</span>}
+                <div style={{width:1,background:"#e5e7eb",height:30,margin:"0 4px"}}/>
+                {/* Reset password */}
+                <div>
+                  <label style={{...lbl,fontSize:10}}>New Password</label>
+                  <input type="text" value={drafts[key]||""} onChange={e=>setDrafts(d=>({...d,[key]:e.target.value}))} placeholder="New password" style={{...inp,width:150,fontSize:12}}/>
+                </div>
+                <button onClick={()=>resetPw(key)} style={{...btnPrimary,padding:"5px 12px",fontSize:11}}>Set Password</button>
+                {pwMsg[key] && <span style={{fontSize:11,color:pwMsg[key].startsWith("✅")?"#16a34a":"#dc2626",fontWeight:600}}>{pwMsg[key]}</span>}
+                {/* Delete */}
+                {!isSelf && (
+                  confirmDel === key
+                    ? <div style={{display:"flex",gap:6,alignItems:"center",marginLeft:8}}>
+                        <span style={{fontSize:12,color:"#dc2626",fontWeight:700}}>Delete "{a.username}"?</span>
+                        <button onClick={()=>deleteAccount(key)} style={{background:"#dc2626",color:"white",border:"none",borderRadius:6,padding:"4px 12px",fontSize:12,fontWeight:700,cursor:"pointer"}}>Yes, Delete</button>
+                        <button onClick={()=>setConfirmDel(null)} style={{background:"#6b7280",color:"white",border:"none",borderRadius:6,padding:"4px 10px",fontSize:12,cursor:"pointer"}}>Cancel</button>
+                      </div>
+                    : <button onClick={()=>setConfirmDel(key)} style={{background:"#fee2e2",color:"#dc2626",border:"1px solid #fca5a5",borderRadius:6,padding:"5px 12px",fontSize:11,fontWeight:700,cursor:"pointer",marginLeft:8}}>🗑 Delete</button>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <div style={{background:"#fef9c3",borderRadius:10,padding:14,fontSize:12,color:"#92400e",border:"1px solid #fde68a"}}>
+        💡 <b>Tip:</b> After adding or changing accounts, the new credentials take effect immediately — teachers can log in with their new username and password right away. To remove the old shared "Teacher / KIZITO172" account, find it in the list above and tap <b>Delete</b>.
+      </div>
     </div>
   );
 }
@@ -3909,7 +3979,7 @@ function Settings({ school, setSchool, bands, setBands, divisions, setDivisions,
         </div>
         {pwMsg&&<div style={{marginTop:8,fontSize:13,color:pwMsg.startsWith("✅")?"#16a34a":"#dc2626"}}>{pwMsg}</div>}
       </div>
-      <ManageTeacherPasswords accounts={accounts} setAccounts={setAccounts} currentUser={currentUser} />
+      <AccountManager accounts={accounts} setAccounts={setAccounts} currentUser={currentUser} />
       <div style={{background:"white",borderRadius:12,padding:20,border:"1px solid #e5e7eb"}}>
         <h3 style={{margin:"0 0 16px",color:"#1e3a6e",fontSize:15,fontWeight:700}}>🎯 Grade Bands</h3>
         <div style={{overflowX:"auto"}}>
