@@ -93,12 +93,20 @@ async function loadShared(key, def) {
 let _currentAuditUser = "system";
 function setAuditUser(username) { _currentAuditUser = username || "system"; }
 // Append one audit entry to the shared audit log stored in window.storage.
-// We keep a rolling list (max 500 entries) so it doesn't grow forever.
-async function writeAuditEntry(key, action) {
+// detail: a human-readable string describing exactly what changed, e.g.
+//   "Term Marks — P4 Term I 2026" or "Student added: John Okello (P3)"
+// action: "LOGIN", "LOGOUT", "UPDATE", "ADD", "DELETE", "LOCK", "UNLOCK" etc.
+async function writeAuditEntry(key, action, detail) {
   try {
     const res = await window.storage.get("mkis_audit_log", true).catch(()=>null);
     const existing = res?.value ? JSON.parse(res.value) : [];
-    const entry = { at: new Date().toISOString(), who: _currentAuditUser, action, key };
+    const entry = {
+      at: new Date().toISOString(),
+      who: _currentAuditUser,
+      action,
+      key,
+      detail: detail || "",
+    };
     const updated = [entry, ...existing].slice(0, 500);
     await window.storage.set("mkis_audit_log", JSON.stringify(updated), true);
   } catch {}
@@ -106,10 +114,15 @@ async function writeAuditEntry(key, action) {
 async function saveShared(key, val) {
   try {
     await window.storage.set(key, JSON.stringify(val), true);
-    // Write audit entry after every save so Audit Log shows real username
-    await writeAuditEntry(key, "UPDATE");
   } catch {}
 }
+// Friendly key → section label map
+const KEY_LABEL = {
+  mkis_students:"Students", mkis_termmarks:"Term Marks", mkis_monthlymarks:"Monthly Marks",
+  mkis_bands:"Grade Bands", mkis_divisions:"Divisions", mkis_school:"School Settings",
+  mkis_accounts:"Accounts", mkis_changerequests:"Change Requests", mkis_initials:"Initials",
+  mkis_locked_term:"Term Lock", mkis_locked_monthly:"Monthly Lock",
+};
 // ─── NO-DATA-LOSS WRITE LAYER ───────────────────────────────────────────────
 // Problem this solves: two devices can each hold a slightly different local
 // snapshot of the same shared key. If a save simply pushes "whatever my
@@ -1159,14 +1172,25 @@ export default function App() {
   // diverging from what's actually on disk. Skipped until the initial load
   // finishes, so we never merge shared data with empty defaults on first
   // render. ──
+  // lastAuditDetail: any mutation can stamp a detail string here before
+  // updating state so the save effect below picks it up and writes a
+  // meaningful audit entry instead of a generic "UPDATE".
+  const lastAuditDetail = useRef({});
+  const stampAudit = (key, detail) => { lastAuditDetail.current[key] = detail; };
   useEffect(() => { if (dataReady) { (async () => {
     if (forceWriteRef.current.has("mkis_students")) {
       forceWriteRef.current.delete("mkis_students");
       await saveShared("mkis_students", students);
+      await writeAuditEntry("mkis_students", "UPDATE", lastAuditDetail.current["mkis_students"] || `Students list updated (${students.length} total)`);
+      lastAuditDetail.current["mkis_students"] = "";
       lastSeenRef.current.mkis_students = JSON.stringify(students);
       return;
     }
     const merged = await updateShared("mkis_students", students, { deletedStudentIds: deletedStudentIdsRef.current });
+    if (JSON.stringify(merged) !== JSON.stringify(students)) {
+      await writeAuditEntry("mkis_students", "UPDATE", lastAuditDetail.current["mkis_students"] || `Students list updated (${students.length} total)`);
+      lastAuditDetail.current["mkis_students"] = "";
+    }
     lastSeenRef.current.mkis_students = JSON.stringify(merged);
     if (JSON.stringify(merged) !== JSON.stringify(students)) setStudents(merged);
   })(); } }, [students, dataReady]);
@@ -1174,10 +1198,16 @@ export default function App() {
     if (forceWriteRef.current.has("mkis_termmarks")) {
       forceWriteRef.current.delete("mkis_termmarks");
       await saveShared("mkis_termmarks", termMarks);
+      await writeAuditEntry("mkis_termmarks", "UPDATE", lastAuditDetail.current["mkis_termmarks"] || "Term marks updated");
+      lastAuditDetail.current["mkis_termmarks"] = "";
       lastSeenRef.current.mkis_termmarks = JSON.stringify(termMarks);
       return;
     }
     const merged = await updateShared("mkis_termmarks", termMarks);
+    if (JSON.stringify(merged) !== JSON.stringify(termMarks)) {
+      await writeAuditEntry("mkis_termmarks", "UPDATE", lastAuditDetail.current["mkis_termmarks"] || "Term marks updated");
+      lastAuditDetail.current["mkis_termmarks"] = "";
+    }
     lastSeenRef.current.mkis_termmarks = JSON.stringify(merged);
     if (JSON.stringify(merged) !== JSON.stringify(termMarks)) setTermMarks(merged);
   })(); } }, [termMarks, dataReady]);
@@ -1185,34 +1215,56 @@ export default function App() {
     if (forceWriteRef.current.has("mkis_monthlymarks")) {
       forceWriteRef.current.delete("mkis_monthlymarks");
       await saveShared("mkis_monthlymarks", monthlyMarks);
+      await writeAuditEntry("mkis_monthlymarks", "UPDATE", lastAuditDetail.current["mkis_monthlymarks"] || "Monthly marks updated");
+      lastAuditDetail.current["mkis_monthlymarks"] = "";
       lastSeenRef.current.mkis_monthlymarks = JSON.stringify(monthlyMarks);
       return;
     }
     const merged = await updateShared("mkis_monthlymarks", monthlyMarks);
+    if (JSON.stringify(merged) !== JSON.stringify(monthlyMarks)) {
+      await writeAuditEntry("mkis_monthlymarks", "UPDATE", lastAuditDetail.current["mkis_monthlymarks"] || "Monthly marks updated");
+      lastAuditDetail.current["mkis_monthlymarks"] = "";
+    }
     lastSeenRef.current.mkis_monthlymarks = JSON.stringify(merged);
     if (JSON.stringify(merged) !== JSON.stringify(monthlyMarks)) setMonthlyMarks(merged);
   })(); } }, [monthlyMarks, dataReady]);
-  useEffect(() => { if (dataReady) { lastSeenRef.current.mkis_bands = JSON.stringify(bands); saveShared("mkis_bands", bands); } }, [bands, dataReady]);
-  useEffect(() => { if (dataReady) { lastSeenRef.current.mkis_divisions = JSON.stringify(divisions); saveShared("mkis_divisions", divisions); } }, [divisions, dataReady]);
-  useEffect(() => { if (dataReady) { lastSeenRef.current.mkis_school = JSON.stringify(school); saveShared("mkis_school", school); } }, [school, dataReady]);
+  useEffect(() => { if (dataReady) { lastSeenRef.current.mkis_bands = JSON.stringify(bands); saveShared("mkis_bands", bands); writeAuditEntry("mkis_bands","UPDATE","Grade bands updated"); } }, [bands, dataReady]);
+  useEffect(() => { if (dataReady) { lastSeenRef.current.mkis_divisions = JSON.stringify(divisions); saveShared("mkis_divisions", divisions); writeAuditEntry("mkis_divisions","UPDATE","Division thresholds updated"); } }, [divisions, dataReady]);
+  useEffect(() => { if (dataReady) { lastSeenRef.current.mkis_school = JSON.stringify(school); saveShared("mkis_school", school); writeAuditEntry("mkis_school","UPDATE","School settings updated"); } }, [school, dataReady]);
   useEffect(() => { if (dataReady) { (async () => {
     const merged = await updateShared("mkis_accounts", accounts);
+    if (JSON.stringify(merged) !== JSON.stringify(accounts)) {
+      await writeAuditEntry("mkis_accounts", "UPDATE", lastAuditDetail.current["mkis_accounts"] || "Accounts updated");
+      lastAuditDetail.current["mkis_accounts"] = "";
+    }
     lastSeenRef.current.mkis_accounts = JSON.stringify(merged);
     if (JSON.stringify(merged) !== JSON.stringify(accounts)) setAccounts(merged);
   })(); } }, [accounts, dataReady]);
   useEffect(() => { if (dataReady) { (async () => {
     const merged = await updateShared("mkis_changerequests", changeRequests, { deletedRequestIds: deletedRequestIdsRef.current });
+    if (JSON.stringify(merged) !== JSON.stringify(changeRequests)) {
+      await writeAuditEntry("mkis_changerequests", "UPDATE", lastAuditDetail.current["mkis_changerequests"] || "Change request updated");
+      lastAuditDetail.current["mkis_changerequests"] = "";
+    }
     lastSeenRef.current.mkis_changerequests = JSON.stringify(merged);
     if (JSON.stringify(merged) !== JSON.stringify(changeRequests)) setChangeRequests(merged);
   })(); } }, [changeRequests, dataReady]);
-  useEffect(() => { if (dataReady) { lastSeenRef.current.mkis_initials = JSON.stringify(initials); saveShared("mkis_initials", initials); } }, [initials, dataReady]);
+  useEffect(() => { if (dataReady) { lastSeenRef.current.mkis_initials = JSON.stringify(initials); saveShared("mkis_initials", initials); writeAuditEntry("mkis_initials","UPDATE","Teacher initials updated"); } }, [initials, dataReady]);
   useEffect(() => { if (dataReady) { (async () => {
     const merged = await updateShared("mkis_locked_term", lockedTerm);
+    if (JSON.stringify(merged) !== JSON.stringify(lockedTerm)) {
+      await writeAuditEntry("mkis_locked_term", "UPDATE", lastAuditDetail.current["mkis_locked_term"] || "Term mark lock updated");
+      lastAuditDetail.current["mkis_locked_term"] = "";
+    }
     lastSeenRef.current.mkis_locked_term = JSON.stringify(merged);
     if (JSON.stringify(merged) !== JSON.stringify(lockedTerm)) setLockedTerm(merged);
   })(); } }, [lockedTerm, dataReady]);
   useEffect(() => { if (dataReady) { (async () => {
     const merged = await updateShared("mkis_locked_monthly", lockedMonthly);
+    if (JSON.stringify(merged) !== JSON.stringify(lockedMonthly)) {
+      await writeAuditEntry("mkis_locked_monthly", "UPDATE", lastAuditDetail.current["mkis_locked_monthly"] || "Monthly mark lock updated");
+      lastAuditDetail.current["mkis_locked_monthly"] = "";
+    }
     lastSeenRef.current.mkis_locked_monthly = JSON.stringify(merged);
     if (JSON.stringify(merged) !== JSON.stringify(lockedMonthly)) setLockedMonthly(merged);
   })(); } }, [lockedMonthly, dataReady]);
@@ -1252,38 +1304,47 @@ export default function App() {
   }, [dataReady]);
   const updateTermMark = useCallback((sid, tk, sub, field, val) => {
     markEditing();
+    const [term, year] = tk.split("__");
+    const s = students.find(x=>x.id===sid);
+    stampAudit("mkis_termmarks", `Term Mark — ${s?.className||"?"} ${term} ${year} — ${s?.name||sid} — ${sub} ${field}`);
     setTermMarks(prev => ({
       ...prev,
       [sid]: { ...prev[sid], [tk]: { ...prev[sid]?.[tk], [sub]: { ...prev[sid]?.[tk]?.[sub], [field]: val } } }
     }));
-  }, []);
+  }, [students]);
   const updateMonthlyMark = useCallback((sid, tk, month, sub, field, val) => {
     markEditing();
+    const [term, year] = tk.split("__");
+    const s = students.find(x=>x.id===sid);
+    stampAudit("mkis_monthlymarks", `Monthly Mark — ${s?.className||"?"} ${term} ${year} ${month} — ${s?.name||sid} — ${sub} ${field}`);
     setMonthlyMarks(prev => ({
       ...prev,
       [sid]: { ...prev[sid], [tk]: { ...prev[sid]?.[tk], [month]: { ...prev[sid]?.[tk]?.[month], [sub]: { ...prev[sid]?.[tk]?.[month]?.[sub], [field]: val } } } }
     }));
-  }, []);
+  }, [students]);
   // ── Save & lock for Mark Entry / Monthly Exams ───────────────────────────
-  // Clicking "Save" on an entry screen locks that class+term+year (or, for
-  // monthly, that class+term+year+month) so the cells render read-only.
-  // Only an admin can unlock it again; anyone else who needs to change a
-  // locked value has to use the per-cell "request change" pencil, which
-  // still funnels through the existing change-request/approval flow above.
   const lockTermEntry = useCallback((cls, tk) => {
     markEditing();
+    const [term, year] = tk.split("__");
+    stampAudit("mkis_locked_term", `Term marks LOCKED — ${cls} ${term} ${year}`);
     setLockedTerm(prev => ({ ...prev, [`${cls}__${tk}`]: true }));
   }, []);
   const unlockTermEntry = useCallback((cls, tk) => {
     markEditing();
+    const [term, year] = tk.split("__");
+    stampAudit("mkis_locked_term", `Term marks UNLOCKED — ${cls} ${term} ${year}`);
     setLockedTerm(prev => ({ ...prev, [`${cls}__${tk}`]: false }));
   }, []);
   const lockMonthlyEntry = useCallback((cls, tk, month) => {
     markEditing();
+    const [term, year] = tk.split("__");
+    stampAudit("mkis_locked_monthly", `Monthly marks LOCKED — ${cls} ${term} ${year} ${month}`);
     setLockedMonthly(prev => ({ ...prev, [`${cls}__${tk}__${month}`]: true }));
   }, []);
   const unlockMonthlyEntry = useCallback((cls, tk, month) => {
     markEditing();
+    const [term, year] = tk.split("__");
+    stampAudit("mkis_locked_monthly", `Monthly marks UNLOCKED — ${cls} ${term} ${year} ${month}`);
     setLockedMonthly(prev => ({ ...prev, [`${cls}__${tk}__${month}`]: false }));
   }, []);
   // ── Change-request workflow ──────────────────────────────────────────────
@@ -1355,13 +1416,16 @@ export default function App() {
   const addStudent = useCallback((name, className, gender) => {
     markEditing();
     const newS = { id: Date.now().toString(), name: toUpper(name.trim()), className, gender };
+    stampAudit("mkis_students", `Learner ADDED — ${newS.name} (${className}, ${gender==="M"?"Male":"Female"})`);
     setStudents(prev => [...prev, newS].sort((a,b) => a.name.localeCompare(b.name)));
   }, []);
   const deleteStudent = useCallback((id) => {
     markEditing();
     deletedStudentIdsRef.current.add(id);
+    const s = students.find(x=>x.id===id);
+    stampAudit("mkis_students", `Learner DELETED — ${s?.name||id} (${s?.className||"?"})`);
     setStudents(prev => prev.filter(s => s.id !== id));
-  }, []);
+  }, [students]);
   // Applies a full-backup restore. This is the one place a whole-object
   // overwrite is correct: the person explicitly chose a backup file and
   // confirmed they want it to replace current data. forceWriteRef tells the
@@ -1400,7 +1464,9 @@ export default function App() {
     const doLogin = () => {
       verifyAccountLogin(accounts, loginUser, loginPw).then(acct => {
         if (acct) {
-          setAuthed(true); setRole(acct.role); setCurrentUser(acct.username); setAuditUser(acct.username); setLoginErr(""); setLoginPw("");
+          setAuthed(true); setRole(acct.role); setCurrentUser(acct.username); setAuditUser(acct.username);
+          writeAuditEntry("session", "LOGIN", `${acct.username} logged in (${acct.role})`);
+          setLoginErr(""); setLoginPw("");
         } else {
           setLoginErr("Incorrect username or password");
         }
@@ -1438,7 +1504,7 @@ export default function App() {
       </div>
     );
   }
-  const props = { students, setStudents, termMarks, setTermMarks, monthlyMarks, setMonthlyMarks, bands, setBands, divisions, setDivisions, school, setSchool, accounts, setAccounts, initials, setInitials, updateTermMark, updateMonthlyMark, requestOrApplyTermMark, requestOrApplyMonthlyMark, addStudent, deleteStudent, forceRestoreData, promoteStudents, role, currentUser, changeRequests, submitChangeRequest, approveChangeRequest, rejectChangeRequest, lockedTerm, lockTermEntry, unlockTermEntry, lockedMonthly, lockMonthlyEntry, unlockMonthlyEntry, requestUnlockTerm, requestUnlockMonthly, markEditing };
+  const props = { students, setStudents, termMarks, setTermMarks, monthlyMarks, setMonthlyMarks, bands, setBands, divisions, setDivisions, school, setSchool, accounts, setAccounts, initials, setInitials, updateTermMark, updateMonthlyMark, requestOrApplyTermMark, requestOrApplyMonthlyMark, addStudent, deleteStudent, forceRestoreData, promoteStudents, role, currentUser, changeRequests, submitChangeRequest, approveChangeRequest, rejectChangeRequest, lockedTerm, lockTermEntry, unlockTermEntry, lockedMonthly, lockMonthlyEntry, unlockMonthlyEntry, requestUnlockTerm, requestUnlockMonthly, markEditing, stampAudit };
   return (
     <div className="app-shell" style={{display:"flex",minHeight:"100vh",fontFamily:"'Segoe UI',system-ui,sans-serif",background:"#f1f5f9"}}>
       {/* SIDEBAR */}
@@ -1467,7 +1533,7 @@ export default function App() {
             Signed in as <b style={{color:"white"}}>{currentUser}</b> ({role === "admin" ? "Admin" : "Teacher"})
           </div>
         )}
-        <button onClick={()=>{ setAuthed(false); setRole(null); setCurrentUser(null); setAuditUser(null); setLoginUser(""); setPage("DASHBOARD"); }} style={{padding:"12px 14px",background:"transparent",border:"none",color:"rgba(255,255,255,0.6)",textAlign:"left",cursor:"pointer",fontSize:13,display:"flex",alignItems:"center",gap:10}}>
+        <button onClick={()=>{ writeAuditEntry("session","LOGOUT",`${currentUser} logged out`); setAuthed(false); setRole(null); setCurrentUser(null); setAuditUser(null); setLoginUser(""); setPage("DASHBOARD"); }} style={{padding:"12px 14px",background:"transparent",border:"none",color:"rgba(255,255,255,0.6)",textAlign:"left",cursor:"pointer",fontSize:13,display:"flex",alignItems:"center",gap:10}}>
           <span>🚪</span>{sideOpen && "Logout"}
         </button>
       </div>
@@ -4644,24 +4710,30 @@ function AuditLog() {
           <table style={{width:"100%",fontSize:13,borderCollapse:"collapse"}}>
             <thead>
               <tr style={{background:"#1e3a6e",color:"white"}}>
-                {["Date / Time","Who","Action","Data Changed"].map(h=>(
+                {["Date / Time","Who","Action","Section","Detail"].map(h=>(
                   <th key={h} style={{padding:"10px 12px",textAlign:"left",fontWeight:700,whiteSpace:"nowrap"}}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {filtered.map((r,i)=>(
-                <tr key={i} style={{background:i%2===0?"white":"#f8fafc",borderBottom:"1px solid #f1f5f9"}}>
-                  <td style={{padding:"8px 12px",color:"#374151",whiteSpace:"nowrap"}}>{fmt(r.at)}</td>
-                  <td style={{padding:"8px 12px"}}>
-                    <span style={{background:whoColors[r.who]||"#f1f5f9",borderRadius:8,padding:"2px 10px",fontWeight:700,fontSize:12,color:"#1e3a6e"}}>{r.who||"system"}</span>
-                  </td>
-                  <td style={{padding:"8px 12px"}}>
-                    <span style={{background:"#dbeafe",color:"#1e40af",borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:700}}>{r.action||"UPDATE"}</span>
-                  </td>
-                  <td style={{padding:"8px 12px",color:"#374151",fontWeight:600}}>{keyLabel(r.key)}</td>
-                </tr>
-              ))}
+              {filtered.map((r,i)=>{
+                const actionColors = { LOGIN:"#15803d", LOGOUT:"#dc2626", UPDATE:"#2563eb", ADD:"#059669", DELETE:"#b91c1c", LOCK:"#d97706", UNLOCK:"#7c3aed" };
+                const actionBg = { LOGIN:"#dcfce7", LOGOUT:"#fee2e2", UPDATE:"#dbeafe", ADD:"#d1fae5", DELETE:"#fee2e2", LOCK:"#fef3c7", UNLOCK:"#ede9fe" };
+                const act = (r.action||"UPDATE").toUpperCase();
+                return (
+                  <tr key={i} style={{background:i%2===0?"white":"#f8fafc",borderBottom:"1px solid #f1f5f9"}}>
+                    <td style={{padding:"8px 12px",color:"#374151",whiteSpace:"nowrap"}}>{fmt(r.at)}</td>
+                    <td style={{padding:"8px 12px"}}>
+                      <span style={{background:whoColors[r.who]||"#f1f5f9",borderRadius:8,padding:"2px 10px",fontWeight:700,fontSize:12,color:"#1e3a6e"}}>{r.who||"system"}</span>
+                    </td>
+                    <td style={{padding:"8px 12px"}}>
+                      <span style={{background:actionBg[act]||"#f1f5f9",color:actionColors[act]||"#374151",borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:700}}>{act}</span>
+                    </td>
+                    <td style={{padding:"8px 12px",color:"#374151",fontWeight:600,whiteSpace:"nowrap"}}>{r.key==="session"?"Session":(KEY_LABEL[r.key]||r.key)}</td>
+                    <td style={{padding:"8px 12px",color:"#6b7280",fontSize:12}}>{r.detail||"—"}</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
           <div style={{fontSize:12,color:"#9ca3af",marginTop:10,textAlign:"right"}}>Showing {filtered.length} of {rows.length} entries</div>
