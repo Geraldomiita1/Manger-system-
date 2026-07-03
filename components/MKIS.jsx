@@ -1228,9 +1228,9 @@ export default function App() {
     lastSeenRef.current.mkis_monthlymarks = JSON.stringify(merged);
     if (JSON.stringify(merged) !== JSON.stringify(monthlyMarks)) setMonthlyMarks(merged);
   })(); } }, [monthlyMarks, dataReady]);
-  useEffect(() => { if (dataReady) { lastSeenRef.current.mkis_bands = JSON.stringify(bands); saveShared("mkis_bands", bands); writeAuditEntry("mkis_bands","UPDATE","Grade bands updated"); } }, [bands, dataReady]);
-  useEffect(() => { if (dataReady) { lastSeenRef.current.mkis_divisions = JSON.stringify(divisions); saveShared("mkis_divisions", divisions); writeAuditEntry("mkis_divisions","UPDATE","Division thresholds updated"); } }, [divisions, dataReady]);
-  useEffect(() => { if (dataReady) { lastSeenRef.current.mkis_school = JSON.stringify(school); saveShared("mkis_school", school); writeAuditEntry("mkis_school","UPDATE","School settings updated"); } }, [school, dataReady]);
+  useEffect(() => { if (dataReady) { lastSeenRef.current.mkis_bands = JSON.stringify(bands); saveShared("mkis_bands", bands); writeAuditEntry("mkis_bands","UPDATE","Grade bands / thresholds updated"); } }, [bands, dataReady]);
+  useEffect(() => { if (dataReady) { lastSeenRef.current.mkis_divisions = JSON.stringify(divisions); saveShared("mkis_divisions", divisions); writeAuditEntry("mkis_divisions","UPDATE","Division pass-mark thresholds updated"); } }, [divisions, dataReady]);
+  useEffect(() => { if (dataReady) { lastSeenRef.current.mkis_school = JSON.stringify(school); saveShared("mkis_school", school); writeAuditEntry("mkis_school","UPDATE",`School settings updated — ${school.name||""}`); } }, [school, dataReady]);
   useEffect(() => { if (dataReady) { (async () => {
     const merged = await updateShared("mkis_accounts", accounts);
     if (JSON.stringify(merged) !== JSON.stringify(accounts)) {
@@ -1359,13 +1359,18 @@ export default function App() {
       status: "pending",
       requestedAt: new Date().toISOString(),
       requestedBy: currentUser || "Unknown",
-      ...req, // { kind: "term"|"monthly"|"unlock_term"|"unlock_monthly", ... }
+      ...req,
     };
+    const detail = req.kind === "term"
+      ? `Change request SUBMITTED — ${req.studentName||req.studentId} — ${req.sub} ${req.field}: ${req.oldVal} → ${req.newVal}`
+      : req.kind === "monthly"
+      ? `Monthly change request SUBMITTED — ${req.studentName||req.studentId} — ${req.month} ${req.sub} ${req.field}: ${req.oldVal} → ${req.newVal}`
+      : req.kind === "unlock_term"
+      ? `Unlock request SUBMITTED — Term marks for ${req.cls}`
+      : `Unlock request SUBMITTED — Monthly marks for ${req.cls}`;
+    stampAudit("mkis_changerequests", detail);
     setChangeRequests(prev => [...prev, full]);
   }, [currentUser]);
-  // A teacher who hits a locked sheet can ask the admin to reopen it,
-  // instead of being stuck with no recourse. This reuses the same
-  // change-request queue/Manage Requests page as mark-change requests.
   const requestUnlockTerm = useCallback((cls, tk) => {
     submitChangeRequest({ kind: "unlock_term", cls, tk });
   }, [submitChangeRequest]);
@@ -1376,6 +1381,14 @@ export default function App() {
     setChangeRequests(prev => {
       const req = prev.find(r => r.id === id);
       if (!req) return prev;
+      const detail = req.kind === "term"
+        ? `Change request APPROVED — ${req.studentName||req.studentId} — ${req.sub} ${req.field}: ${req.oldVal} → ${req.newVal}`
+        : req.kind === "monthly"
+        ? `Monthly change request APPROVED — ${req.studentName||req.studentId} — ${req.month} ${req.sub}: ${req.oldVal} → ${req.newVal}`
+        : req.kind === "unlock_term"
+        ? `Unlock APPROVED — Term marks for ${req.cls}`
+        : `Unlock APPROVED — Monthly marks for ${req.cls}`;
+      stampAudit("mkis_changerequests", detail);
       if (req.kind === "term") {
         updateTermMark(req.studentId, req.tk, req.sub, req.field, req.newVal);
       } else if (req.kind === "monthly") {
@@ -1390,9 +1403,11 @@ export default function App() {
     });
   }, [updateTermMark, updateMonthlyMark, unlockTermEntry, unlockMonthlyEntry]);
   const rejectChangeRequest = useCallback((id) => {
+    const req = changeRequests.find(r => r.id === id);
+    if (req) stampAudit("mkis_changerequests", `Change request REJECTED — ${req.studentName||req.studentId||""} ${req.sub||""}`);
     deletedRequestIdsRef.current.add(id);
     setChangeRequests(prev => prev.filter(r => r.id !== id));
-  }, []);
+  }, [changeRequests]);
   // Wrapper the Mark Entry / Monthly Exams screens call: admins always write
   // straight through (and can correct anything instantly); teachers write
   // straight through ONLY when the cell is currently empty (a first-time
@@ -1439,15 +1454,16 @@ export default function App() {
     if (d.bands)         setBands(d.bands);
     if (d.divisions)     setDivisions(d.divisions);
     if (d.school)        setSchool(d.school);
-    if (d.accounts) {
-      setAccounts(d.accounts);
-    }
+    if (d.accounts) {    setAccounts(d.accounts); }
+    writeAuditEntry("session","RESTORE","Full data backup restored from file");
     deletedStudentIdsRef.current = new Set();
   }, []);
   const promoteStudents = useCallback((fromClass) => {
     markEditing();
     const classMap = {"P1":"P2","P2":"P3","P3":"P4","P4":"P5","P5":"P6","P6":"P7","P7":"Completed"};
-    setStudents(prev => prev.map(s => s.className === fromClass ? {...s, className: classMap[fromClass] || s.className} : s));
+    const toClass = classMap[fromClass] || fromClass;
+    stampAudit("mkis_students", `Learners PROMOTED — ${fromClass} → ${toClass}`);
+    setStudents(prev => prev.map(s => s.className === fromClass ? {...s, className: toClass} : s));
   }, []);
   if (!dataReady) {
     return (
@@ -4717,8 +4733,8 @@ function AuditLog() {
             </thead>
             <tbody>
               {filtered.map((r,i)=>{
-                const actionColors = { LOGIN:"#15803d", LOGOUT:"#dc2626", UPDATE:"#2563eb", ADD:"#059669", DELETE:"#b91c1c", LOCK:"#d97706", UNLOCK:"#7c3aed" };
-                const actionBg = { LOGIN:"#dcfce7", LOGOUT:"#fee2e2", UPDATE:"#dbeafe", ADD:"#d1fae5", DELETE:"#fee2e2", LOCK:"#fef3c7", UNLOCK:"#ede9fe" };
+                const actionColors = { LOGIN:"#15803d", LOGOUT:"#dc2626", UPDATE:"#2563eb", ADD:"#059669", DELETE:"#b91c1c", LOCK:"#d97706", UNLOCK:"#7c3aed", RESTORE:"#c2410c" };
+                const actionBg = { LOGIN:"#dcfce7", LOGOUT:"#fee2e2", UPDATE:"#dbeafe", ADD:"#d1fae5", DELETE:"#fee2e2", LOCK:"#fef3c7", UNLOCK:"#ede9fe", RESTORE:"#ffedd5" };
                 const act = (r.action||"UPDATE").toUpperCase();
                 return (
                   <tr key={i} style={{background:i%2===0?"white":"#f8fafc",borderBottom:"1px solid #f1f5f9"}}>
