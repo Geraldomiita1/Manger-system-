@@ -1570,6 +1570,7 @@ export default function App() {
           {page==="REPORT CARDS" && <ReportCards {...props} />}
           {page==="LEARNERS" && <Students {...props} />}
           {page==="PLE INFO" && <PleInfo students={students} setStudents={setStudents} school={school} markEditing={markEditing} />}
+          {page==="MANAGE REQUESTS" && role==="admin" && <ManageRequests {...props} />}
           {page==="SETTINGS" && role==="admin" && <Settings {...props} />}
           {page==="AUDIT LOG" && role==="admin" && <AuditLog />}
           {page==="DOWNLOAD CENTRE" && <DownloadCentre {...props} />}
