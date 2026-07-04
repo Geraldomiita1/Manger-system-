@@ -56,6 +56,7 @@ const DEFAULT_SCHOOL = {
   nextEnds: "",
   requirements: "",
   year: String(new Date().getFullYear()),
+  logo: "", // base64 data URL of the school crest/logo, set from Settings
 };
 // ─── STORAGE (shared across all devices via window.storage) ───────────────────
 // All MKIS data is saved with shared:true, so every device/browser that opens
@@ -3560,10 +3561,102 @@ function PleCertificateDesign3({ rec, school, year, pdfRef }) {
     </div>
   );
 }
+function PleCertificateDesign4({ rec, school, year, pdfRef }) {
+  const s = rec;
+  const he = s.gender==="F"?"her":"his";
+  const zigzag = "repeating-linear-gradient(135deg,#dc2626 0 4px,#fde68a 4px 8px)";
+  return (
+    <div ref={pdfRef} className="ple-cert" style={{width:"210mm",height:"297mm",boxSizing:"border-box",background:"white",fontFamily:"Georgia,serif",position:"relative",overflow:"hidden"}}>
+      {/* Outer zigzag border band */}
+      <div style={{position:"absolute",inset:14,background:zigzag,zIndex:0}}/>
+      {/* Inner solid red border, inset within the zigzag band */}
+      <div style={{position:"absolute",inset:26,border:"3px solid #dc2626",background:"white",zIndex:1}}/>
+      {/* Content — flex column, fills the full inner area top to bottom */}
+      <div style={{position:"absolute",inset:34,zIndex:2,display:"flex",flexDirection:"column",padding:"22px 40px"}}>
+        {/* Header: logo + school name side by side */}
+        <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:16,marginBottom:10}}>
+          {school.logo && <img src={school.logo} alt="logo" style={{width:64,height:64,objectFit:"contain",flexShrink:0}}/>}
+          <div style={{textAlign:"center"}}>
+            <div style={{fontWeight:900,fontSize:26,color:"#111827",letterSpacing:0.5,lineHeight:1.15}}>{school.name}</div>
+            <div style={{fontSize:13,color:"#374151",marginTop:4}}>{school.poBox}</div>
+          </div>
+        </div>
+        <div style={{textAlign:"center",fontSize:13,color:"#374151",marginBottom:8}}>
+          {school.tel && <>Tel: <b>{school.tel}</b>&nbsp;&nbsp;&nbsp;</>}
+          {school.email && <>Email: <span style={{color:"#2563eb",fontStyle:"italic"}}>{school.email}</span></>}
+        </div>
+        <div style={{borderBottom:"2.5px solid #d4af37",display:"flex",justifyContent:"center",gap:10,paddingBottom:8,marginBottom:16,fontSize:16,color:"#d4af37"}}>★ ★ ★</div>
+
+        {/* Title */}
+        <div style={{textAlign:"center",marginBottom:18}}>
+          <div style={{fontSize:23,fontWeight:900,color:"#dc2626",textTransform:"uppercase",letterSpacing:2}}>PLE Recommendation</div>
+        </div>
+
+        {/* Certify text + name */}
+        <div style={{textAlign:"center",fontSize:14,color:"#374151",marginBottom:6}}>This is to certify that</div>
+        <div style={{textAlign:"center",marginBottom:8}}>
+          <span style={{fontWeight:900,fontSize:20,textTransform:"uppercase",letterSpacing:1.5,textDecoration:"underline",textUnderlineOffset:5}}>{s.name}</span>
+          {s.indexNo && <span style={{fontSize:14,color:"#374151",marginLeft:14}}>Index No. <b>{s.indexNo}</b></span>}
+        </div>
+        <div style={{textAlign:"center",fontSize:14,color:"#111827",marginBottom:20,lineHeight:1.7}}>
+          successfully completed {he} Primary Leaving Examination<br/>(PLE) in <b>{year}</b> at <b>{school.name}.</b>
+        </div>
+
+        {/* Results + info row — flex:1 so it grows to fill remaining vertical space */}
+        <div style={{flex:1,display:"flex",flexDirection:"column",justifyContent:"space-evenly"}}>
+          <div style={{display:"flex",gap:36,marginBottom:22}}>
+            {/* Results box */}
+            <div style={{border:"2.5px solid #d4af37",borderRadius:4,padding:"14px 22px",background:"#fffdf5",minWidth:230}}>
+              <div style={{fontWeight:900,fontSize:15,marginBottom:8}}>PLE RESULTS</div>
+              <table style={{fontSize:16,borderCollapse:"collapse"}}><tbody>
+                {PLE_SUBJECTS.map(sub=>(
+                  <tr key={sub}>
+                    <td style={{padding:"3px 18px 3px 0"}}>{pleSubLabel(sub)}:</td>
+                    <td style={{padding:"3px 0",fontWeight:700}}>{s.results?.[sub]||"—"}</td>
+                  </tr>
+                ))}
+              </tbody></table>
+              <div style={{marginTop:10}}>
+                <div style={{fontSize:16}}>Total Agg: <b>{s.totalAgg||"—"}</b></div>
+                <div style={{fontSize:16}}>Div: <b>{s.division||"—"}</b></div>
+              </div>
+            </div>
+            {/* Extra info */}
+            <div style={{display:"flex",flexDirection:"column",gap:14,fontSize:14,justifyContent:"center"}}>
+              <div><b>LIN:</b> <span style={{color:"#2563eb"}}>{s.lin||""}</span></div>
+              <div><b>Co-curricular activities</b><br/><span style={{color:"#2563eb"}}>{s.cocurricular||""}</span></div>
+              <div><b>Leadership position</b><br/><span style={{color:"#2563eb"}}>{s.leadership||"-"}</span></div>
+              <div><b>Conduct:</b> <span style={{color:"#2563eb"}}>{s.conduct||"Good"}</span></div>
+            </div>
+          </div>
+
+          {/* Recommendation */}
+          <div style={{textAlign:"center",fontSize:14,color:"#111827",marginBottom:16}}>
+            {pleRecommendation(s.name,s.gender,s.totalAgg,s.division)}
+          </div>
+          <div style={{textAlign:"center",fontSize:18,color:"#d4af37",marginBottom:16}}>★ ★ ★</div>
+
+          {/* Date of issuance */}
+          <div style={{textAlign:"right",fontSize:14,color:"#111827",marginBottom:20}}>
+            Date of Issuance: <span style={{borderBottom:"1px solid #111827",display:"inline-block",width:160}}>&nbsp;</span>
+          </div>
+        </div>
+
+        {/* Signature — anchored near the bottom, not deep past the border */}
+        <div>
+          <div style={{fontSize:13,color:"#111827",marginBottom:4}}>....................</div>
+          <div style={{fontWeight:900,fontSize:14,textTransform:"uppercase"}}>{school.headTeacher||"HEAD TEACHER"}</div>
+          <div style={{fontSize:13,color:"#374151",marginTop:2}}>Headteacher</div>
+        </div>
+      </div>
+    </div>
+  );
+}
 const CERT_DESIGNS = [
   { id:1, label:"Design 1 — Gold & Navy", Component: PleCertificateDesign1 },
   { id:2, label:"Design 2 — Modern Blue/Green", Component: PleCertificateDesign2 },
   { id:3, label:"Design 3 — Maroon & Gold", Component: PleCertificateDesign3 },
+  { id:4, label:"Design 4 — Classic Red Zigzag (with logo)", Component: PleCertificateDesign4 },
 ];
 function PleInfo({ students, setStudents, school, markEditing }) {
   const [tab, setTab] = useState("records");
@@ -3571,7 +3664,7 @@ function PleInfo({ students, setStudents, school, markEditing }) {
   // imported rows that didn't match any student (flagged red)
   const [unmatched, setUnmatched] = useState([]); // [{ name, indexNo, sex, results, totalAgg, division }]
   const [year, setYear] = useState(school.year||String(new Date().getFullYear()));
-  const [selectedDesign, setSelectedDesign] = useState(1);
+  const [selectedDesign, setSelectedDesign] = useState(4);
   const [selectedStudent, setSelectedStudent] = useState(null);
   const [pdfBusy, setPdfBusy] = useState(false);
   const [allPdfBusy, setAllPdfBusy] = useState(false);
@@ -3580,7 +3673,7 @@ function PleInfo({ students, setStudents, school, markEditing }) {
   const certRef = useRef(null);
   const allCertsRef = useRef(null);
   const p7Students = students.filter(s=>s.className==="P7"||s.className==="Completed");
-  const DesignComponent = CERT_DESIGNS.find(d=>d.id===selectedDesign)?.Component || PleCertificateDesign1;
+  const DesignComponent = CERT_DESIGNS.find(d=>d.id===selectedDesign)?.Component || PleCertificateDesign4;
 
   const updatePle = (sid, field, val) => setPleData(prev=>({...prev,[sid]:{...prev[sid],[field]:val}}));
   const updateResult = (sid, sub, val) => {
@@ -4698,6 +4791,28 @@ function Settings({ school, setSchool, bands, setBands, divisions, setDivisions,
     <div style={{display:"flex",flexDirection:"column",gap:20}}>
       <div style={{background:"white",borderRadius:12,padding:20,border:"1px solid #e5e7eb"}}>
         <h3 style={{margin:"0 0 16px",color:"#1e3a6e",fontSize:15,fontWeight:700}}>🏫 School Information</h3>
+        <div style={{display:"flex",gap:16,alignItems:"center",marginBottom:16,padding:14,background:"#f8fafc",borderRadius:10,border:"1px solid #e5e7eb"}}>
+          <div style={{width:70,height:70,borderRadius:8,border:"1.5px dashed #cbd5e1",display:"flex",alignItems:"center",justifyContent:"center",background:"white",overflow:"hidden",flexShrink:0}}>
+            {school.logo
+              ? <img src={school.logo} alt="School logo" style={{maxWidth:"100%",maxHeight:"100%",objectFit:"contain"}}/>
+              : <span style={{fontSize:10,color:"#9ca3af",textAlign:"center"}}>No logo</span>}
+          </div>
+          <div style={{flex:1}}>
+            <label style={lbl}>School Logo</label>
+            <div style={{fontSize:11,color:"#6b7280",marginBottom:8}}>Used on PLE certificates and report headers. PNG with a transparent background works best.</div>
+            <div style={{display:"flex",gap:8}}>
+              <input type="file" accept="image/*" onChange={e=>{
+                const file = e.target.files?.[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = (ev) => { markEditing(); setSchool(prev=>({...prev,logo:ev.target.result})); };
+                reader.readAsDataURL(file);
+                e.target.value="";
+              }} style={{fontSize:12}}/>
+              {school.logo && <button onClick={()=>{ markEditing(); setSchool(prev=>({...prev,logo:""})); }} style={{...btnGhost,padding:"4px 10px",fontSize:11}}>✕ Remove</button>}
+            </div>
+          </div>
+        </div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
           {[["name","School Name"],["motto","School Motto"],["poBox","P.O. Box"],["district","District"],["email","Email"],["headTeacher","Head Teacher"],["year","Academic Year"],["nextOpens","Next Term Opens"],["nextEnds","Next Term Ends"]].map(([k,label])=>(
             <div key={k}>
