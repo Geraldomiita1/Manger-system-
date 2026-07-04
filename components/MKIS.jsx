@@ -3323,197 +3323,237 @@ function pleRecommendation(name, gender, totalAgg, div) {
   return `${he} has completed the Primary Leaving Examination. Encouraged to work harder in secondary school.`;
 }
 function PleCertificateDesign1({ rec, school, year, pdfRef }) {
-  // Design 1: Elegant gold border, crest-style
   const s = rec;
   const he = s.gender==="F"?"her":"his";
   return (
-    <div ref={pdfRef} className="ple-cert" style={{width:"210mm",minHeight:"280mm",boxSizing:"border-box",background:"white",fontFamily:"Georgia,serif",position:"relative",padding:0,overflow:"hidden"}}>
-      {/* Outer decorative border */}
-      <div style={{position:"absolute",inset:8,border:"6px double #b8860b",borderRadius:8,pointerEvents:"none",zIndex:0}}/>
-      <div style={{position:"absolute",inset:16,border:"2px solid #b8860b",borderRadius:4,pointerEvents:"none",zIndex:0}}/>
-      {/* Content */}
-      <div style={{position:"relative",zIndex:1,padding:"24px 32px"}}>
-        {/* Header */}
-        <div style={{textAlign:"center",marginBottom:12}}>
-          <div style={{fontWeight:900,fontSize:22,color:"#1e3a6e",letterSpacing:1,textTransform:"uppercase"}}>{school.name}</div>
-          <div style={{fontSize:11,color:"#374151",marginTop:2}}>{school.poBox} &nbsp;|&nbsp; Tel: {school.tel||"N/A"} &nbsp;|&nbsp; <span style={{color:"#1d4ed8",fontStyle:"italic"}}>{school.email||""}</span></div>
-          <div style={{display:"flex",justifyContent:"center",gap:8,marginTop:8,fontSize:18,color:"#b8860b"}}>★ ★ ★</div>
+    <div ref={pdfRef} className="ple-cert" style={{width:"210mm",height:"297mm",boxSizing:"border-box",background:"white",fontFamily:"Georgia,serif",position:"relative",overflow:"hidden",display:"flex",flexDirection:"column"}}>
+      {/* Decorative borders */}
+      <div style={{position:"absolute",inset:6,border:"7px double #b8860b",borderRadius:6,pointerEvents:"none",zIndex:0}}/>
+      <div style={{position:"absolute",inset:18,border:"1.5px solid #b8860b",borderRadius:3,pointerEvents:"none",zIndex:0}}/>
+      {/* Content fills full height */}
+      <div style={{position:"relative",zIndex:1,padding:"28px 40px 24px",display:"flex",flexDirection:"column",height:"100%",boxSizing:"border-box"}}>
+        {/* School header */}
+        <div style={{textAlign:"center",marginBottom:18}}>
+          <div style={{fontWeight:900,fontSize:24,color:"#1e3a6e",letterSpacing:1.5,textTransform:"uppercase",lineHeight:1.2}}>{school.name}</div>
+          <div style={{fontSize:12,color:"#374151",marginTop:6,lineHeight:1.6}}>{school.poBox} &nbsp;|&nbsp; Tel: {school.tel||"N/A"} &nbsp;|&nbsp; <span style={{color:"#1d4ed8",fontStyle:"italic"}}>{school.email||""}</span></div>
+          <div style={{display:"flex",justifyContent:"center",gap:12,marginTop:10,fontSize:22,color:"#b8860b"}}>★ ★ ★</div>
         </div>
-        <div style={{textAlign:"center",margin:"10px 0"}}>
-          <div style={{display:"inline-block",borderBottom:"2px solid #b8860b",borderTop:"2px solid #b8860b",padding:"4px 0"}}>
-            <div style={{fontSize:20,fontWeight:900,color:"#dc2626",letterSpacing:2,fontFamily:"Georgia,serif",textTransform:"uppercase"}}>PLE Recommendation</div>
+        {/* Title */}
+        <div style={{textAlign:"center",margin:"12px 0 20px"}}>
+          <div style={{display:"inline-block",borderBottom:"3px solid #b8860b",borderTop:"3px solid #b8860b",padding:"8px 0"}}>
+            <div style={{fontSize:22,fontWeight:900,color:"#dc2626",letterSpacing:3,textTransform:"uppercase"}}>PLE Recommendation</div>
           </div>
         </div>
-        <div style={{textAlign:"center",fontSize:13,marginBottom:12,color:"#374151",fontStyle:"italic"}}>This is to certify that</div>
-        <div style={{textAlign:"center",marginBottom:8}}>
-          <span style={{fontWeight:900,fontSize:18,borderBottom:"2px solid #1e3a6e",paddingBottom:2,textTransform:"uppercase",letterSpacing:1}}>{s.name}</span>
-          {s.indexNo && <span style={{fontSize:13,marginLeft:20,color:"#374151"}}>Index No. <b>{s.indexNo}</b></span>}
+        {/* Certify text */}
+        <div style={{textAlign:"center",fontSize:14,marginBottom:16,color:"#374151",fontStyle:"italic"}}>This is to certify that</div>
+        <div style={{textAlign:"center",marginBottom:10}}>
+          <span style={{fontWeight:900,fontSize:21,borderBottom:"2.5px solid #1e3a6e",paddingBottom:3,textTransform:"uppercase",letterSpacing:1.5}}>{s.name}</span>
+          {s.indexNo && <div style={{fontSize:14,marginTop:8,color:"#374151"}}>Index No. <b>{s.indexNo}</b></div>}
         </div>
-        <div style={{textAlign:"center",fontSize:13,color:"#374151",marginBottom:16,lineHeight:1.6}}>
+        <div style={{textAlign:"center",fontSize:14,color:"#374151",marginBottom:24,lineHeight:1.8}}>
           successfully completed {he} Primary Leaving Examination (PLE) in <b>{year}</b> at <b>{school.name}.</b>
         </div>
-        {/* Results + extra info */}
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20,marginBottom:16}}>
-          <div style={{border:"2px solid #b8860b",borderRadius:8,padding:14,background:"#fffbeb"}}>
-            <div style={{fontWeight:900,fontSize:13,textAlign:"center",marginBottom:10,borderBottom:"1px solid #b8860b",paddingBottom:6,color:"#1e3a6e",letterSpacing:1}}>PLE RESULTS</div>
-            <table style={{width:"100%",fontSize:13,borderCollapse:"collapse"}}>
-              <thead><tr><th style={{textAlign:"left",borderBottom:"1px solid #e5e7eb",paddingBottom:4,color:"#374151"}}>Subject</th><th style={{textAlign:"center",borderBottom:"1px solid #e5e7eb",paddingBottom:4,color:"#374151"}}>Agg</th></tr></thead>
-              <tbody>
-                {PLE_SUBJECTS.map(sub=>(
-                  <tr key={sub}><td style={{padding:"3px 0",borderBottom:"1px solid #f3f4f6"}}>{pleSubLabel(sub)}:</td><td style={{textAlign:"center",padding:"3px 0",borderBottom:"1px solid #f3f4f6",fontWeight:700}}>{s.results?.[sub]||"-"}</td></tr>
-                ))}
-              </tbody>
-            </table>
-            <div style={{marginTop:10,borderTop:"1px solid #b8860b",paddingTop:6}}>
-              <div style={{display:"flex",justifyContent:"space-between",fontSize:13}}>
-                <span>Total Agg:</span><span style={{fontWeight:900,fontSize:15}}>{s.totalAgg||"-"}</span>
-              </div>
-              <div style={{display:"flex",justifyContent:"space-between",fontSize:13,marginTop:2}}>
-                <span>Division:</span><span style={{fontWeight:900,fontSize:15}}>{s.division||"-"}</span>
+        {/* Results grid — flex:1 spreads remaining space */}
+        <div style={{flex:1,display:"flex",flexDirection:"column",justifyContent:"space-between"}}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:24,marginBottom:20}}>
+            {/* Results box */}
+            <div style={{border:"2px solid #b8860b",borderRadius:10,padding:"16px 18px",background:"#fffbeb"}}>
+              <div style={{fontWeight:900,fontSize:14,textAlign:"center",marginBottom:14,borderBottom:"1.5px solid #b8860b",paddingBottom:8,color:"#1e3a6e",letterSpacing:1,textTransform:"uppercase"}}>PLE Results</div>
+              <table style={{width:"100%",fontSize:14,borderCollapse:"collapse"}}>
+                <thead><tr>
+                  <th style={{textAlign:"left",borderBottom:"1px solid #e5e7eb",paddingBottom:6,color:"#374151",fontWeight:700}}>Subject</th>
+                  <th style={{textAlign:"center",borderBottom:"1px solid #e5e7eb",paddingBottom:6,color:"#374151",fontWeight:700}}>Agg</th>
+                </tr></thead>
+                <tbody>
+                  {PLE_SUBJECTS.map(sub=>(
+                    <tr key={sub}>
+                      <td style={{padding:"7px 0",borderBottom:"1px solid #f3f4f6",fontSize:14}}>{pleSubLabel(sub)}:</td>
+                      <td style={{textAlign:"center",padding:"7px 0",borderBottom:"1px solid #f3f4f6",fontWeight:800,fontSize:16}}>{s.results?.[sub]||"—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <div style={{marginTop:14,borderTop:"2px solid #b8860b",paddingTop:10}}>
+                <div style={{display:"flex",justifyContent:"space-between",fontSize:15,marginBottom:4}}><span style={{fontWeight:700}}>Total Agg:</span><span style={{fontWeight:900,fontSize:18}}>{s.totalAgg||"—"}</span></div>
+                <div style={{display:"flex",justifyContent:"space-between",fontSize:15}}><span style={{fontWeight:700}}>Division:</span><span style={{fontWeight:900,fontSize:18,color:"#1e3a6e"}}>{s.division||"—"}</span></div>
               </div>
             </div>
+            {/* Extra info */}
+            <div style={{display:"flex",flexDirection:"column",gap:16,fontSize:14,justifyContent:"flex-start",paddingTop:4}}>
+              {[["LIN",s.lin],["Co-curricular Activities",s.cocurricular],["Leadership Position",s.leadership],["Conduct",s.conduct||"Good"]].map(([label,val])=>(
+                <div key={label}>
+                  <div style={{fontWeight:700,color:"#374151",marginBottom:3}}>{label}:</div>
+                  <div style={{fontStyle:"italic",color:"#2563eb",borderBottom:"1.5px solid #93c5fd",paddingBottom:2,minHeight:20}}>{val||""}</div>
+                </div>
+              ))}
+            </div>
           </div>
-          <div style={{display:"flex",flexDirection:"column",gap:10,fontSize:13,justifyContent:"flex-start"}}>
-            <div><span style={{fontWeight:700}}>LIN: </span><span style={{fontStyle:"italic",color:"#2563eb",borderBottom:"1px solid #93c5fd"}}>{s.lin||"___________________"}</span></div>
-            <div><span style={{fontWeight:700}}>Co-curricular activities:</span><br/><span style={{fontStyle:"italic",color:"#2563eb",borderBottom:"1px solid #93c5fd"}}>{s.cocurricular||"___________________"}</span></div>
-            <div><span style={{fontWeight:700}}>Leadership position:</span><br/><span style={{fontStyle:"italic",color:"#2563eb",borderBottom:"1px solid #93c5fd"}}>{s.leadership||"___________________"}</span></div>
-            <div><span style={{fontStyle:"italic",fontWeight:700}}>Conduct: </span><span style={{fontStyle:"italic",color:"#2563eb",borderBottom:"1px solid #93c5fd"}}>{s.conduct||"Good"}</span></div>
+          {/* Recommendation sentence */}
+          <div style={{textAlign:"center",fontSize:14,color:"#374151",fontStyle:"italic",lineHeight:1.8,padding:"14px 20px",background:"#fffbeb",borderRadius:8,border:"1px solid #fde68a",marginBottom:18}}>
+            {pleRecommendation(s.name,s.gender,s.totalAgg,s.division)}
           </div>
-        </div>
-        <div style={{textAlign:"center",fontSize:13,color:"#374151",fontStyle:"italic",marginBottom:4}}>{pleRecommendation(s.name,s.gender,s.totalAgg,s.division)}</div>
-        <div style={{display:"flex",justifyContent:"center",gap:8,marginTop:8,fontSize:18,color:"#b8860b"}}>★ ★ ★</div>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end",marginTop:20,paddingTop:12,borderTop:"1px solid #e5e7eb"}}>
-          <div>
-            <div style={{borderBottom:"1px solid #374151",width:160,marginBottom:4}}></div>
-            <div style={{fontWeight:900,fontSize:13,textTransform:"uppercase"}}>{school.headTeacher||"HEAD TEACHER"}</div>
-            <div style={{fontSize:11,color:"#6b7280"}}>Headteacher</div>
-          </div>
-          <div style={{textAlign:"right",fontSize:12}}>
-            <div>Date of Issuance: <span style={{borderBottom:"1px solid #374151",display:"inline-block",width:120}}>&nbsp;</span></div>
+          <div style={{display:"flex",justifyContent:"center",gap:14,fontSize:22,color:"#b8860b",marginBottom:18}}>★ ★ ★</div>
+          {/* Signature row */}
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end",paddingTop:14,borderTop:"1px solid #d1d5db"}}>
+            <div>
+              <div style={{borderBottom:"1px solid #374151",width:180,marginBottom:6}}/>
+              <div style={{fontWeight:900,fontSize:13,textTransform:"uppercase",letterSpacing:0.5}}>{school.headTeacher||"HEAD TEACHER"}</div>
+              <div style={{fontSize:12,color:"#6b7280",marginTop:2}}>Headteacher</div>
+            </div>
+            <div style={{textAlign:"right",fontSize:13}}>
+              <div style={{color:"#374151",marginBottom:6}}>Date of Issuance:</div>
+              <div style={{borderBottom:"1px solid #374151",width:160,display:"inline-block"}}>&nbsp;</div>
+            </div>
           </div>
         </div>
       </div>
     </div>
   );
 }
+
 function PleCertificateDesign2({ rec, school, year, pdfRef }) {
-  // Design 2: Modern navy + green, clean sans-serif
   const s = rec;
   const he = s.gender==="F"?"her":"his";
   return (
-    <div ref={pdfRef} className="ple-cert" style={{width:"210mm",minHeight:"280mm",boxSizing:"border-box",background:"white",fontFamily:"'Segoe UI',system-ui,sans-serif",overflow:"hidden"}}>
-      <div style={{background:"linear-gradient(135deg,#1e3a6e 0%,#1e40af 60%,#0ea5e9 100%)",color:"white",padding:"24px 32px",textAlign:"center"}}>
-        <div style={{fontWeight:900,fontSize:21,letterSpacing:1}}>{school.name}</div>
-        <div style={{fontSize:10,opacity:0.85,marginTop:3}}>{school.poBox} &nbsp;|&nbsp; {school.email||""}</div>
-        <div style={{marginTop:10,display:"inline-block",background:"rgba(255,255,255,0.15)",borderRadius:20,padding:"4px 20px",fontSize:12,fontWeight:700,letterSpacing:2,textTransform:"uppercase"}}>
+    <div ref={pdfRef} className="ple-cert" style={{width:"210mm",height:"297mm",boxSizing:"border-box",background:"white",fontFamily:"'Segoe UI',system-ui,sans-serif",overflow:"hidden",display:"flex",flexDirection:"column"}}>
+      {/* Top gradient banner */}
+      <div style={{background:"linear-gradient(135deg,#1e3a6e 0%,#1e40af 55%,#0ea5e9 100%)",color:"white",padding:"30px 36px",textAlign:"center",flexShrink:0}}>
+        <div style={{fontWeight:900,fontSize:23,letterSpacing:1.5,marginBottom:6}}>{school.name}</div>
+        <div style={{fontSize:12,opacity:0.88,marginBottom:12}}>{school.poBox} &nbsp;|&nbsp; Tel: {school.tel||""} &nbsp;|&nbsp; {school.email||""}</div>
+        <div style={{display:"inline-block",background:"rgba(255,255,255,0.18)",borderRadius:24,padding:"7px 28px",fontSize:13,fontWeight:800,letterSpacing:2,textTransform:"uppercase",border:"1.5px solid rgba(255,255,255,0.4)"}}>
           Primary Leaving Examination — Recommendation {year}
         </div>
       </div>
-      <div style={{padding:"22px 32px"}}>
-        <div style={{background:"#f0fdf4",border:"2px solid #22c55e",borderRadius:10,padding:"14px 20px",marginBottom:16,textAlign:"center"}}>
-          <div style={{fontSize:11,color:"#15803d",fontWeight:600,marginBottom:4,textTransform:"uppercase",letterSpacing:1}}>This is to certify that</div>
-          <div style={{fontWeight:900,fontSize:20,color:"#1e3a6e",textTransform:"uppercase",letterSpacing:1}}>{s.name}</div>
-          {s.indexNo && <div style={{fontSize:12,color:"#374151",marginTop:4}}>Index No: <b>{s.indexNo}</b></div>}
-          <div style={{fontSize:12,color:"#374151",marginTop:6,lineHeight:1.6}}>
+      {/* Body fills remaining height */}
+      <div style={{flex:1,display:"flex",flexDirection:"column",padding:"28px 36px",gap:0}}>
+        {/* Name block */}
+        <div style={{background:"#f0fdf4",border:"2px solid #22c55e",borderRadius:12,padding:"18px 24px",marginBottom:22,textAlign:"center"}}>
+          <div style={{fontSize:12,color:"#15803d",fontWeight:700,marginBottom:6,textTransform:"uppercase",letterSpacing:1.5}}>This is to certify that</div>
+          <div style={{fontWeight:900,fontSize:22,color:"#1e3a6e",textTransform:"uppercase",letterSpacing:1.5,marginBottom:6}}>{s.name}</div>
+          {s.indexNo && <div style={{fontSize:13,color:"#374151",marginBottom:6}}>Index No: <b>{s.indexNo}</b></div>}
+          <div style={{fontSize:13,color:"#374151",lineHeight:1.8}}>
             successfully completed {he} Primary Leaving Examination (PLE) in <b>{year}</b> at <b>{school.name}.</b>
           </div>
         </div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:14}}>
-          <div style={{background:"#eff6ff",borderRadius:10,padding:14,border:"1px solid #bfdbfe"}}>
-            <div style={{fontWeight:800,fontSize:12,color:"#1e40af",marginBottom:10,textTransform:"uppercase",letterSpacing:0.5}}>📊 PLE Results</div>
+        {/* Results + extra info */}
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20,marginBottom:22,flex:1}}>
+          <div style={{background:"#eff6ff",borderRadius:12,padding:"16px 18px",border:"1.5px solid #bfdbfe",display:"flex",flexDirection:"column"}}>
+            <div style={{fontWeight:800,fontSize:14,color:"#1e40af",marginBottom:14,textTransform:"uppercase",letterSpacing:0.5}}>📊 PLE Results</div>
             {PLE_SUBJECTS.map(sub=>(
-              <div key={sub} style={{display:"flex",justifyContent:"space-between",fontSize:13,padding:"4px 0",borderBottom:"1px solid #dbeafe"}}>
-                <span>{pleSubLabel(sub)}</span><span style={{fontWeight:800,color:"#1e40af"}}>{s.results?.[sub]||"—"}</span>
+              <div key={sub} style={{display:"flex",justifyContent:"space-between",fontSize:14,padding:"8px 0",borderBottom:"1px solid #dbeafe"}}>
+                <span style={{color:"#374151"}}>{pleSubLabel(sub)}</span>
+                <span style={{fontWeight:900,fontSize:16,color:"#1e40af"}}>{s.results?.[sub]||"—"}</span>
               </div>
             ))}
-            <div style={{marginTop:10,display:"flex",justifyContent:"space-between",fontWeight:900,fontSize:14,color:"#1e3a6e",borderTop:"2px solid #1e40af",paddingTop:6}}>
+            <div style={{marginTop:12,display:"flex",justifyContent:"space-between",fontWeight:900,fontSize:17,color:"#1e3a6e",borderTop:"2px solid #1e40af",paddingTop:10,marginTop:"auto"}}>
               <span>Total Agg</span><span>{s.totalAgg||"—"}</span>
             </div>
-            <div style={{display:"flex",justifyContent:"space-between",fontWeight:900,fontSize:14,color:"#dc2626"}}>
+            <div style={{display:"flex",justifyContent:"space-between",fontWeight:900,fontSize:17,color:"#dc2626",marginTop:4}}>
               <span>Division</span><span>{s.division||"—"}</span>
             </div>
           </div>
-          <div style={{display:"flex",flexDirection:"column",gap:10,fontSize:12}}>
+          <div style={{display:"flex",flexDirection:"column",gap:14,fontSize:13}}>
             {[["LIN",s.lin],["Co-curricular Activities",s.cocurricular],["Leadership Position",s.leadership],["Conduct",s.conduct||"Good"]].map(([label,val])=>(
-              <div key={label} style={{background:"#f8fafc",borderRadius:8,padding:"8px 12px",border:"1px solid #e5e7eb"}}>
-                <div style={{fontWeight:700,color:"#374151",fontSize:11,textTransform:"uppercase",marginBottom:2}}>{label}</div>
-                <div style={{color:"#1d4ed8",fontWeight:600}}>{val||<span style={{color:"#9ca3af"}}>—</span>}</div>
+              <div key={label} style={{background:"#f8fafc",borderRadius:10,padding:"12px 14px",border:"1px solid #e5e7eb",flex:1}}>
+                <div style={{fontWeight:700,color:"#374151",fontSize:11,textTransform:"uppercase",letterSpacing:0.5,marginBottom:5}}>{label}</div>
+                <div style={{color:"#1d4ed8",fontWeight:700,fontSize:14}}>{val||<span style={{color:"#9ca3af"}}>—</span>}</div>
               </div>
             ))}
           </div>
         </div>
-        <div style={{background:"#fefce8",borderRadius:8,padding:"10px 16px",border:"1px solid #fde68a",textAlign:"center",fontSize:13,color:"#374151",fontStyle:"italic",marginBottom:14}}>
+        {/* Recommendation */}
+        <div style={{background:"#fefce8",borderRadius:10,padding:"14px 20px",border:"1.5px solid #fde68a",textAlign:"center",fontSize:14,color:"#374151",fontStyle:"italic",lineHeight:1.8,marginBottom:20}}>
           {pleRecommendation(s.name,s.gender,s.totalAgg,s.division)}
         </div>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end",paddingTop:12,borderTop:"2px solid #1e3a6e"}}>
+        {/* Signature */}
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end",paddingTop:16,borderTop:"2.5px solid #1e3a6e"}}>
           <div>
-            <div style={{borderBottom:"1px solid #374151",width:180,marginBottom:4}}/>
-            <div style={{fontWeight:900,fontSize:12,color:"#1e3a6e",textTransform:"uppercase"}}>{school.headTeacher||"HEAD TEACHER"}</div>
-            <div style={{fontSize:11,color:"#6b7280"}}>Headteacher, {school.name}</div>
+            <div style={{borderBottom:"1px solid #374151",width:200,marginBottom:6}}/>
+            <div style={{fontWeight:900,fontSize:13,color:"#1e3a6e",textTransform:"uppercase",letterSpacing:0.5}}>{school.headTeacher||"HEAD TEACHER"}</div>
+            <div style={{fontSize:12,color:"#6b7280",marginTop:2}}>Headteacher, {school.name}</div>
           </div>
-          <div style={{textAlign:"right",fontSize:11,color:"#6b7280"}}>
-            Date of Issuance:<br/><span style={{borderBottom:"1px solid #374151",display:"inline-block",width:140}}>&nbsp;</span>
+          <div style={{textAlign:"right",fontSize:13,color:"#374151"}}>
+            Date of Issuance:<br/>
+            <span style={{borderBottom:"1px solid #374151",display:"inline-block",width:160,marginTop:8}}>&nbsp;</span>
           </div>
         </div>
       </div>
     </div>
   );
 }
+
 function PleCertificateDesign3({ rec, school, year, pdfRef }) {
-  // Design 3: Elegant dark red/maroon certificate style
   const s = rec;
   const he = s.gender==="F"?"her":"his";
   return (
-    <div ref={pdfRef} className="ple-cert" style={{width:"210mm",minHeight:"280mm",boxSizing:"border-box",fontFamily:"Georgia,serif",background:"#fdfaf5",overflow:"hidden",position:"relative"}}>
-      <div style={{position:"absolute",inset:0,border:"12px solid #7b1c1c",pointerEvents:"none"}}/>
-      <div style={{position:"absolute",inset:18,border:"2px solid #d4af37",pointerEvents:"none"}}/>
-      <div style={{position:"relative",zIndex:1,padding:"28px 36px"}}>
-        <div style={{textAlign:"center",borderBottom:"2px solid #d4af37",paddingBottom:12,marginBottom:12}}>
-          <div style={{fontWeight:900,fontSize:22,color:"#7b1c1c",textTransform:"uppercase",letterSpacing:2}}>{school.name}</div>
-          <div style={{fontSize:11,color:"#374151",marginTop:2}}>{school.poBox} &nbsp;·&nbsp; {school.email||""}</div>
+    <div ref={pdfRef} className="ple-cert" style={{width:"210mm",height:"297mm",boxSizing:"border-box",fontFamily:"Georgia,serif",background:"#fdfaf5",overflow:"hidden",position:"relative",display:"flex",flexDirection:"column"}}>
+      {/* Decorative borders */}
+      <div style={{position:"absolute",inset:0,border:"13px solid #7b1c1c",pointerEvents:"none",zIndex:2}}/>
+      <div style={{position:"absolute",inset:20,border:"2px solid #d4af37",pointerEvents:"none",zIndex:2}}/>
+      {/* Content */}
+      <div style={{position:"relative",zIndex:1,padding:"32px 44px 28px",display:"flex",flexDirection:"column",height:"100%",boxSizing:"border-box"}}>
+        {/* Header */}
+        <div style={{textAlign:"center",borderBottom:"2.5px solid #d4af37",paddingBottom:14,marginBottom:18}}>
+          <div style={{fontWeight:900,fontSize:23,color:"#7b1c1c",textTransform:"uppercase",letterSpacing:2,lineHeight:1.3}}>{school.name}</div>
+          <div style={{fontSize:12,color:"#374151",marginTop:6}}>{school.poBox} &nbsp;·&nbsp; Tel: {school.tel||""} &nbsp;·&nbsp; {school.email||""}</div>
         </div>
-        <div style={{textAlign:"center",margin:"10px 0"}}>
-          <div style={{fontSize:22,fontWeight:900,color:"#7b1c1c",textTransform:"uppercase",letterSpacing:3,fontFamily:"Georgia,serif"}}>PLE Recommendation</div>
-          <div style={{fontSize:12,color:"#6b7280",marginTop:2,fontStyle:"italic"}}>Uganda National Examinations Board — {year}</div>
+        {/* Title */}
+        <div style={{textAlign:"center",marginBottom:20}}>
+          <div style={{fontSize:24,fontWeight:900,color:"#7b1c1c",textTransform:"uppercase",letterSpacing:3}}>PLE Recommendation</div>
+          <div style={{fontSize:12,color:"#6b7280",marginTop:5,fontStyle:"italic"}}>Uganda National Examinations Board — {year}</div>
         </div>
-        <div style={{textAlign:"center",fontSize:13,margin:"12px 0 8px",color:"#374151",fontStyle:"italic"}}>This is to certify that</div>
-        <div style={{textAlign:"center",marginBottom:10}}>
-          <div style={{display:"inline-block",background:"#7b1c1c",color:"white",padding:"6px 30px",borderRadius:4,fontWeight:900,fontSize:18,textTransform:"uppercase",letterSpacing:2}}>{s.name}</div>
-          {s.indexNo && <div style={{fontSize:12,color:"#374151",marginTop:6}}>Index No. <b>{s.indexNo}</b></div>}
+        <div style={{textAlign:"center",fontSize:14,margin:"0 0 14px",color:"#374151",fontStyle:"italic"}}>This is to certify that</div>
+        {/* Name */}
+        <div style={{textAlign:"center",marginBottom:14}}>
+          <div style={{display:"inline-block",background:"#7b1c1c",color:"white",padding:"9px 36px",borderRadius:5,fontWeight:900,fontSize:20,textTransform:"uppercase",letterSpacing:2}}>{s.name}</div>
+          {s.indexNo && <div style={{fontSize:14,color:"#374151",marginTop:10}}>Index No. <b>{s.indexNo}</b></div>}
         </div>
-        <div style={{textAlign:"center",fontSize:13,color:"#374151",marginBottom:16,lineHeight:1.8}}>
+        <div style={{textAlign:"center",fontSize:14,color:"#374151",marginBottom:22,lineHeight:1.9}}>
           successfully completed {he} Primary Leaving Examination (PLE)<br/>in <b>{year}</b> at <b style={{color:"#7b1c1c"}}>{school.name}</b>
         </div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:24,marginBottom:16}}>
-          <div style={{border:"1px solid #d4af37",borderRadius:6,overflow:"hidden"}}>
-            <div style={{background:"#7b1c1c",color:"white",fontWeight:900,fontSize:12,padding:"6px 12px",textAlign:"center",letterSpacing:1}}>PLE RESULTS</div>
-            <div style={{padding:"10px 14px",background:"#fffbeb"}}>
-              {PLE_SUBJECTS.map(sub=>(
-                <div key={sub} style={{display:"flex",justifyContent:"space-between",fontSize:13,padding:"3px 0",borderBottom:"1px solid #fde68a"}}>
-                  <span>{pleSubLabel(sub)}:</span><span style={{fontWeight:800}}>{s.results?.[sub]||"—"}</span>
+        {/* Body fills remaining space */}
+        <div style={{flex:1,display:"flex",flexDirection:"column",justifyContent:"space-between"}}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:26,marginBottom:20}}>
+            {/* Results */}
+            <div style={{border:"1.5px solid #d4af37",borderRadius:8,overflow:"hidden"}}>
+              <div style={{background:"#7b1c1c",color:"white",fontWeight:900,fontSize:13,padding:"9px 14px",textAlign:"center",letterSpacing:1.5,textTransform:"uppercase"}}>PLE Results</div>
+              <div style={{padding:"14px 18px",background:"#fffbeb"}}>
+                {PLE_SUBJECTS.map(sub=>(
+                  <div key={sub} style={{display:"flex",justifyContent:"space-between",fontSize:14,padding:"7px 0",borderBottom:"1px solid #fde68a"}}>
+                    <span>{pleSubLabel(sub)}:</span>
+                    <span style={{fontWeight:900,fontSize:17}}>{s.results?.[sub]||"—"}</span>
+                  </div>
+                ))}
+                <div style={{marginTop:12,paddingTop:10,borderTop:"2px solid #d4af37",display:"flex",justifyContent:"space-between",fontWeight:900,fontSize:17}}><span>Total Agg:</span><span>{s.totalAgg||"—"}</span></div>
+                <div style={{display:"flex",justifyContent:"space-between",fontWeight:900,fontSize:17,color:"#7b1c1c",marginTop:5}}><span>Division:</span><span>{s.division||"—"}</span></div>
+              </div>
+            </div>
+            {/* Extra info */}
+            <div style={{display:"flex",flexDirection:"column",gap:16,fontSize:14,justifyContent:"center"}}>
+              {[["LIN",s.lin],["Co-curricular Activities",s.cocurricular],["Leadership Position",s.leadership],["Conduct",s.conduct||"Good"]].map(([label,val])=>(
+                <div key={label}>
+                  <div style={{fontWeight:800,color:"#7b1c1c",marginBottom:4,fontSize:13}}>{label}:</div>
+                  <div style={{borderBottom:"1.5px solid #d4af37",color:"#1d4ed8",fontStyle:"italic",paddingBottom:3,minHeight:20,fontSize:14}}>{val||""}</div>
                 </div>
               ))}
-              <div style={{marginTop:8,paddingTop:6,borderTop:"2px solid #d4af37",display:"flex",justifyContent:"space-between",fontWeight:900,fontSize:14}}><span>Total Agg:</span><span>{s.totalAgg||"—"}</span></div>
-              <div style={{display:"flex",justifyContent:"space-between",fontWeight:900,fontSize:14,color:"#7b1c1c"}}><span>Division:</span><span>{s.division||"—"}</span></div>
             </div>
           </div>
-          <div style={{display:"flex",flexDirection:"column",gap:10,fontSize:12,justifyContent:"center"}}>
-            {[["LIN",s.lin],["Co-curricular Activities",s.cocurricular],["Leadership Position",s.leadership],["Conduct",s.conduct||"Good"]].map(([label,val])=>(
-              <div key={label}>
-                <div style={{fontWeight:700,color:"#7b1c1c",marginBottom:2}}>{label}:</div>
-                <div style={{borderBottom:"1px solid #d4af37",color:"#1d4ed8",fontStyle:"italic",paddingBottom:2}}>{val||<span style={{color:"#9ca3af"}}>—</span>}</div>
-              </div>
-            ))}
+          {/* Recommendation */}
+          <div style={{textAlign:"center",fontSize:14,color:"#374151",fontStyle:"italic",marginBottom:16,lineHeight:1.9,padding:"12px 16px",background:"#fffbeb",borderRadius:8,border:"1px solid #fde68a"}}>
+            {pleRecommendation(s.name,s.gender,s.totalAgg,s.division)}
           </div>
-        </div>
-        <div style={{textAlign:"center",fontSize:13,color:"#374151",fontStyle:"italic",marginBottom:12,lineHeight:1.7}}>{pleRecommendation(s.name,s.gender,s.totalAgg,s.division)}</div>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end",borderTop:"1px solid #d4af37",paddingTop:12,marginTop:8}}>
-          <div>
-            <div style={{borderBottom:"1px solid #374151",width:180,marginBottom:4}}/>
-            <div style={{fontWeight:900,fontSize:12,color:"#7b1c1c",textTransform:"uppercase"}}>{school.headTeacher||"HEAD TEACHER"}</div>
-            <div style={{fontSize:11,color:"#6b7280"}}>Headteacher</div>
+          {/* Signature */}
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end",borderTop:"1.5px solid #d4af37",paddingTop:14}}>
+            <div>
+              <div style={{borderBottom:"1px solid #374151",width:200,marginBottom:6}}/>
+              <div style={{fontWeight:900,fontSize:13,color:"#7b1c1c",textTransform:"uppercase",letterSpacing:0.5}}>{school.headTeacher||"HEAD TEACHER"}</div>
+              <div style={{fontSize:12,color:"#6b7280",marginTop:2}}>Headteacher</div>
+            </div>
+            <div style={{textAlign:"right",fontSize:13,color:"#374151"}}>
+              Date of Issuance:<br/>
+              <span style={{borderBottom:"1px solid #374151",display:"inline-block",width:160,marginTop:8}}>&nbsp;</span>
+            </div>
           </div>
-          <div style={{textAlign:"right",fontSize:11}}>Date of Issuance:<br/><span style={{borderBottom:"1px solid #374151",display:"inline-block",width:140}}>&nbsp;</span></div>
         </div>
       </div>
     </div>
