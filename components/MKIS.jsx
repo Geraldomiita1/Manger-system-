@@ -3311,11 +3311,12 @@ function MonthlySlip({ school, student, monthData, term, year, cls, isLower, sub
   );
 }
 // ─── PLE INFO ────────────────────────────────────────────────────────────────
-const PLE_SUBJECTS = ["English","Mathematics","Science","Social Studies"];
+const PLE_SUBJECTS = ["ENG","SCI","SST","MTC"]; // UNEB column order
+const PLE_SUBJECT_LABELS = { ENG:"English", SCI:"Science", SST:"Social Studies", MTC:"Mathematics" };
+const pleSubLabel = (code) => PLE_SUBJECT_LABELS[code] || code;
 // Auto-generate a recommendation sentence based on total aggregate
 function pleRecommendation(name, gender, totalAgg, div) {
   const he = gender==="F"?"She":"He";
-  const his = gender==="F"?"her":"his";
   if (div==="1"||div==="2") return `${he} is disciplined, responsible and hardworking. Highly recommended for further Education.`;
   if (div==="3") return `${he} has demonstrated satisfactory academic performance. Recommended for further Education.`;
   if (div==="4") return `${he} has shown effort during the course of study. Recommended to continue with secondary education.`;
@@ -3359,7 +3360,7 @@ function PleCertificateDesign1({ rec, school, year, pdfRef }) {
               <thead><tr><th style={{textAlign:"left",borderBottom:"1px solid #e5e7eb",paddingBottom:4,color:"#374151"}}>Subject</th><th style={{textAlign:"center",borderBottom:"1px solid #e5e7eb",paddingBottom:4,color:"#374151"}}>Agg</th></tr></thead>
               <tbody>
                 {PLE_SUBJECTS.map(sub=>(
-                  <tr key={sub}><td style={{padding:"3px 0",borderBottom:"1px solid #f3f4f6"}}>{sub}:</td><td style={{textAlign:"center",padding:"3px 0",borderBottom:"1px solid #f3f4f6",fontWeight:700}}>{s.results?.[sub]||"-"}</td></tr>
+                  <tr key={sub}><td style={{padding:"3px 0",borderBottom:"1px solid #f3f4f6"}}>{pleSubLabel(sub)}:</td><td style={{textAlign:"center",padding:"3px 0",borderBottom:"1px solid #f3f4f6",fontWeight:700}}>{s.results?.[sub]||"-"}</td></tr>
                 ))}
               </tbody>
             </table>
@@ -3422,7 +3423,7 @@ function PleCertificateDesign2({ rec, school, year, pdfRef }) {
             <div style={{fontWeight:800,fontSize:12,color:"#1e40af",marginBottom:10,textTransform:"uppercase",letterSpacing:0.5}}>📊 PLE Results</div>
             {PLE_SUBJECTS.map(sub=>(
               <div key={sub} style={{display:"flex",justifyContent:"space-between",fontSize:13,padding:"4px 0",borderBottom:"1px solid #dbeafe"}}>
-                <span>{sub}</span><span style={{fontWeight:800,color:"#1e40af"}}>{s.results?.[sub]||"—"}</span>
+                <span>{pleSubLabel(sub)}</span><span style={{fontWeight:800,color:"#1e40af"}}>{s.results?.[sub]||"—"}</span>
               </div>
             ))}
             <div style={{marginTop:10,display:"flex",justifyContent:"space-between",fontWeight:900,fontSize:14,color:"#1e3a6e",borderTop:"2px solid #1e40af",paddingTop:6}}>
@@ -3489,7 +3490,7 @@ function PleCertificateDesign3({ rec, school, year, pdfRef }) {
             <div style={{padding:"10px 14px",background:"#fffbeb"}}>
               {PLE_SUBJECTS.map(sub=>(
                 <div key={sub} style={{display:"flex",justifyContent:"space-between",fontSize:13,padding:"3px 0",borderBottom:"1px solid #fde68a"}}>
-                  <span>{sub}:</span><span style={{fontWeight:800}}>{s.results?.[sub]||"—"}</span>
+                  <span>{pleSubLabel(sub)}:</span><span style={{fontWeight:800}}>{s.results?.[sub]||"—"}</span>
                 </div>
               ))}
               <div style={{marginTop:8,paddingTop:6,borderTop:"2px solid #d4af37",display:"flex",justifyContent:"space-between",fontWeight:900,fontSize:14}}><span>Total Agg:</span><span>{s.totalAgg||"—"}</span></div>
@@ -3524,170 +3525,260 @@ const CERT_DESIGNS = [
   { id:3, label:"Design 3 — Maroon & Gold", Component: PleCertificateDesign3 },
 ];
 function PleInfo({ students, setStudents, school, markEditing }) {
-  const [tab, setTab] = useState("records"); // "records" | "certificates" | "analysis"
-  const [pleData, setPleData] = useState({}); // { [studentId]: { indexNo, results:{...}, totalAgg, division, lin, cocurricular, leadership, conduct } }
+  const [tab, setTab] = useState("records");
+  const [pleData, setPleData] = useState({});
+  // imported rows that didn't match any student (flagged red)
+  const [unmatched, setUnmatched] = useState([]); // [{ name, indexNo, sex, results, totalAgg, division }]
   const [year, setYear] = useState(school.year||String(new Date().getFullYear()));
   const [selectedDesign, setSelectedDesign] = useState(1);
   const [selectedStudent, setSelectedStudent] = useState(null);
   const [pdfBusy, setPdfBusy] = useState(false);
   const [allPdfBusy, setAllPdfBusy] = useState(false);
   const [csvMsg, setCsvMsg] = useState("");
+  const [toDelete, setToDelete] = useState([]); // ids to delete from unmatched after confirm
   const certRef = useRef(null);
   const allCertsRef = useRef(null);
   const p7Students = students.filter(s=>s.className==="P7"||s.className==="Completed");
   const DesignComponent = CERT_DESIGNS.find(d=>d.id===selectedDesign)?.Component || PleCertificateDesign1;
-  // Update a single field in pleData for a student
-  const updatePle = (sid, field, val) => {
-    setPleData(prev => ({ ...prev, [sid]: { ...prev[sid], [field]: val } }));
-  };
+
+  const updatePle = (sid, field, val) => setPleData(prev=>({...prev,[sid]:{...prev[sid],[field]:val}}));
   const updateResult = (sid, sub, val) => {
-    setPleData(prev => ({
-      ...prev,
-      [sid]: {
-        ...prev[sid],
-        results: { ...prev[sid]?.results, [sub]: val },
-      }
-    }));
-    // Auto-recalculate total agg and division
-    setTimeout(() => {
-      setPleData(prev => {
-        const rec = prev[sid] || {};
-        const results = { ...rec.results, [sub]: val };
-        const vals = PLE_SUBJECTS.map(s=>parseInt(results[s]||0,10)).filter(v=>!isNaN(v));
-        const totalAgg = vals.length===PLE_SUBJECTS.length ? vals.reduce((a,b)=>a+b,0) : (rec.totalAgg||"");
-        const div = totalAgg ? (totalAgg<=12?"1":totalAgg<=24?"2":totalAgg<=36?"3":totalAgg<=48?"4":"U") : (rec.division||"");
-        return { ...prev, [sid]: { ...rec, results, totalAgg: totalAgg||rec.totalAgg||"", division: div||rec.division||"" } };
-      });
-    }, 0);
+    setPleData(prev=>{
+      const rec = {...(prev[sid]||{}), results:{...(prev[sid]?.results||{}),[sub]:val}};
+      const vals = PLE_SUBJECTS.map(s=>parseInt(rec.results[s]||0,10));
+      const allEntered = vals.every(v=>!isNaN(v)&&v>0);
+      const totalAgg = allEntered ? vals.reduce((a,b)=>a+b,0).toString() : rec.totalAgg||"";
+      const division = totalAgg ? (Number(totalAgg)<=12?"1":Number(totalAgg)<=24?"2":Number(totalAgg)<=36?"3":Number(totalAgg)<=48?"4":"U") : rec.division||"";
+      return {...prev,[sid]:{...rec,totalAgg,division}};
+    });
   };
-  // Parse CSV import: expects columns Name, IndexNo, English, Mathematics, Science, Social Studies
-  // (and optionally LIN, Cocurricular, Leadership, Conduct)
+
+  // Parse UNEB Excel/CSV file — handles the real UNEB format from the screenshot.
+  // The file has metadata rows at the top before the header row (Year, Index_No, NAME, SEX, ENG, SCI, SST, MTC, AGG, DIV).
   const importCsv = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
     reader.onload = (ev) => {
       try {
-        const lines = ev.target.result.split(/\r?\n/).filter(Boolean);
-        const header = lines[0].split(",").map(h=>h.trim().replace(/^"|"$/g,"").toLowerCase());
-        const colIdx = (names) => { for (const n of names) { const i=header.indexOf(n); if(i>=0)return i; } return -1; };
-        const nameCol = colIdx(["name","student name","pupil name","learner name"]);
-        const idxCol  = colIdx(["indexno","index no","index number","index_no"]);
-        const engCol  = colIdx(["english","eng"]);
-        const sciCol  = colIdx(["science","sci"]);
-        const sstCol  = colIdx(["social studies","social_studies","sst"]);
-        const mathCol = colIdx(["mathematics","math","maths"]);
-        const linCol  = colIdx(["lin"]);
-        const coCol   = colIdx(["cocurricular","co-curricular","activities"]);
-        const leadCol = colIdx(["leadership","leadership position"]);
-        const condCol = colIdx(["conduct"]);
-        let matched = 0;
-        lines.slice(1).forEach(line => {
+        const lines = ev.target.result.split(/\r?\n/).filter(l=>l.trim());
+        // Find the header row — look for the row that contains "NAME" and "ENG"
+        let headerIdx = -1;
+        let header = [];
+        for (let i=0; i<lines.length; i++) {
+          const cols = lines[i].split(",").map(c=>c.trim().replace(/^"|"$/g,"").toLowerCase());
+          if (cols.includes("name") && (cols.includes("eng")||cols.includes("english"))) {
+            headerIdx = i; header = cols; break;
+          }
+        }
+        if (headerIdx===-1) { setCsvMsg("⚠️ Could not find header row. Make sure file has columns: Year, Index_No, NAME, SEX, ENG, SCI, SST, MTC, AGG, DIV"); return; }
+
+        const ci = (names) => { for (const n of names) { const i=header.indexOf(n.toLowerCase()); if(i>=0)return i; } return -1; };
+        const yearCol  = ci(["year"]);
+        const idxCol   = ci(["index_no","indexno","index no","index number"]);
+        const nameCol  = ci(["name","student name","pupil name"]);
+        const sexCol   = ci(["sex","gender"]);
+        const engCol   = ci(["eng","english"]);
+        const sciCol   = ci(["sci","science"]);
+        const sstCol   = ci(["sst","social studies","social_studies"]);
+        const mtcCol   = ci(["mtc","mathematics","math","maths"]);
+        const aggCol   = ci(["agg","total agg","total_agg","aggregate"]);
+        const divCol   = ci(["div","division"]);
+        const linCol   = ci(["lin"]);
+
+        const matched = [], unmatchedRows = [];
+        lines.slice(headerIdx+1).forEach(line=>{
           const cols = line.split(",").map(c=>c.trim().replace(/^"|"$/g,""));
-          const name = nameCol>=0 ? cols[nameCol]?.toUpperCase().trim() : "";
-          if (!name) return;
-          const student = p7Students.find(s=>s.name===name) || p7Students.find(s=>s.name.includes(name)||name.includes(s.name));
-          if (!student) return;
-          const results = {};
-          if (engCol>=0)  results["English"]       = cols[engCol]?.trim()||"";
-          if (sciCol>=0)  results["Science"]        = cols[sciCol]?.trim()||"";
-          if (sstCol>=0)  results["Social Studies"] = cols[sstCol]?.trim()||"";
-          if (mathCol>=0) results["Mathematics"]    = cols[mathCol]?.trim()||"";
-          const vals = PLE_SUBJECTS.map(s=>parseInt(results[s]||0,10)).filter(v=>!isNaN(v)&&v>0);
-          const totalAgg = vals.length===PLE_SUBJECTS.length ? vals.reduce((a,b)=>a+b,0).toString() : "";
-          const division = totalAgg ? (Number(totalAgg)<=12?"1":Number(totalAgg)<=24?"2":Number(totalAgg)<=36?"3":Number(totalAgg)<=48?"4":"U") : "";
-          setPleData(prev=>({...prev,[student.id]:{
-            ...prev[student.id],
-            results,
-            totalAgg, division,
-            indexNo: idxCol>=0 ? (cols[idxCol]?.trim()||prev[student.id]?.indexNo||"") : (prev[student.id]?.indexNo||""),
-            lin:     linCol>=0  ? (cols[linCol]?.trim().toUpperCase()||student.lin||"") : (student.lin||""),
-            cocurricular: coCol>=0   ? (cols[coCol]?.trim()||"")   : (prev[student.id]?.cocurricular||""),
-            leadership:   leadCol>=0 ? (cols[leadCol]?.trim()||"") : (prev[student.id]?.leadership||""),
-            conduct:      condCol>=0 ? (cols[condCol]?.trim()||"") : (prev[student.id]?.conduct||""),
-          }}));
-          matched++;
+          const rawName = nameCol>=0 ? cols[nameCol]?.toUpperCase().trim() : "";
+          if (!rawName) return;
+          const indexNo   = idxCol>=0   ? cols[idxCol]?.trim()  : "";
+          const sex       = sexCol>=0   ? cols[sexCol]?.trim().toUpperCase() : "";
+          const fileYear  = yearCol>=0  ? cols[yearCol]?.trim() : "";
+          const results   = {
+            ENG: engCol>=0 ? cols[engCol]?.trim() : "",
+            SCI: sciCol>=0 ? cols[sciCol]?.trim() : "",
+            SST: sstCol>=0 ? cols[sstCol]?.trim() : "",
+            MTC: mtcCol>=0 ? cols[mtcCol]?.trim() : "",
+          };
+          const totalAgg  = aggCol>=0 ? cols[aggCol]?.trim() : (() => { const vs=PLE_SUBJECTS.map(s=>parseInt(results[s]||0,10)); return vs.every(v=>!isNaN(v)&&v>0)?vs.reduce((a,b)=>a+b,0).toString():""; })();
+          const division  = divCol>=0 ? cols[divCol]?.trim() : (totalAgg?(Number(totalAgg)<=12?"1":Number(totalAgg)<=24?"2":Number(totalAgg)<=36?"3":Number(totalAgg)<=48?"4":"U"):"");
+          const lin       = linCol>=0  ? cols[linCol]?.trim().toUpperCase() : "";
+          // Try to match by name (exact first, then partial)
+          let student = p7Students.find(s=>s.name===rawName)
+            || p7Students.find(s=>s.name.replace(/\s+/g,"")===rawName.replace(/\s+/g,""))
+            || p7Students.find(s=>rawName.includes(s.name)||s.name.includes(rawName));
+          if (student) {
+            setPleData(prev=>({...prev,[student.id]:{...prev[student.id],indexNo,results,totalAgg,division,lin:lin||student.lin||prev[student.id]?.lin||""}}));
+            if (sex && student.gender!==sex[0]) setStudents(prev=>prev.map(x=>x.id===student.id?{...x,gender:sex[0]==="F"?"F":"M"}:x));
+            matched.push(student.id);
+          } else {
+            // Not matched — flag red
+            unmatchedRows.push({id:`unm_${Date.now()}_${Math.random().toString(36).slice(2,6)}`,rawName,indexNo,sex,results,totalAgg,division,lin,fileYear});
+          }
         });
-        setCsvMsg(`✅ Imported results for ${matched} learner(s).`);
-        setTimeout(()=>setCsvMsg(""),4000);
-      } catch(err) { setCsvMsg(`⚠️ Error reading file: ${err.message}`); }
+        setUnmatched(unmatchedRows);
+        setYear(prev=>{
+          const fyear = lines[headerIdx+1]?.split(",")?.[yearCol>=0?yearCol:0]?.trim().replace(/^"|"$/g,"");
+          return fyear && /^\d{4}$/.test(fyear) ? fyear : prev;
+        });
+        setCsvMsg(`✅ Matched ${matched.length} learner(s). ${unmatchedRows.length>0?`⚠️ ${unmatchedRows.length} name(s) not found in the system — see red rows below.`:""}`);
+        setTimeout(()=>setCsvMsg(""),8000);
+      } catch(err) { setCsvMsg(`⚠️ Error: ${err.message}`); }
     };
     reader.readAsText(file);
     e.target.value="";
   };
-  const getRecForStudent = (s) => ({
-    ...s,
-    ...(pleData[s.id]||{}),
-    lin: pleData[s.id]?.lin || s.lin || "",
-    name: s.name,
-    gender: s.gender,
+
+  const getRecForStudent = (s) => ({...s,...(pleData[s.id]||{}),lin:pleData[s.id]?.lin||s.lin||"",name:s.name,gender:s.gender});
+  const sortedP7 = [...p7Students].sort((a,b)=>{
+    const aAgg = Number(pleData[a.id]?.totalAgg||999);
+    const bAgg = Number(pleData[b.id]?.totalAgg||999);
+    return aAgg-bAgg || a.name.localeCompare(b.name);
   });
-  const tabStyle = (t) => ({
-    padding:"8px 18px", borderRadius:"8px 8px 0 0", border:"none", cursor:"pointer", fontWeight:700, fontSize:13,
-    background: tab===t ? "#1e3a6e" : "#e2e8f0", color: tab===t ? "white" : "#374151",
-  });
+
+  const tabStyle = (t) => ({padding:"8px 18px",borderRadius:"8px 8px 0 0",border:"none",cursor:"pointer",fontWeight:700,fontSize:13,background:tab===t?"#1e3a6e":"#e2e8f0",color:tab===t?"white":"#374151"});
+
   return (
     <div>
-      {/* Tab bar */}
       <div style={{display:"flex",gap:4,marginBottom:0,flexWrap:"wrap"}}>
-        {[["records","📋 PLE Records"],["certificates","🏅 Certificates"],["analysis","📊 Analysis"]].map(([t,label])=>(
+        {[["records","📋 PLE Results"],["certificates","🏅 Certificates"],["analysis","📊 Analysis"]].map(([t,label])=>(
           <button key={t} onClick={()=>setTab(t)} style={tabStyle(t)}>{label}</button>
         ))}
       </div>
       <div style={{background:"white",borderRadius:"0 12px 12px 12px",padding:20,boxShadow:"0 2px 12px rgba(0,0,0,0.07)"}}>
+
         {/* ── RECORDS TAB ── */}
         {tab==="records" && (
           <div>
-            <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"flex-end",marginBottom:16}}>
-              <div><label style={lbl}>PLE Year</label><input type="number" value={year} onChange={e=>setYear(e.target.value)} style={{...inp,width:100}}/></div>
-              <div>
-                <label style={lbl}>Import from CSV</label>
-                <div style={{fontSize:11,color:"#6b7280",marginBottom:4}}>Columns: Name, IndexNo, English, Mathematics, Science, Social Studies (+ optional: LIN, Cocurricular, Leadership, Conduct)</div>
-                <input type="file" accept=".csv,.txt" onChange={importCsv} style={{fontSize:12}}/>
+            {/* Import controls */}
+            <div style={{background:"#f0f9ff",border:"1px solid #bae6fd",borderRadius:10,padding:16,marginBottom:16}}>
+              <div style={{fontWeight:700,color:"#0369a1",fontSize:14,marginBottom:8}}>📥 Import UNEB Result File</div>
+              <div style={{fontSize:12,color:"#374151",marginBottom:10}}>
+                Upload the CSV/Excel-exported file from UNEB. The system expects columns:<br/>
+                <code style={{background:"#e0f2fe",padding:"2px 6px",borderRadius:4}}>Year, Index_No, NAME, SEX, ENG, SCI, SST, MTC, AGG, DIV</code><br/>
+                Names not found in this school's learner list will be highlighted red — they may be from another school sharing the same EMIS code.
+              </div>
+              <div style={{display:"flex",gap:12,alignItems:"flex-end",flexWrap:"wrap"}}>
+                <div>
+                  <label style={lbl}>Upload UNEB CSV</label>
+                  <input type="file" accept=".csv,.txt,.xlsx" onChange={importCsv} style={{fontSize:12}}/>
+                </div>
+                <div>
+                  <label style={lbl}>PLE Year</label>
+                  <input type="number" value={year} onChange={e=>setYear(e.target.value)} style={{...inp,width:100}}/>
+                </div>
+              </div>
+              {csvMsg && <div style={{marginTop:10,fontSize:13,fontWeight:600,color:csvMsg.startsWith("✅")?"#15803d":"#92400e",padding:"8px 12px",background:csvMsg.startsWith("✅")?"#f0fdf4":"#fef9c3",borderRadius:8}}>{csvMsg}</div>}
+            </div>
+
+            {/* Unmatched names (red flagged) */}
+            {unmatched.length>0 && (
+              <div style={{background:"#fef2f2",border:"2px solid #fca5a5",borderRadius:10,padding:16,marginBottom:16}}>
+                <div style={{fontWeight:800,color:"#dc2626",fontSize:14,marginBottom:8}}>🚨 {unmatched.length} Name(s) Not Found in This School's Records</div>
+                <div style={{fontSize:12,color:"#7f1d1d",marginBottom:10}}>
+                  These names appear in the imported file but don't match any learner in the system. They may be from another school using the same EMIS code (<b>{school.emis||"010999"}</b>). Review carefully — tick to remove from this import, or leave them if you need to add them to the system manually.
+                </div>
+                <table style={{width:"100%",fontSize:12,borderCollapse:"collapse"}}>
+                  <thead><tr style={{background:"#dc2626",color:"white"}}>
+                    {["Remove?","Name in File","Index No","SEX","ENG","SCI","SST","MTC","AGG","DIV"].map(h=>(
+                      <th key={h} style={{padding:"6px 8px",textAlign:"left",fontWeight:700}}>{h}</th>
+                    ))}
+                  </tr></thead>
+                  <tbody>
+                    {unmatched.map((r,i)=>(
+                      <tr key={r.id} style={{background:i%2===0?"#fff5f5":"#fef2f2"}}>
+                        <td style={{padding:"6px 8px",textAlign:"center"}}>
+                          <input type="checkbox" checked={toDelete.includes(r.id)} onChange={()=>setToDelete(prev=>prev.includes(r.id)?prev.filter(x=>x!==r.id):[...prev,r.id])}/>
+                        </td>
+                        <td style={{padding:"6px 8px",fontWeight:700,color:"#dc2626"}}>{r.rawName}</td>
+                        <td style={{padding:"6px 8px",fontSize:11}}>{r.indexNo}</td>
+                        <td style={{padding:"6px 8px"}}>{r.sex}</td>
+                        {PLE_SUBJECTS.map(sub=><td key={sub} style={{padding:"6px 8px",textAlign:"center"}}>{r.results?.[sub]||"—"}</td>)}
+                        <td style={{padding:"6px 8px",fontWeight:800}}>{r.totalAgg}</td>
+                        <td style={{padding:"6px 8px",fontWeight:800,color:"#dc2626"}}>{r.division}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {toDelete.length>0 && (
+                  <div style={{marginTop:10,display:"flex",gap:10,alignItems:"center"}}>
+                    <button onClick={()=>{ setUnmatched(prev=>prev.filter(r=>!toDelete.includes(r.id))); setToDelete([]); }} style={{background:"#dc2626",color:"white",border:"none",borderRadius:8,padding:"7px 18px",fontWeight:700,cursor:"pointer"}}>
+                      🗑 Remove {toDelete.length} selected from import
+                    </button>
+                    <span style={{fontSize:12,color:"#7f1d1d"}}>This only removes them from the import view — it does not affect your learner records.</span>
+                  </div>
+                )}
+                <div style={{marginTop:8,display:"flex",gap:10,alignItems:"center"}}>
+                  <button onClick={()=>{setToDelete(unmatched.map(r=>r.id));}} style={{background:"#fca5a5",color:"#7f1d1d",border:"1px solid #fca5a5",borderRadius:8,padding:"6px 14px",fontWeight:700,fontSize:12,cursor:"pointer"}}>Select All</button>
+                  <button onClick={()=>setToDelete([])} style={{background:"white",color:"#374151",border:"1px solid #d1d5db",borderRadius:8,padding:"6px 14px",fontWeight:700,fontSize:12,cursor:"pointer"}}>Deselect All</button>
+                </div>
+              </div>
+            )}
+
+            {/* UNEB-style result sheet */}
+            <div style={{background:"white",border:"1px solid #e5e7eb",borderRadius:10,overflow:"hidden"}}>
+              {/* UNEB header block */}
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",background:"#f8fafc",borderBottom:"2px solid #1e3a6e",padding:"10px 16px",fontSize:12}}>
+                <div>
+                  <div style={{fontWeight:800,color:"#1e3a6e",fontSize:13}}>DISTRICT: TORORO M/C</div>
+                  <div style={{marginTop:6,color:"#374151"}}>041 - TORORO M/C Results for {year}</div>
+                  <div style={{color:"#374151",fontWeight:700}}>{school.emis||"010999"} - {school.name}</div>
+                </div>
+                <div style={{textAlign:"right",color:"#374151"}}>
+                  <div style={{fontWeight:800,color:"#1e3a6e",fontSize:13}}>Uganda National Examinations Board</div>
+                  <div>35 Martyrs Way, Ntinda</div>
+                  <div>P.O. Box 7066</div>
+                  <div>Kampala, Uganda</div>
+                </div>
+              </div>
+              {/* Table */}
+              <div style={{overflowX:"auto"}}>
+                <table style={{width:"100%",fontSize:12,borderCollapse:"collapse",minWidth:700}}>
+                  <thead>
+                    <tr style={{background:"#1e3a6e",color:"white"}}>
+                      {["#","Year","Index No","NAME","SEX","ENG","SCI","SST","MTC","AGG","DIV","Conduct","Co-curr","Leadership"].map(h=>(
+                        <th key={h} style={{padding:"8px 8px",textAlign:"left",fontWeight:700,whiteSpace:"nowrap",fontSize:11}}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sortedP7.length===0 && <tr><td colSpan={14} style={{padding:24,textAlign:"center",color:"#9ca3af"}}>No P7 learners found. Add them in the LEARNERS page.</td></tr>}
+                    {sortedP7.map((s,i)=>{
+                      const rec = pleData[s.id]||{};
+                      const hasResults = PLE_SUBJECTS.some(sub=>rec.results?.[sub]);
+                      const rowBg = i%2===0?"white":"#dbeafe";
+                      return (
+                        <tr key={s.id} style={{background:rowBg}}>
+                          <td style={{padding:"5px 8px",color:"#6b7280",fontSize:11}}>{i+1}</td>
+                          <td style={{padding:"5px 8px",color:"#374151",fontSize:11}}>{year}</td>
+                          <td style={{padding:"3px 6px"}}>
+                            <input value={rec.indexNo||""} onChange={e=>updatePle(s.id,"indexNo",e.target.value)} style={{...inp,padding:"2px 4px",width:100,fontSize:11}}/>
+                          </td>
+                          <td style={{padding:"5px 8px",fontWeight:700,whiteSpace:"nowrap",color:"#1e3a6e"}}>{s.name}</td>
+                          <td style={{padding:"5px 8px",textAlign:"center"}}>{s.gender}</td>
+                          {PLE_SUBJECTS.map(sub=>(
+                            <td key={sub} style={{padding:"3px 4px",textAlign:"center"}}>
+                              <input type="number" min={1} max={9} value={rec.results?.[sub]||""} onChange={e=>updateResult(s.id,sub,e.target.value)} style={{...inp,padding:"2px 3px",width:38,fontSize:12,textAlign:"center",fontWeight:700}}/>
+                            </td>
+                          ))}
+                          <td style={{padding:"5px 8px",textAlign:"center",fontWeight:900,fontSize:14,color:"#1e3a6e"}}>{rec.totalAgg||"—"}</td>
+                          <td style={{padding:"5px 8px",textAlign:"center",fontWeight:900,fontSize:14,color:rec.division==="1"?"#15803d":rec.division==="2"?"#1e40af":rec.division==="3"?"#d97706":rec.division==="4"?"#ea580c":"#dc2626"}}>{rec.division||"—"}</td>
+                          <td style={{padding:"3px 4px"}}><input value={rec.conduct||""} onChange={e=>updatePle(s.id,"conduct",e.target.value)} placeholder="Good" style={{...inp,padding:"2px 4px",width:60,fontSize:11}}/></td>
+                          <td style={{padding:"3px 4px"}}><input value={rec.cocurricular||""} onChange={e=>updatePle(s.id,"cocurricular",e.target.value)} style={{...inp,padding:"2px 4px",width:70,fontSize:11}}/></td>
+                          <td style={{padding:"3px 4px"}}><input value={rec.leadership||""} onChange={e=>updatePle(s.id,"leadership",e.target.value)} style={{...inp,padding:"2px 4px",width:70,fontSize:11}}/></td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
               </div>
             </div>
-            {csvMsg && <div style={{background:"#f0fdf4",color:"#15803d",padding:"8px 14px",borderRadius:8,fontSize:13,marginBottom:12,fontWeight:600}}>{csvMsg}</div>}
-            {p7Students.length===0 && <div style={{color:"#9ca3af",padding:24,textAlign:"center"}}>No P7 or Completed learners found. Add them in the LEARNERS page first.</div>}
-            <div style={{overflowX:"auto"}}>
-              <table style={{width:"100%",fontSize:12,borderCollapse:"collapse"}}>
-                <thead>
-                  <tr style={{background:"#1e3a6e",color:"white"}}>
-                    {["Name","Gender","Index No","LIN","Eng","Math","Sci","SST","Total Agg","Div","Co-curr","Leadership","Conduct"].map(h=>(
-                      <th key={h} style={{padding:"8px 8px",textAlign:"left",fontWeight:700,whiteSpace:"nowrap",fontSize:11}}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {p7Students.map((s,i)=>{
-                    const rec = pleData[s.id]||{};
-                    const results = rec.results||{};
-                    return (
-                      <tr key={s.id} style={{background:i%2===0?"white":"#f8fafc"}}>
-                        <td style={{padding:"5px 8px",fontWeight:700,whiteSpace:"nowrap",color:"#1e3a6e"}}>{s.name}</td>
-                        <td style={{padding:"5px 8px"}}>{s.gender==="M"?"M":"F"}</td>
-                        <td style={{padding:"3px 6px"}}><input value={rec.indexNo||""} onChange={e=>updatePle(s.id,"indexNo",e.target.value)} style={{...inp,padding:"3px 6px",width:110,fontSize:11}}/></td>
-                        <td style={{padding:"3px 6px"}}><input value={rec.lin||s.lin||""} onChange={e=>updatePle(s.id,"lin",e.target.value.toUpperCase())} style={{...inp,padding:"3px 6px",width:120,fontSize:11,textTransform:"uppercase"}}/></td>
-                        {PLE_SUBJECTS.map(sub=>(
-                          <td key={sub} style={{padding:"3px 6px"}}>
-                            <input type="number" min={0} max={9} value={results[sub]||""} onChange={e=>updateResult(s.id,sub,e.target.value)} style={{...inp,padding:"3px 4px",width:42,fontSize:12,textAlign:"center"}}/>
-                          </td>
-                        ))}
-                        <td style={{padding:"5px 8px",fontWeight:800,color:"#1e3a6e",fontSize:13}}>{rec.totalAgg||"—"}</td>
-                        <td style={{padding:"5px 8px",fontWeight:800,color:"#dc2626",fontSize:13}}>{rec.division||"—"}</td>
-                        <td style={{padding:"3px 6px"}}><input value={rec.cocurricular||""} onChange={e=>updatePle(s.id,"cocurricular",e.target.value)} style={{...inp,padding:"3px 6px",width:80,fontSize:11}}/></td>
-                        <td style={{padding:"3px 6px"}}><input value={rec.leadership||""} onChange={e=>updatePle(s.id,"leadership",e.target.value)} style={{...inp,padding:"3px 6px",width:80,fontSize:11}}/></td>
-                        <td style={{padding:"3px 6px"}}><input value={rec.conduct||""} onChange={e=>updatePle(s.id,"conduct",e.target.value)} placeholder="Good" style={{...inp,padding:"3px 6px",width:70,fontSize:11}}/></td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-            <div style={{marginTop:12,fontSize:11,color:"#9ca3af"}}>
-              💡 Tip: Enter aggregates 1–9 per subject. Total Agg and Division are calculated automatically. You can also import from a CSV file.
+            <div style={{marginTop:10,fontSize:11,color:"#9ca3af"}}>
+              💡 Aggregates (AGG) auto-calculate when all 4 subjects are filled. Division auto-sets from total AGG.
             </div>
           </div>
         )}
+
         {/* ── CERTIFICATES TAB ── */}
         {tab==="certificates" && (
           <div>
@@ -3703,110 +3794,100 @@ function PleInfo({ students, setStudents, school, markEditing }) {
                 </div>
               </div>
               <div>
-                <label style={lbl}>Learner</label>
+                <label style={lbl}>Preview Learner</label>
                 <select value={selectedStudent||""} onChange={e=>setSelectedStudent(e.target.value||null)} style={inp}>
                   <option value="">— Select learner —</option>
-                  {p7Students.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}
+                  {sortedP7.map(s=><option key={s.id} value={s.id}>{s.name} {pleData[s.id]?.division?`(Div ${pleData[s.id].division})`:""}</option>)}
                 </select>
               </div>
               {selectedStudent && (
-                <button disabled={pdfBusy} onClick={async()=>{
-                  setPdfBusy(true);
-                  try { await downloadNodesAsPdf([certRef.current], `PLE_Recommendation_${safeFileName(p7Students.find(s=>s.id===selectedStudent)?.name||"cert")}_${year}.pdf`); }
-                  finally { setPdfBusy(false); }
-                }} style={pdfBusy?btnPdfBusy:btnPdf}>{pdfBusy?"⏳ Generating...":"📕 Download PDF"}</button>
+                <button disabled={pdfBusy} onClick={async()=>{ setPdfBusy(true); try { await downloadNodesAsPdf([certRef.current],`PLE_Recommendation_${safeFileName(p7Students.find(s=>s.id===selectedStudent)?.name||"cert")}_${year}.pdf`); } finally { setPdfBusy(false); } }} style={pdfBusy?btnPdfBusy:btnPdf}>{pdfBusy?"⏳ Generating...":"📕 Download PDF"}</button>
               )}
-              <button disabled={allPdfBusy} onClick={async()=>{
-                setAllPdfBusy(true);
-                try {
-                  const nodes = Array.from(allCertsRef.current?.querySelectorAll(".ple-cert")||[]);
-                  await downloadNodesAsPdf(nodes, `PLE_Recommendations_All_${year}.pdf`);
-                } finally { setAllPdfBusy(false); }
-              }} style={allPdfBusy?btnPdfBusy:{...btnPdf,background:"linear-gradient(135deg,#4c1d95,#7c3aed)"}}>
+              <button disabled={allPdfBusy} onClick={async()=>{ setAllPdfBusy(true); try { const nodes=Array.from(allCertsRef.current?.querySelectorAll(".ple-cert")||[]); await downloadNodesAsPdf(nodes,`PLE_Recommendations_All_${year}.pdf`); } finally { setAllPdfBusy(false); } }} style={allPdfBusy?btnPdfBusy:{...btnPdf,background:"linear-gradient(135deg,#4c1d95,#7c3aed)"}}>
                 {allPdfBusy?"⏳ Generating...":"📕 Download All PDFs"}
               </button>
               <button onClick={()=>window.print()} style={btnPrimary}>🖨️ Print All</button>
             </div>
-            {/* Single certificate preview */}
             {selectedStudent && (()=>{
               const s = p7Students.find(x=>x.id===selectedStudent);
               if (!s) return null;
-              const rec = getRecForStudent(s);
               return (
                 <div style={{marginBottom:24}}>
                   <div style={{fontSize:13,fontWeight:700,color:"#1e3a6e",marginBottom:10}}>Preview: {s.name}</div>
-                  <DesignComponent rec={rec} school={school} year={year} pdfRef={certRef}/>
+                  <DesignComponent rec={getRecForStudent(s)} school={school} year={year} pdfRef={certRef}/>
                 </div>
               );
             })()}
-            {/* All certificates (for bulk PDF / print) */}
-            <div ref={allCertsRef} style={{marginTop:16}}>
-              {p7Students.map(s=>{
-                const rec = getRecForStudent(s);
-                return (
-                  <div key={s.id} style={{marginBottom:24,pageBreakAfter:"always",breakAfter:"page"}}>
-                    <DesignComponent rec={rec} school={school} year={year} pdfRef={null}/>
-                  </div>
-                );
-              })}
+            <div ref={allCertsRef}>
+              {sortedP7.map(s=>(
+                <div key={s.id} style={{marginBottom:24,pageBreakAfter:"always",breakAfter:"page"}}>
+                  <DesignComponent rec={getRecForStudent(s)} school={school} year={year} pdfRef={null}/>
+                </div>
+              ))}
             </div>
           </div>
         )}
+
         {/* ── ANALYSIS TAB ── */}
         {tab==="analysis" && (
           <div>
-            <div style={{fontSize:14,fontWeight:700,color:"#1e3a6e",marginBottom:16}}>📊 PLE {year} — Performance Analysis</div>
-            {p7Students.length===0 ? <div style={{color:"#9ca3af",textAlign:"center",padding:24}}>No P7 learners found.</div> : (()=>{
-              const recs = p7Students.map(s=>getRecForStudent(s)).filter(r=>r.totalAgg);
-              const divCounts = {1:0,2:0,3:0,4:0,U:0};
+            <div style={{fontSize:14,fontWeight:700,color:"#1e3a6e",marginBottom:16}}>📊 PLE {year} — {school.name} Performance Summary</div>
+            {sortedP7.length===0 ? <div style={{color:"#9ca3af",textAlign:"center",padding:24}}>No P7 learners found.</div> : (()=>{
+              const recs = sortedP7.map(s=>getRecForStudent(s)).filter(r=>r.totalAgg);
+              const divCounts = {"1":0,"2":0,"3":0,"4":0,"U":0};
               recs.forEach(r=>{ const d=String(r.division); if(divCounts[d]!==undefined)divCounts[d]++; });
               const subAvg = {};
               PLE_SUBJECTS.forEach(sub=>{
                 const vals = recs.map(r=>parseInt(r.results?.[sub]||0,10)).filter(v=>v>0);
-                subAvg[sub] = vals.length ? (vals.reduce((a,b)=>a+b,0)/vals.length).toFixed(1) : "—";
+                subAvg[sub] = vals.length?(vals.reduce((a,b)=>a+b,0)/vals.length).toFixed(1):"—";
               });
+              const divColors = {"1":"#15803d","2":"#1e40af","3":"#d97706","4":"#ea580c","U":"#dc2626"};
+              const divBg = {"1":"#dcfce7","2":"#dbeafe","3":"#fef9c3","4":"#ffedd5","U":"#fee2e2"};
               return (
                 <div>
-                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))",gap:12,marginBottom:20}}>
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(100px,1fr))",gap:10,marginBottom:20}}>
                     {Object.entries(divCounts).map(([div,count])=>(
-                      <div key={div} style={{background:div==="1"?"#dcfce7":div==="2"?"#dbeafe":div==="3"?"#fef9c3":div==="4"?"#ffedd5":"#fee2e2",borderRadius:10,padding:"14px 16px",textAlign:"center"}}>
-                        <div style={{fontSize:28,fontWeight:900,color:div==="1"?"#15803d":div==="2"?"#1e40af":div==="3"?"#92400e":div==="4"?"#c2410c":"#dc2626"}}>{count}</div>
-                        <div style={{fontSize:12,fontWeight:700,color:"#374151"}}>Division {div}</div>
+                      <div key={div} style={{background:divBg[div],borderRadius:10,padding:"14px 12px",textAlign:"center",border:`2px solid ${divColors[div]}22`}}>
+                        <div style={{fontSize:30,fontWeight:900,color:divColors[div]}}>{count}</div>
+                        <div style={{fontSize:11,fontWeight:700,color:"#374151"}}>Division {div}</div>
+                        <div style={{fontSize:10,color:"#6b7280"}}>{recs.length?Math.round(count/recs.length*100):0}%</div>
                       </div>
                     ))}
-                    <div style={{background:"#ede9fe",borderRadius:10,padding:"14px 16px",textAlign:"center"}}>
-                      <div style={{fontSize:28,fontWeight:900,color:"#6d28d9"}}>{recs.length}</div>
-                      <div style={{fontSize:12,fontWeight:700,color:"#374151"}}>Total Sat</div>
+                    <div style={{background:"#ede9fe",borderRadius:10,padding:"14px 12px",textAlign:"center",border:"2px solid #a855f722"}}>
+                      <div style={{fontSize:30,fontWeight:900,color:"#6d28d9"}}>{recs.length}</div>
+                      <div style={{fontSize:11,fontWeight:700,color:"#374151"}}>Total Sat</div>
                     </div>
                   </div>
                   <div style={{background:"#f8fafc",borderRadius:10,padding:16,marginBottom:16}}>
-                    <div style={{fontWeight:700,color:"#1e3a6e",marginBottom:12}}>Subject Average Aggregates</div>
-                    {PLE_SUBJECTS.map(sub=>(
+                    <div style={{fontWeight:700,color:"#1e3a6e",marginBottom:12,fontSize:13}}>Average Aggregate per Subject (lower = better)</div>
+                    {PLE_SUBJECTS.map((sub,i)=>(
                       <div key={sub} style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
-                        <div style={{width:120,fontSize:13,fontWeight:600}}>{sub}</div>
-                        <div style={{flex:1,background:"#e2e8f0",borderRadius:4,height:20,overflow:"hidden"}}>
-                          <div style={{width:`${subAvg[sub]!=="—"?Math.min(subAvg[sub]/9*100,100):0}%`,background:"linear-gradient(90deg,#1e40af,#3b82f6)",height:"100%",borderRadius:4}}/>
+                        <div style={{width:80,fontSize:13,fontWeight:600}}>{sub}</div>
+                        <div style={{flex:1,background:"#e2e8f0",borderRadius:4,height:22,overflow:"hidden"}}>
+                          <div style={{width:`${subAvg[sub]!=="—"?Math.min(Number(subAvg[sub])/9*100,100):0}%`,background:BAR_COLORS[i%BAR_COLORS.length],height:"100%",borderRadius:4}}/>
                         </div>
-                        <div style={{width:40,textAlign:"right",fontWeight:700,color:"#1e3a6e"}}>{subAvg[sub]}</div>
+                        <div style={{width:36,textAlign:"right",fontWeight:800,color:"#1e3a6e"}}>{subAvg[sub]}</div>
                       </div>
                     ))}
                   </div>
+                  {/* Full ranked result sheet */}
                   <div style={{overflowX:"auto"}}>
                     <table style={{width:"100%",fontSize:12,borderCollapse:"collapse"}}>
                       <thead><tr style={{background:"#1e3a6e",color:"white"}}>
-                        {["#","Name","Index No","Eng","Math","Sci","SST","Total Agg","Division"].map(h=>(
+                        {["POS","Name","Index No","SEX","ENG","SCI","SST","MTC","AGG","DIV"].map(h=>(
                           <th key={h} style={{padding:"8px 10px",textAlign:"left",fontWeight:700}}>{h}</th>
                         ))}
                       </tr></thead>
                       <tbody>
-                        {[...recs].sort((a,b)=>Number(a.totalAgg||999)-Number(b.totalAgg||999)).map((r,i)=>(
-                          <tr key={r.id} style={{background:i%2===0?"white":"#f8fafc"}}>
-                            <td style={{padding:"6px 10px",color:"#6b7280"}}>{i+1}</td>
-                            <td style={{padding:"6px 10px",fontWeight:700}}>{r.name}</td>
-                            <td style={{padding:"6px 10px",color:"#6b7280"}}>{r.indexNo||"—"}</td>
-                            {PLE_SUBJECTS.map(sub=><td key={sub} style={{padding:"6px 10px",textAlign:"center"}}>{r.results?.[sub]||"—"}</td>)}
+                        {recs.map((r,i)=>(
+                          <tr key={r.id} style={{background:i%2===0?"white":"#dbeafe"}}>
+                            <td style={{padding:"6px 10px",fontWeight:700}}>{i+1}</td>
+                            <td style={{padding:"6px 10px",fontWeight:700,color:"#1e3a6e",whiteSpace:"nowrap"}}>{r.name}</td>
+                            <td style={{padding:"6px 10px",color:"#6b7280",fontSize:11}}>{r.indexNo||"—"}</td>
+                            <td style={{padding:"6px 10px",textAlign:"center"}}>{r.gender}</td>
+                            {PLE_SUBJECTS.map(sub=><td key={sub} style={{padding:"6px 10px",textAlign:"center",fontWeight:600}}>{r.results?.[sub]||"—"}</td>)}
                             <td style={{padding:"6px 10px",fontWeight:900,fontSize:14,color:"#1e3a6e"}}>{r.totalAgg}</td>
-                            <td style={{padding:"6px 10px",fontWeight:900,fontSize:14,color:r.division==="1"?"#15803d":r.division==="2"?"#1e40af":r.division==="3"?"#92400e":"#dc2626"}}>{r.division}</td>
+                            <td style={{padding:"6px 10px",fontWeight:900,fontSize:14,color:divColors[r.division]||"#374151"}}>{r.division}</td>
                           </tr>
                         ))}
                       </tbody>
