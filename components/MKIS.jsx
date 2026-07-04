@@ -1058,7 +1058,7 @@ function SchoolCrest({ size = 64, ink = "#0f1115", paper = "#ffffff" }) {
     </svg>
   );
 }
-const PAGES = ["DASHBOARD","MARK ENTRY","MONTHLY EXAMS","MONTHLY CARDS","MONTHLY SLIPS","RESULT SHEETS","REPORT CARDS","LEARNERS","MANAGE REQUESTS","SETTINGS","AUDIT LOG","DOWNLOAD CENTRE"];
+const PAGES = ["DASHBOARD","MARK ENTRY","MONTHLY EXAMS","MONTHLY CARDS","MONTHLY SLIPS","RESULT SHEETS","REPORT CARDS","LEARNERS","PLE INFO","MANAGE REQUESTS","SETTINGS","AUDIT LOG","DOWNLOAD CENTRE"];
 // Pages only the admin account can see/use. Teachers never see these in the sidebar.
 const ADMIN_ONLY_PAGES = ["MANAGE REQUESTS", "SETTINGS", "AUDIT LOG"];
 // ─── APP ─────────────────────────────────────────────────────────────────────
@@ -1428,10 +1428,10 @@ export default function App() {
       submitChangeRequest({ kind: "monthly", studentId: sid, studentName, tk, month, sub, field, oldVal: existingVal, newVal: val });
     }
   }, [role, updateMonthlyMark, submitChangeRequest]);
-  const addStudent = useCallback((name, className, gender) => {
+  const addStudent = useCallback((name, className, gender, lin) => {
     markEditing();
-    const newS = { id: Date.now().toString(), name: toUpper(name.trim()), className, gender };
-    stampAudit("mkis_students", `Learner ADDED — ${newS.name} (${className}, ${gender==="M"?"Male":"Female"})`);
+    const newS = { id: Date.now().toString(), name: toUpper(name.trim()), className, gender, lin: (lin||"").toUpperCase() };
+    stampAudit("mkis_students", `Learner ADDED — ${newS.name} (${className}, ${gender==="M"?"Male":"Female"})${lin?` LIN:${lin}`:""}`);
     setStudents(prev => [...prev, newS].sort((a,b) => a.name.localeCompare(b.name)));
   }, []);
   const deleteStudent = useCallback((id) => {
@@ -1533,7 +1533,7 @@ export default function App() {
         </div>
         <nav style={{flex:1,padding:"8px 0"}}>
           {PAGES.filter(p => !ADMIN_ONLY_PAGES.includes(p) || role==="admin").map(p => {
-            const icons = {"DASHBOARD":"📊","MARK ENTRY":"📝","MONTHLY EXAMS":"📅","MONTHLY CARDS":"🗂️","MONTHLY SLIPS":"🎫","RESULT SHEETS":"📋","REPORT CARDS":"🎓","LEARNERS":"👥","MANAGE REQUESTS":"🛂","SETTINGS":"⚙️","AUDIT LOG":"🕓","DOWNLOAD CENTRE":"📥"};
+            const icons = {"DASHBOARD":"📊","MARK ENTRY":"📝","MONTHLY EXAMS":"📅","MONTHLY CARDS":"🗂️","MONTHLY SLIPS":"🎫","RESULT SHEETS":"📋","REPORT CARDS":"🎓","LEARNERS":"👥","PLE INFO":"🏅","MANAGE REQUESTS":"🛂","SETTINGS":"⚙️","AUDIT LOG":"🕓","DOWNLOAD CENTRE":"📥"};
             const pendingCount = p==="MANAGE REQUESTS" ? changeRequests.filter(r=>r.status==="pending").length : 0;
             return (
               <button key={p} onClick={()=>setPage(p)}
@@ -1569,7 +1569,7 @@ export default function App() {
           {page==="RESULT SHEETS" && <ResultSheets {...props} />}
           {page==="REPORT CARDS" && <ReportCards {...props} />}
           {page==="LEARNERS" && <Students {...props} />}
-          {page==="MANAGE REQUESTS" && role==="admin" && <ManageRequests {...props} />}
+          {page==="PLE INFO" && <PleInfo students={students} setStudents={setStudents} school={school} markEditing={markEditing} />}
           {page==="SETTINGS" && role==="admin" && <Settings {...props} />}
           {page==="AUDIT LOG" && role==="admin" && <AuditLog />}
           {page==="DOWNLOAD CENTRE" && <DownloadCentre {...props} />}
@@ -1934,10 +1934,11 @@ function Dashboard({ students, school, termMarks, bands }) {
   );
 }
 // ─── STUDENTS ────────────────────────────────────────────────────────────────
-function Students({ students, setStudents, addStudent, deleteStudent, promoteStudents }) {
+function Students({ students, setStudents, addStudent, deleteStudent, promoteStudents, markEditing }) {
   const [name, setName] = useState("");
   const [cls, setCls] = useState("P1");
   const [gender, setGender] = useState("M");
+  const [lin, setLin] = useState("");
   const [search, setSearch] = useState("");
   const [filterCls, setFilterCls] = useState("All");
   const [filterGender, setFilterGender] = useState("All");
@@ -1947,6 +1948,7 @@ function Students({ students, setStudents, addStudent, deleteStudent, promoteStu
   const [editName, setEditName] = useState("");
   const [editCls, setEditCls] = useState("P1");
   const [editGender, setEditGender] = useState("M");
+  const [editLin, setEditLin] = useState("");
   const [bulkPreview, setBulkPreview] = useState(null);
   const [bulkCls, setBulkCls] = useState("P1");
   const [bulkGender, setBulkGender] = useState("M");
@@ -1965,15 +1967,15 @@ function Students({ students, setStudents, addStudent, deleteStudent, promoteStu
   );
   const handleAdd = () => {
     if (!name.trim()) return;
-    addStudent(name, cls, gender);
-    setName("");
+    addStudent(name, cls, gender, lin.trim().toUpperCase());
+    setName(""); setLin("");
   };
   const handleDelete = (id) => {
     setConfirmDeleteId(id);
   };
-  const handleEdit = (s) => { setEditId(s.id); setEditName(s.name); setEditCls(s.className); setEditGender(s.gender); };
+  const handleEdit = (s) => { setEditId(s.id); setEditName(s.name); setEditCls(s.className); setEditGender(s.gender); setEditLin(s.lin||""); };
   const handleSaveEdit = (id) => {
-    setStudents(prev => prev.map(s=>s.id===id?{...s,name:toUpper(editName.trim()),className:editCls,gender:editGender}:s).sort((a,b)=>a.name.localeCompare(b.name)));
+    setStudents(prev => prev.map(s=>s.id===id?{...s,name:toUpper(editName.trim()),className:editCls,gender:editGender,lin:editLin.trim().toUpperCase()}:s).sort((a,b)=>a.name.localeCompare(b.name)));
     setEditId(null);
   };
   const handleBulkTextPreview = () => {
@@ -1996,7 +1998,8 @@ function Students({ students, setStudents, addStudent, deleteStudent, promoteStu
           <div><label style={lbl}>Full Name</label><input value={name} onChange={e=>setName(toUpper(e.target.value))} onKeyDown={e=>e.key==="Enter"&&handleAdd()} style={{...inp,textTransform:"uppercase"}} placeholder="e.g. AKELLO TIM" /></div>
           <div><label style={lbl}>Class</label><select value={cls} onChange={e=>setCls(e.target.value)} style={inp}>{ALL_CLASSES.map(c=><option key={c}>{c}</option>)}</select></div>
           <div><label style={lbl}>Gender</label><select value={gender} onChange={e=>setGender(e.target.value)} style={inp}><option value="M">Male</option><option value="F">Female</option></select></div>
-          <button onClick={handleAdd} style={btnPrimary}>+ Add Student</button>
+          <div><label style={lbl}>LIN (optional)</label><input value={lin} onChange={e=>setLin(e.target.value)} style={{...inp,width:140,textTransform:"uppercase"}} placeholder="e.g. U10F1121A50023"/></div>
+          <button onClick={handleAdd} style={btnPrimary}>+ Add Learner</button>
           <button onClick={()=>setShowBulk(v=>!v)} style={btnWarning}>📋 Bulk Import</button>
         </div>
       </div>
@@ -2062,13 +2065,13 @@ function Students({ students, setStudents, addStudent, deleteStudent, promoteStu
       )}
       <div style={{background:"white",borderRadius:12,border:"1px solid #e5e7eb",overflow:"hidden"}}>
         <div style={{padding:"12px 16px",background:"#1e3a6e",color:"white",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-          <span style={{fontWeight:700}}>Students ({filtered.length})</span>
+          <span style={{fontWeight:700}}>Learners ({filtered.length})</span>
         </div>
         <div style={{overflowX:"auto"}}>
           <table style={{width:"100%",fontSize:13}}>
             <thead>
               <tr style={{background:"#dbeafe"}}>
-                {["#","Name","Class","Gender","Actions"].map(h=>(
+                {["#","Name","Class","Gender","LIN","Actions"].map(h=>(
                   <th key={h} style={{padding:"10px 12px",textAlign:"left",fontWeight:700,color:"#1e3a6e",whiteSpace:"nowrap"}}>{h}</th>
                 ))}
               </tr>
@@ -2090,6 +2093,11 @@ function Students({ students, setStudents, addStudent, deleteStudent, promoteStu
                       ? <select value={editGender} onChange={e=>setEditGender(e.target.value)} style={{...inp,padding:"4px 8px",fontSize:12}}><option value="M">Male</option><option value="F">Female</option></select>
                       : (s.gender==="M"?"👦 Male":"👧 Female")}
                   </td>
+                  <td style={{padding:"9px 12px"}}>
+                    {editId===s.id
+                      ? <input value={editLin||""} onChange={e=>setEditLin(e.target.value.toUpperCase())} style={{...inp,padding:"4px 8px",width:160,textTransform:"uppercase",fontSize:11}} placeholder="e.g. U10F1121A50023"/>
+                      : s.lin ? <span style={{fontStyle:"italic",color:"#2563eb",fontSize:12,fontWeight:600}}>{s.lin}</span> : <span style={{color:"#9ca3af",fontSize:11}}>—</span>}
+                  </td>
                   <td style={{padding:"9px 12px",display:"flex",gap:6}}>
                     {editId===s.id
                       ? <><button onClick={()=>handleSaveEdit(s.id)} style={{...btnPrimary,padding:"4px 10px",fontSize:12}}>Save</button><button onClick={()=>setEditId(null)} style={{...btnGhost,padding:"4px 10px",fontSize:12}}>Cancel</button></>
@@ -2098,7 +2106,7 @@ function Students({ students, setStudents, addStudent, deleteStudent, promoteStu
                   </td>
                 </tr>
               ))}
-              {filtered.length===0 && <tr><td colSpan={5} style={{padding:24,textAlign:"center",color:"#9ca3af"}}>No students found.</td></tr>}
+              {filtered.length===0 && <tr><td colSpan={6} style={{padding:24,textAlign:"center",color:"#9ca3af"}}>No learners found.</td></tr>}
             </tbody>
           </table>
         </div>
@@ -3302,7 +3310,517 @@ function MonthlySlip({ school, student, monthData, term, year, cls, isLower, sub
     </div>
   );
 }
-// ─── RESULT SHEETS ───────────────────────────────────────────────────────────
+// ─── PLE INFO ────────────────────────────────────────────────────────────────
+const PLE_SUBJECTS = ["English","Mathematics","Science","Social Studies"];
+// Auto-generate a recommendation sentence based on total aggregate
+function pleRecommendation(name, gender, totalAgg, div) {
+  const he = gender==="F"?"She":"He";
+  const his = gender==="F"?"her":"his";
+  if (div==="1"||div==="2") return `${he} is disciplined, responsible and hardworking. Highly recommended for further Education.`;
+  if (div==="3") return `${he} has demonstrated satisfactory academic performance. Recommended for further Education.`;
+  if (div==="4") return `${he} has shown effort during the course of study. Recommended to continue with secondary education.`;
+  return `${he} has completed the Primary Leaving Examination. Encouraged to work harder in secondary school.`;
+}
+function PleCertificateDesign1({ rec, school, year, pdfRef }) {
+  // Design 1: Elegant gold border, crest-style
+  const s = rec;
+  const he = s.gender==="F"?"her":"his";
+  return (
+    <div ref={pdfRef} className="ple-cert" style={{width:"210mm",minHeight:"280mm",boxSizing:"border-box",background:"white",fontFamily:"Georgia,serif",position:"relative",padding:0,overflow:"hidden"}}>
+      {/* Outer decorative border */}
+      <div style={{position:"absolute",inset:8,border:"6px double #b8860b",borderRadius:8,pointerEvents:"none",zIndex:0}}/>
+      <div style={{position:"absolute",inset:16,border:"2px solid #b8860b",borderRadius:4,pointerEvents:"none",zIndex:0}}/>
+      {/* Content */}
+      <div style={{position:"relative",zIndex:1,padding:"24px 32px"}}>
+        {/* Header */}
+        <div style={{textAlign:"center",marginBottom:12}}>
+          <div style={{fontWeight:900,fontSize:22,color:"#1e3a6e",letterSpacing:1,textTransform:"uppercase"}}>{school.name}</div>
+          <div style={{fontSize:11,color:"#374151",marginTop:2}}>{school.poBox} &nbsp;|&nbsp; Tel: {school.tel||"N/A"} &nbsp;|&nbsp; <span style={{color:"#1d4ed8",fontStyle:"italic"}}>{school.email||""}</span></div>
+          <div style={{display:"flex",justifyContent:"center",gap:8,marginTop:8,fontSize:18,color:"#b8860b"}}>★ ★ ★</div>
+        </div>
+        <div style={{textAlign:"center",margin:"10px 0"}}>
+          <div style={{display:"inline-block",borderBottom:"2px solid #b8860b",borderTop:"2px solid #b8860b",padding:"4px 0"}}>
+            <div style={{fontSize:20,fontWeight:900,color:"#dc2626",letterSpacing:2,fontFamily:"Georgia,serif",textTransform:"uppercase"}}>PLE Recommendation</div>
+          </div>
+        </div>
+        <div style={{textAlign:"center",fontSize:13,marginBottom:12,color:"#374151",fontStyle:"italic"}}>This is to certify that</div>
+        <div style={{textAlign:"center",marginBottom:8}}>
+          <span style={{fontWeight:900,fontSize:18,borderBottom:"2px solid #1e3a6e",paddingBottom:2,textTransform:"uppercase",letterSpacing:1}}>{s.name}</span>
+          {s.indexNo && <span style={{fontSize:13,marginLeft:20,color:"#374151"}}>Index No. <b>{s.indexNo}</b></span>}
+        </div>
+        <div style={{textAlign:"center",fontSize:13,color:"#374151",marginBottom:16,lineHeight:1.6}}>
+          successfully completed {he} Primary Leaving Examination (PLE) in <b>{year}</b> at <b>{school.name}.</b>
+        </div>
+        {/* Results + extra info */}
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20,marginBottom:16}}>
+          <div style={{border:"2px solid #b8860b",borderRadius:8,padding:14,background:"#fffbeb"}}>
+            <div style={{fontWeight:900,fontSize:13,textAlign:"center",marginBottom:10,borderBottom:"1px solid #b8860b",paddingBottom:6,color:"#1e3a6e",letterSpacing:1}}>PLE RESULTS</div>
+            <table style={{width:"100%",fontSize:13,borderCollapse:"collapse"}}>
+              <thead><tr><th style={{textAlign:"left",borderBottom:"1px solid #e5e7eb",paddingBottom:4,color:"#374151"}}>Subject</th><th style={{textAlign:"center",borderBottom:"1px solid #e5e7eb",paddingBottom:4,color:"#374151"}}>Agg</th></tr></thead>
+              <tbody>
+                {PLE_SUBJECTS.map(sub=>(
+                  <tr key={sub}><td style={{padding:"3px 0",borderBottom:"1px solid #f3f4f6"}}>{sub}:</td><td style={{textAlign:"center",padding:"3px 0",borderBottom:"1px solid #f3f4f6",fontWeight:700}}>{s.results?.[sub]||"-"}</td></tr>
+                ))}
+              </tbody>
+            </table>
+            <div style={{marginTop:10,borderTop:"1px solid #b8860b",paddingTop:6}}>
+              <div style={{display:"flex",justifyContent:"space-between",fontSize:13}}>
+                <span>Total Agg:</span><span style={{fontWeight:900,fontSize:15}}>{s.totalAgg||"-"}</span>
+              </div>
+              <div style={{display:"flex",justifyContent:"space-between",fontSize:13,marginTop:2}}>
+                <span>Division:</span><span style={{fontWeight:900,fontSize:15}}>{s.division||"-"}</span>
+              </div>
+            </div>
+          </div>
+          <div style={{display:"flex",flexDirection:"column",gap:10,fontSize:13,justifyContent:"flex-start"}}>
+            <div><span style={{fontWeight:700}}>LIN: </span><span style={{fontStyle:"italic",color:"#2563eb",borderBottom:"1px solid #93c5fd"}}>{s.lin||"___________________"}</span></div>
+            <div><span style={{fontWeight:700}}>Co-curricular activities:</span><br/><span style={{fontStyle:"italic",color:"#2563eb",borderBottom:"1px solid #93c5fd"}}>{s.cocurricular||"___________________"}</span></div>
+            <div><span style={{fontWeight:700}}>Leadership position:</span><br/><span style={{fontStyle:"italic",color:"#2563eb",borderBottom:"1px solid #93c5fd"}}>{s.leadership||"___________________"}</span></div>
+            <div><span style={{fontStyle:"italic",fontWeight:700}}>Conduct: </span><span style={{fontStyle:"italic",color:"#2563eb",borderBottom:"1px solid #93c5fd"}}>{s.conduct||"Good"}</span></div>
+          </div>
+        </div>
+        <div style={{textAlign:"center",fontSize:13,color:"#374151",fontStyle:"italic",marginBottom:4}}>{pleRecommendation(s.name,s.gender,s.totalAgg,s.division)}</div>
+        <div style={{display:"flex",justifyContent:"center",gap:8,marginTop:8,fontSize:18,color:"#b8860b"}}>★ ★ ★</div>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end",marginTop:20,paddingTop:12,borderTop:"1px solid #e5e7eb"}}>
+          <div>
+            <div style={{borderBottom:"1px solid #374151",width:160,marginBottom:4}}></div>
+            <div style={{fontWeight:900,fontSize:13,textTransform:"uppercase"}}>{school.headTeacher||"HEAD TEACHER"}</div>
+            <div style={{fontSize:11,color:"#6b7280"}}>Headteacher</div>
+          </div>
+          <div style={{textAlign:"right",fontSize:12}}>
+            <div>Date of Issuance: <span style={{borderBottom:"1px solid #374151",display:"inline-block",width:120}}>&nbsp;</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+function PleCertificateDesign2({ rec, school, year, pdfRef }) {
+  // Design 2: Modern navy + green, clean sans-serif
+  const s = rec;
+  const he = s.gender==="F"?"her":"his";
+  return (
+    <div ref={pdfRef} className="ple-cert" style={{width:"210mm",minHeight:"280mm",boxSizing:"border-box",background:"white",fontFamily:"'Segoe UI',system-ui,sans-serif",overflow:"hidden"}}>
+      <div style={{background:"linear-gradient(135deg,#1e3a6e 0%,#1e40af 60%,#0ea5e9 100%)",color:"white",padding:"24px 32px",textAlign:"center"}}>
+        <div style={{fontWeight:900,fontSize:21,letterSpacing:1}}>{school.name}</div>
+        <div style={{fontSize:10,opacity:0.85,marginTop:3}}>{school.poBox} &nbsp;|&nbsp; {school.email||""}</div>
+        <div style={{marginTop:10,display:"inline-block",background:"rgba(255,255,255,0.15)",borderRadius:20,padding:"4px 20px",fontSize:12,fontWeight:700,letterSpacing:2,textTransform:"uppercase"}}>
+          Primary Leaving Examination — Recommendation {year}
+        </div>
+      </div>
+      <div style={{padding:"22px 32px"}}>
+        <div style={{background:"#f0fdf4",border:"2px solid #22c55e",borderRadius:10,padding:"14px 20px",marginBottom:16,textAlign:"center"}}>
+          <div style={{fontSize:11,color:"#15803d",fontWeight:600,marginBottom:4,textTransform:"uppercase",letterSpacing:1}}>This is to certify that</div>
+          <div style={{fontWeight:900,fontSize:20,color:"#1e3a6e",textTransform:"uppercase",letterSpacing:1}}>{s.name}</div>
+          {s.indexNo && <div style={{fontSize:12,color:"#374151",marginTop:4}}>Index No: <b>{s.indexNo}</b></div>}
+          <div style={{fontSize:12,color:"#374151",marginTop:6,lineHeight:1.6}}>
+            successfully completed {he} Primary Leaving Examination (PLE) in <b>{year}</b> at <b>{school.name}.</b>
+          </div>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:14}}>
+          <div style={{background:"#eff6ff",borderRadius:10,padding:14,border:"1px solid #bfdbfe"}}>
+            <div style={{fontWeight:800,fontSize:12,color:"#1e40af",marginBottom:10,textTransform:"uppercase",letterSpacing:0.5}}>📊 PLE Results</div>
+            {PLE_SUBJECTS.map(sub=>(
+              <div key={sub} style={{display:"flex",justifyContent:"space-between",fontSize:13,padding:"4px 0",borderBottom:"1px solid #dbeafe"}}>
+                <span>{sub}</span><span style={{fontWeight:800,color:"#1e40af"}}>{s.results?.[sub]||"—"}</span>
+              </div>
+            ))}
+            <div style={{marginTop:10,display:"flex",justifyContent:"space-between",fontWeight:900,fontSize:14,color:"#1e3a6e",borderTop:"2px solid #1e40af",paddingTop:6}}>
+              <span>Total Agg</span><span>{s.totalAgg||"—"}</span>
+            </div>
+            <div style={{display:"flex",justifyContent:"space-between",fontWeight:900,fontSize:14,color:"#dc2626"}}>
+              <span>Division</span><span>{s.division||"—"}</span>
+            </div>
+          </div>
+          <div style={{display:"flex",flexDirection:"column",gap:10,fontSize:12}}>
+            {[["LIN",s.lin],["Co-curricular Activities",s.cocurricular],["Leadership Position",s.leadership],["Conduct",s.conduct||"Good"]].map(([label,val])=>(
+              <div key={label} style={{background:"#f8fafc",borderRadius:8,padding:"8px 12px",border:"1px solid #e5e7eb"}}>
+                <div style={{fontWeight:700,color:"#374151",fontSize:11,textTransform:"uppercase",marginBottom:2}}>{label}</div>
+                <div style={{color:"#1d4ed8",fontWeight:600}}>{val||<span style={{color:"#9ca3af"}}>—</span>}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div style={{background:"#fefce8",borderRadius:8,padding:"10px 16px",border:"1px solid #fde68a",textAlign:"center",fontSize:13,color:"#374151",fontStyle:"italic",marginBottom:14}}>
+          {pleRecommendation(s.name,s.gender,s.totalAgg,s.division)}
+        </div>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end",paddingTop:12,borderTop:"2px solid #1e3a6e"}}>
+          <div>
+            <div style={{borderBottom:"1px solid #374151",width:180,marginBottom:4}}/>
+            <div style={{fontWeight:900,fontSize:12,color:"#1e3a6e",textTransform:"uppercase"}}>{school.headTeacher||"HEAD TEACHER"}</div>
+            <div style={{fontSize:11,color:"#6b7280"}}>Headteacher, {school.name}</div>
+          </div>
+          <div style={{textAlign:"right",fontSize:11,color:"#6b7280"}}>
+            Date of Issuance:<br/><span style={{borderBottom:"1px solid #374151",display:"inline-block",width:140}}>&nbsp;</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+function PleCertificateDesign3({ rec, school, year, pdfRef }) {
+  // Design 3: Elegant dark red/maroon certificate style
+  const s = rec;
+  const he = s.gender==="F"?"her":"his";
+  return (
+    <div ref={pdfRef} className="ple-cert" style={{width:"210mm",minHeight:"280mm",boxSizing:"border-box",fontFamily:"Georgia,serif",background:"#fdfaf5",overflow:"hidden",position:"relative"}}>
+      <div style={{position:"absolute",inset:0,border:"12px solid #7b1c1c",pointerEvents:"none"}}/>
+      <div style={{position:"absolute",inset:18,border:"2px solid #d4af37",pointerEvents:"none"}}/>
+      <div style={{position:"relative",zIndex:1,padding:"28px 36px"}}>
+        <div style={{textAlign:"center",borderBottom:"2px solid #d4af37",paddingBottom:12,marginBottom:12}}>
+          <div style={{fontWeight:900,fontSize:22,color:"#7b1c1c",textTransform:"uppercase",letterSpacing:2}}>{school.name}</div>
+          <div style={{fontSize:11,color:"#374151",marginTop:2}}>{school.poBox} &nbsp;·&nbsp; {school.email||""}</div>
+        </div>
+        <div style={{textAlign:"center",margin:"10px 0"}}>
+          <div style={{fontSize:22,fontWeight:900,color:"#7b1c1c",textTransform:"uppercase",letterSpacing:3,fontFamily:"Georgia,serif"}}>PLE Recommendation</div>
+          <div style={{fontSize:12,color:"#6b7280",marginTop:2,fontStyle:"italic"}}>Uganda National Examinations Board — {year}</div>
+        </div>
+        <div style={{textAlign:"center",fontSize:13,margin:"12px 0 8px",color:"#374151",fontStyle:"italic"}}>This is to certify that</div>
+        <div style={{textAlign:"center",marginBottom:10}}>
+          <div style={{display:"inline-block",background:"#7b1c1c",color:"white",padding:"6px 30px",borderRadius:4,fontWeight:900,fontSize:18,textTransform:"uppercase",letterSpacing:2}}>{s.name}</div>
+          {s.indexNo && <div style={{fontSize:12,color:"#374151",marginTop:6}}>Index No. <b>{s.indexNo}</b></div>}
+        </div>
+        <div style={{textAlign:"center",fontSize:13,color:"#374151",marginBottom:16,lineHeight:1.8}}>
+          successfully completed {he} Primary Leaving Examination (PLE)<br/>in <b>{year}</b> at <b style={{color:"#7b1c1c"}}>{school.name}</b>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:24,marginBottom:16}}>
+          <div style={{border:"1px solid #d4af37",borderRadius:6,overflow:"hidden"}}>
+            <div style={{background:"#7b1c1c",color:"white",fontWeight:900,fontSize:12,padding:"6px 12px",textAlign:"center",letterSpacing:1}}>PLE RESULTS</div>
+            <div style={{padding:"10px 14px",background:"#fffbeb"}}>
+              {PLE_SUBJECTS.map(sub=>(
+                <div key={sub} style={{display:"flex",justifyContent:"space-between",fontSize:13,padding:"3px 0",borderBottom:"1px solid #fde68a"}}>
+                  <span>{sub}:</span><span style={{fontWeight:800}}>{s.results?.[sub]||"—"}</span>
+                </div>
+              ))}
+              <div style={{marginTop:8,paddingTop:6,borderTop:"2px solid #d4af37",display:"flex",justifyContent:"space-between",fontWeight:900,fontSize:14}}><span>Total Agg:</span><span>{s.totalAgg||"—"}</span></div>
+              <div style={{display:"flex",justifyContent:"space-between",fontWeight:900,fontSize:14,color:"#7b1c1c"}}><span>Division:</span><span>{s.division||"—"}</span></div>
+            </div>
+          </div>
+          <div style={{display:"flex",flexDirection:"column",gap:10,fontSize:12,justifyContent:"center"}}>
+            {[["LIN",s.lin],["Co-curricular Activities",s.cocurricular],["Leadership Position",s.leadership],["Conduct",s.conduct||"Good"]].map(([label,val])=>(
+              <div key={label}>
+                <div style={{fontWeight:700,color:"#7b1c1c",marginBottom:2}}>{label}:</div>
+                <div style={{borderBottom:"1px solid #d4af37",color:"#1d4ed8",fontStyle:"italic",paddingBottom:2}}>{val||<span style={{color:"#9ca3af"}}>—</span>}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div style={{textAlign:"center",fontSize:13,color:"#374151",fontStyle:"italic",marginBottom:12,lineHeight:1.7}}>{pleRecommendation(s.name,s.gender,s.totalAgg,s.division)}</div>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end",borderTop:"1px solid #d4af37",paddingTop:12,marginTop:8}}>
+          <div>
+            <div style={{borderBottom:"1px solid #374151",width:180,marginBottom:4}}/>
+            <div style={{fontWeight:900,fontSize:12,color:"#7b1c1c",textTransform:"uppercase"}}>{school.headTeacher||"HEAD TEACHER"}</div>
+            <div style={{fontSize:11,color:"#6b7280"}}>Headteacher</div>
+          </div>
+          <div style={{textAlign:"right",fontSize:11}}>Date of Issuance:<br/><span style={{borderBottom:"1px solid #374151",display:"inline-block",width:140}}>&nbsp;</span></div>
+        </div>
+      </div>
+    </div>
+  );
+}
+const CERT_DESIGNS = [
+  { id:1, label:"Design 1 — Gold & Navy", Component: PleCertificateDesign1 },
+  { id:2, label:"Design 2 — Modern Blue/Green", Component: PleCertificateDesign2 },
+  { id:3, label:"Design 3 — Maroon & Gold", Component: PleCertificateDesign3 },
+];
+function PleInfo({ students, setStudents, school, markEditing }) {
+  const [tab, setTab] = useState("records"); // "records" | "certificates" | "analysis"
+  const [pleData, setPleData] = useState({}); // { [studentId]: { indexNo, results:{...}, totalAgg, division, lin, cocurricular, leadership, conduct } }
+  const [year, setYear] = useState(school.year||String(new Date().getFullYear()));
+  const [selectedDesign, setSelectedDesign] = useState(1);
+  const [selectedStudent, setSelectedStudent] = useState(null);
+  const [pdfBusy, setPdfBusy] = useState(false);
+  const [allPdfBusy, setAllPdfBusy] = useState(false);
+  const [csvMsg, setCsvMsg] = useState("");
+  const certRef = useRef(null);
+  const allCertsRef = useRef(null);
+  const p7Students = students.filter(s=>s.className==="P7"||s.className==="Completed");
+  const DesignComponent = CERT_DESIGNS.find(d=>d.id===selectedDesign)?.Component || PleCertificateDesign1;
+  // Update a single field in pleData for a student
+  const updatePle = (sid, field, val) => {
+    setPleData(prev => ({ ...prev, [sid]: { ...prev[sid], [field]: val } }));
+  };
+  const updateResult = (sid, sub, val) => {
+    setPleData(prev => ({
+      ...prev,
+      [sid]: {
+        ...prev[sid],
+        results: { ...prev[sid]?.results, [sub]: val },
+      }
+    }));
+    // Auto-recalculate total agg and division
+    setTimeout(() => {
+      setPleData(prev => {
+        const rec = prev[sid] || {};
+        const results = { ...rec.results, [sub]: val };
+        const vals = PLE_SUBJECTS.map(s=>parseInt(results[s]||0,10)).filter(v=>!isNaN(v));
+        const totalAgg = vals.length===PLE_SUBJECTS.length ? vals.reduce((a,b)=>a+b,0) : (rec.totalAgg||"");
+        const div = totalAgg ? (totalAgg<=12?"1":totalAgg<=24?"2":totalAgg<=36?"3":totalAgg<=48?"4":"U") : (rec.division||"");
+        return { ...prev, [sid]: { ...rec, results, totalAgg: totalAgg||rec.totalAgg||"", division: div||rec.division||"" } };
+      });
+    }, 0);
+  };
+  // Parse CSV import: expects columns Name, IndexNo, English, Mathematics, Science, Social Studies
+  // (and optionally LIN, Cocurricular, Leadership, Conduct)
+  const importCsv = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const lines = ev.target.result.split(/\r?\n/).filter(Boolean);
+        const header = lines[0].split(",").map(h=>h.trim().replace(/^"|"$/g,"").toLowerCase());
+        const colIdx = (names) => { for (const n of names) { const i=header.indexOf(n); if(i>=0)return i; } return -1; };
+        const nameCol = colIdx(["name","student name","pupil name","learner name"]);
+        const idxCol  = colIdx(["indexno","index no","index number","index_no"]);
+        const engCol  = colIdx(["english","eng"]);
+        const sciCol  = colIdx(["science","sci"]);
+        const sstCol  = colIdx(["social studies","social_studies","sst"]);
+        const mathCol = colIdx(["mathematics","math","maths"]);
+        const linCol  = colIdx(["lin"]);
+        const coCol   = colIdx(["cocurricular","co-curricular","activities"]);
+        const leadCol = colIdx(["leadership","leadership position"]);
+        const condCol = colIdx(["conduct"]);
+        let matched = 0;
+        lines.slice(1).forEach(line => {
+          const cols = line.split(",").map(c=>c.trim().replace(/^"|"$/g,""));
+          const name = nameCol>=0 ? cols[nameCol]?.toUpperCase().trim() : "";
+          if (!name) return;
+          const student = p7Students.find(s=>s.name===name) || p7Students.find(s=>s.name.includes(name)||name.includes(s.name));
+          if (!student) return;
+          const results = {};
+          if (engCol>=0)  results["English"]       = cols[engCol]?.trim()||"";
+          if (sciCol>=0)  results["Science"]        = cols[sciCol]?.trim()||"";
+          if (sstCol>=0)  results["Social Studies"] = cols[sstCol]?.trim()||"";
+          if (mathCol>=0) results["Mathematics"]    = cols[mathCol]?.trim()||"";
+          const vals = PLE_SUBJECTS.map(s=>parseInt(results[s]||0,10)).filter(v=>!isNaN(v)&&v>0);
+          const totalAgg = vals.length===PLE_SUBJECTS.length ? vals.reduce((a,b)=>a+b,0).toString() : "";
+          const division = totalAgg ? (Number(totalAgg)<=12?"1":Number(totalAgg)<=24?"2":Number(totalAgg)<=36?"3":Number(totalAgg)<=48?"4":"U") : "";
+          setPleData(prev=>({...prev,[student.id]:{
+            ...prev[student.id],
+            results,
+            totalAgg, division,
+            indexNo: idxCol>=0 ? (cols[idxCol]?.trim()||prev[student.id]?.indexNo||"") : (prev[student.id]?.indexNo||""),
+            lin:     linCol>=0  ? (cols[linCol]?.trim().toUpperCase()||student.lin||"") : (student.lin||""),
+            cocurricular: coCol>=0   ? (cols[coCol]?.trim()||"")   : (prev[student.id]?.cocurricular||""),
+            leadership:   leadCol>=0 ? (cols[leadCol]?.trim()||"") : (prev[student.id]?.leadership||""),
+            conduct:      condCol>=0 ? (cols[condCol]?.trim()||"") : (prev[student.id]?.conduct||""),
+          }}));
+          matched++;
+        });
+        setCsvMsg(`✅ Imported results for ${matched} learner(s).`);
+        setTimeout(()=>setCsvMsg(""),4000);
+      } catch(err) { setCsvMsg(`⚠️ Error reading file: ${err.message}`); }
+    };
+    reader.readAsText(file);
+    e.target.value="";
+  };
+  const getRecForStudent = (s) => ({
+    ...s,
+    ...(pleData[s.id]||{}),
+    lin: pleData[s.id]?.lin || s.lin || "",
+    name: s.name,
+    gender: s.gender,
+  });
+  const tabStyle = (t) => ({
+    padding:"8px 18px", borderRadius:"8px 8px 0 0", border:"none", cursor:"pointer", fontWeight:700, fontSize:13,
+    background: tab===t ? "#1e3a6e" : "#e2e8f0", color: tab===t ? "white" : "#374151",
+  });
+  return (
+    <div>
+      {/* Tab bar */}
+      <div style={{display:"flex",gap:4,marginBottom:0,flexWrap:"wrap"}}>
+        {[["records","📋 PLE Records"],["certificates","🏅 Certificates"],["analysis","📊 Analysis"]].map(([t,label])=>(
+          <button key={t} onClick={()=>setTab(t)} style={tabStyle(t)}>{label}</button>
+        ))}
+      </div>
+      <div style={{background:"white",borderRadius:"0 12px 12px 12px",padding:20,boxShadow:"0 2px 12px rgba(0,0,0,0.07)"}}>
+        {/* ── RECORDS TAB ── */}
+        {tab==="records" && (
+          <div>
+            <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"flex-end",marginBottom:16}}>
+              <div><label style={lbl}>PLE Year</label><input type="number" value={year} onChange={e=>setYear(e.target.value)} style={{...inp,width:100}}/></div>
+              <div>
+                <label style={lbl}>Import from CSV</label>
+                <div style={{fontSize:11,color:"#6b7280",marginBottom:4}}>Columns: Name, IndexNo, English, Mathematics, Science, Social Studies (+ optional: LIN, Cocurricular, Leadership, Conduct)</div>
+                <input type="file" accept=".csv,.txt" onChange={importCsv} style={{fontSize:12}}/>
+              </div>
+            </div>
+            {csvMsg && <div style={{background:"#f0fdf4",color:"#15803d",padding:"8px 14px",borderRadius:8,fontSize:13,marginBottom:12,fontWeight:600}}>{csvMsg}</div>}
+            {p7Students.length===0 && <div style={{color:"#9ca3af",padding:24,textAlign:"center"}}>No P7 or Completed learners found. Add them in the LEARNERS page first.</div>}
+            <div style={{overflowX:"auto"}}>
+              <table style={{width:"100%",fontSize:12,borderCollapse:"collapse"}}>
+                <thead>
+                  <tr style={{background:"#1e3a6e",color:"white"}}>
+                    {["Name","Gender","Index No","LIN","Eng","Math","Sci","SST","Total Agg","Div","Co-curr","Leadership","Conduct"].map(h=>(
+                      <th key={h} style={{padding:"8px 8px",textAlign:"left",fontWeight:700,whiteSpace:"nowrap",fontSize:11}}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {p7Students.map((s,i)=>{
+                    const rec = pleData[s.id]||{};
+                    const results = rec.results||{};
+                    return (
+                      <tr key={s.id} style={{background:i%2===0?"white":"#f8fafc"}}>
+                        <td style={{padding:"5px 8px",fontWeight:700,whiteSpace:"nowrap",color:"#1e3a6e"}}>{s.name}</td>
+                        <td style={{padding:"5px 8px"}}>{s.gender==="M"?"M":"F"}</td>
+                        <td style={{padding:"3px 6px"}}><input value={rec.indexNo||""} onChange={e=>updatePle(s.id,"indexNo",e.target.value)} style={{...inp,padding:"3px 6px",width:110,fontSize:11}}/></td>
+                        <td style={{padding:"3px 6px"}}><input value={rec.lin||s.lin||""} onChange={e=>updatePle(s.id,"lin",e.target.value.toUpperCase())} style={{...inp,padding:"3px 6px",width:120,fontSize:11,textTransform:"uppercase"}}/></td>
+                        {PLE_SUBJECTS.map(sub=>(
+                          <td key={sub} style={{padding:"3px 6px"}}>
+                            <input type="number" min={0} max={9} value={results[sub]||""} onChange={e=>updateResult(s.id,sub,e.target.value)} style={{...inp,padding:"3px 4px",width:42,fontSize:12,textAlign:"center"}}/>
+                          </td>
+                        ))}
+                        <td style={{padding:"5px 8px",fontWeight:800,color:"#1e3a6e",fontSize:13}}>{rec.totalAgg||"—"}</td>
+                        <td style={{padding:"5px 8px",fontWeight:800,color:"#dc2626",fontSize:13}}>{rec.division||"—"}</td>
+                        <td style={{padding:"3px 6px"}}><input value={rec.cocurricular||""} onChange={e=>updatePle(s.id,"cocurricular",e.target.value)} style={{...inp,padding:"3px 6px",width:80,fontSize:11}}/></td>
+                        <td style={{padding:"3px 6px"}}><input value={rec.leadership||""} onChange={e=>updatePle(s.id,"leadership",e.target.value)} style={{...inp,padding:"3px 6px",width:80,fontSize:11}}/></td>
+                        <td style={{padding:"3px 6px"}}><input value={rec.conduct||""} onChange={e=>updatePle(s.id,"conduct",e.target.value)} placeholder="Good" style={{...inp,padding:"3px 6px",width:70,fontSize:11}}/></td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <div style={{marginTop:12,fontSize:11,color:"#9ca3af"}}>
+              💡 Tip: Enter aggregates 1–9 per subject. Total Agg and Division are calculated automatically. You can also import from a CSV file.
+            </div>
+          </div>
+        )}
+        {/* ── CERTIFICATES TAB ── */}
+        {tab==="certificates" && (
+          <div>
+            <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"flex-end",marginBottom:16}}>
+              <div>
+                <label style={lbl}>Certificate Design</label>
+                <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:4}}>
+                  {CERT_DESIGNS.map(d=>(
+                    <button key={d.id} onClick={()=>setSelectedDesign(d.id)} style={{padding:"6px 14px",borderRadius:8,border:`2px solid ${selectedDesign===d.id?"#1e3a6e":"#d1d5db"}`,background:selectedDesign===d.id?"#1e3a6e":"white",color:selectedDesign===d.id?"white":"#374151",fontWeight:700,fontSize:12,cursor:"pointer"}}>
+                      {d.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <label style={lbl}>Learner</label>
+                <select value={selectedStudent||""} onChange={e=>setSelectedStudent(e.target.value||null)} style={inp}>
+                  <option value="">— Select learner —</option>
+                  {p7Students.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}
+                </select>
+              </div>
+              {selectedStudent && (
+                <button disabled={pdfBusy} onClick={async()=>{
+                  setPdfBusy(true);
+                  try { await downloadNodesAsPdf([certRef.current], `PLE_Recommendation_${safeFileName(p7Students.find(s=>s.id===selectedStudent)?.name||"cert")}_${year}.pdf`); }
+                  finally { setPdfBusy(false); }
+                }} style={pdfBusy?btnPdfBusy:btnPdf}>{pdfBusy?"⏳ Generating...":"📕 Download PDF"}</button>
+              )}
+              <button disabled={allPdfBusy} onClick={async()=>{
+                setAllPdfBusy(true);
+                try {
+                  const nodes = Array.from(allCertsRef.current?.querySelectorAll(".ple-cert")||[]);
+                  await downloadNodesAsPdf(nodes, `PLE_Recommendations_All_${year}.pdf`);
+                } finally { setAllPdfBusy(false); }
+              }} style={allPdfBusy?btnPdfBusy:{...btnPdf,background:"linear-gradient(135deg,#4c1d95,#7c3aed)"}}>
+                {allPdfBusy?"⏳ Generating...":"📕 Download All PDFs"}
+              </button>
+              <button onClick={()=>window.print()} style={btnPrimary}>🖨️ Print All</button>
+            </div>
+            {/* Single certificate preview */}
+            {selectedStudent && (()=>{
+              const s = p7Students.find(x=>x.id===selectedStudent);
+              if (!s) return null;
+              const rec = getRecForStudent(s);
+              return (
+                <div style={{marginBottom:24}}>
+                  <div style={{fontSize:13,fontWeight:700,color:"#1e3a6e",marginBottom:10}}>Preview: {s.name}</div>
+                  <DesignComponent rec={rec} school={school} year={year} pdfRef={certRef}/>
+                </div>
+              );
+            })()}
+            {/* All certificates (for bulk PDF / print) */}
+            <div ref={allCertsRef} style={{marginTop:16}}>
+              {p7Students.map(s=>{
+                const rec = getRecForStudent(s);
+                return (
+                  <div key={s.id} style={{marginBottom:24,pageBreakAfter:"always",breakAfter:"page"}}>
+                    <DesignComponent rec={rec} school={school} year={year} pdfRef={null}/>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+        {/* ── ANALYSIS TAB ── */}
+        {tab==="analysis" && (
+          <div>
+            <div style={{fontSize:14,fontWeight:700,color:"#1e3a6e",marginBottom:16}}>📊 PLE {year} — Performance Analysis</div>
+            {p7Students.length===0 ? <div style={{color:"#9ca3af",textAlign:"center",padding:24}}>No P7 learners found.</div> : (()=>{
+              const recs = p7Students.map(s=>getRecForStudent(s)).filter(r=>r.totalAgg);
+              const divCounts = {1:0,2:0,3:0,4:0,U:0};
+              recs.forEach(r=>{ const d=String(r.division); if(divCounts[d]!==undefined)divCounts[d]++; });
+              const subAvg = {};
+              PLE_SUBJECTS.forEach(sub=>{
+                const vals = recs.map(r=>parseInt(r.results?.[sub]||0,10)).filter(v=>v>0);
+                subAvg[sub] = vals.length ? (vals.reduce((a,b)=>a+b,0)/vals.length).toFixed(1) : "—";
+              });
+              return (
+                <div>
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))",gap:12,marginBottom:20}}>
+                    {Object.entries(divCounts).map(([div,count])=>(
+                      <div key={div} style={{background:div==="1"?"#dcfce7":div==="2"?"#dbeafe":div==="3"?"#fef9c3":div==="4"?"#ffedd5":"#fee2e2",borderRadius:10,padding:"14px 16px",textAlign:"center"}}>
+                        <div style={{fontSize:28,fontWeight:900,color:div==="1"?"#15803d":div==="2"?"#1e40af":div==="3"?"#92400e":div==="4"?"#c2410c":"#dc2626"}}>{count}</div>
+                        <div style={{fontSize:12,fontWeight:700,color:"#374151"}}>Division {div}</div>
+                      </div>
+                    ))}
+                    <div style={{background:"#ede9fe",borderRadius:10,padding:"14px 16px",textAlign:"center"}}>
+                      <div style={{fontSize:28,fontWeight:900,color:"#6d28d9"}}>{recs.length}</div>
+                      <div style={{fontSize:12,fontWeight:700,color:"#374151"}}>Total Sat</div>
+                    </div>
+                  </div>
+                  <div style={{background:"#f8fafc",borderRadius:10,padding:16,marginBottom:16}}>
+                    <div style={{fontWeight:700,color:"#1e3a6e",marginBottom:12}}>Subject Average Aggregates</div>
+                    {PLE_SUBJECTS.map(sub=>(
+                      <div key={sub} style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
+                        <div style={{width:120,fontSize:13,fontWeight:600}}>{sub}</div>
+                        <div style={{flex:1,background:"#e2e8f0",borderRadius:4,height:20,overflow:"hidden"}}>
+                          <div style={{width:`${subAvg[sub]!=="—"?Math.min(subAvg[sub]/9*100,100):0}%`,background:"linear-gradient(90deg,#1e40af,#3b82f6)",height:"100%",borderRadius:4}}/>
+                        </div>
+                        <div style={{width:40,textAlign:"right",fontWeight:700,color:"#1e3a6e"}}>{subAvg[sub]}</div>
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{overflowX:"auto"}}>
+                    <table style={{width:"100%",fontSize:12,borderCollapse:"collapse"}}>
+                      <thead><tr style={{background:"#1e3a6e",color:"white"}}>
+                        {["#","Name","Index No","Eng","Math","Sci","SST","Total Agg","Division"].map(h=>(
+                          <th key={h} style={{padding:"8px 10px",textAlign:"left",fontWeight:700}}>{h}</th>
+                        ))}
+                      </tr></thead>
+                      <tbody>
+                        {[...recs].sort((a,b)=>Number(a.totalAgg||999)-Number(b.totalAgg||999)).map((r,i)=>(
+                          <tr key={r.id} style={{background:i%2===0?"white":"#f8fafc"}}>
+                            <td style={{padding:"6px 10px",color:"#6b7280"}}>{i+1}</td>
+                            <td style={{padding:"6px 10px",fontWeight:700}}>{r.name}</td>
+                            <td style={{padding:"6px 10px",color:"#6b7280"}}>{r.indexNo||"—"}</td>
+                            {PLE_SUBJECTS.map(sub=><td key={sub} style={{padding:"6px 10px",textAlign:"center"}}>{r.results?.[sub]||"—"}</td>)}
+                            <td style={{padding:"6px 10px",fontWeight:900,fontSize:14,color:"#1e3a6e"}}>{r.totalAgg}</td>
+                            <td style={{padding:"6px 10px",fontWeight:900,fontSize:14,color:r.division==="1"?"#15803d":r.division==="2"?"#1e40af":r.division==="3"?"#92400e":"#dc2626"}}>{r.division}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 function ResultSheets({ students, termMarks, bands, divisions, school }) {
   const [cls, setCls] = useState("P4");
   const [term, setTerm] = useState("Term I");
@@ -3596,6 +4114,7 @@ function ReportCard({ school, r, term, year, cls, position, totalInClass, isLowe
           <div><b>NAME:</b> <span style={{fontWeight:800,fontStyle:"italic"}}>{s.name}</span></div>
           <div><b>CLASS:</b> {cls}</div>
           <div><b>TERM:</b> {term}</div>
+          {s.lin && <div style={{gridColumn:"1/-1",fontSize:12,color:"#1e3a6e"}}><b>LIN:</b> <span style={{fontStyle:"italic",color:"#2563eb",fontWeight:700}}>{s.lin}</span></div>}
         </div>
         <div style={{padding:"12px 16px"}}>
           <table style={{width:"100%",fontSize:13}}>
