@@ -3571,25 +3571,25 @@ function PleCertificateDesign4({ rec, school, year, pdfRef }) {
       <div style={{position:"absolute",inset:14,background:zigzag,zIndex:0}}/>
       {/* Inner solid red border, inset within the zigzag band */}
       <div style={{position:"absolute",inset:26,border:"3px solid #dc2626",background:"white",zIndex:1}}/>
-      {/* Content — flex column, fills the full inner area top to bottom */}
-      <div style={{position:"absolute",inset:34,zIndex:2,display:"flex",flexDirection:"column",padding:"22px 40px"}}>
+      {/* Content — fixed 0.6in top/bottom margin, natural flow (no stretch) so nothing drifts */}
+      <div style={{position:"absolute",inset:34,zIndex:2,display:"flex",flexDirection:"column",padding:"0.6in 40px"}}>
         {/* Header: logo + school name side by side */}
-        <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:16,marginBottom:10}}>
-          {school.logo && <img src={school.logo} alt="logo" style={{width:64,height:64,objectFit:"contain",flexShrink:0}}/>}
+        <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:16,marginBottom:6}}>
+          {school.logo && <img src={school.logo} alt="logo" style={{width:58,height:58,objectFit:"contain",flexShrink:0}}/>}
           <div style={{textAlign:"center"}}>
-            <div style={{fontWeight:900,fontSize:26,color:"#111827",letterSpacing:0.5,lineHeight:1.15}}>{school.name}</div>
-            <div style={{fontSize:13,color:"#374151",marginTop:4}}>{school.poBox}</div>
+            <div style={{fontWeight:900,fontSize:25,color:"#111827",letterSpacing:0.5,lineHeight:1.1}}>{school.name}</div>
+            <div style={{fontSize:12,color:"#374151",marginTop:2}}>{school.poBox}</div>
           </div>
         </div>
-        <div style={{textAlign:"center",fontSize:13,color:"#374151",marginBottom:8}}>
+        <div style={{textAlign:"center",fontSize:12,color:"#374151",marginBottom:6}}>
           {school.tel && <>Tel: <b>{school.tel}</b>&nbsp;&nbsp;&nbsp;</>}
           {school.email && <>Email: <span style={{color:"#2563eb",fontStyle:"italic"}}>{school.email}</span></>}
         </div>
-        <div style={{borderBottom:"2.5px solid #d4af37",display:"flex",justifyContent:"center",gap:10,paddingBottom:8,marginBottom:16,fontSize:16,color:"#d4af37"}}>★ ★ ★</div>
+        <div style={{borderBottom:"2.5px solid #d4af37",display:"flex",justifyContent:"center",gap:10,paddingBottom:6,marginBottom:12,fontSize:15,color:"#d4af37"}}>★ ★ ★</div>
 
         {/* Title */}
-        <div style={{textAlign:"center",marginBottom:18}}>
-          <div style={{fontSize:23,fontWeight:900,color:"#dc2626",textTransform:"uppercase",letterSpacing:2}}>PLE Recommendation</div>
+        <div style={{textAlign:"center",marginBottom:12}}>
+          <div style={{fontSize:22,fontWeight:900,color:"#dc2626",textTransform:"uppercase",letterSpacing:2}}>PLE Recommendation</div>
         </div>
 
         {/* Certify text + name */}
@@ -3598,51 +3598,52 @@ function PleCertificateDesign4({ rec, school, year, pdfRef }) {
           <span style={{fontWeight:900,fontSize:20,textTransform:"uppercase",letterSpacing:1.5,textDecoration:"underline",textUnderlineOffset:5}}>{s.name}</span>
           {s.indexNo && <span style={{fontSize:14,color:"#374151",marginLeft:14}}>Index No. <b>{s.indexNo}</b></span>}
         </div>
-        <div style={{textAlign:"center",fontSize:14,color:"#111827",marginBottom:20,lineHeight:1.7}}>
+        <div style={{textAlign:"center",fontSize:14,color:"#111827",marginBottom:16,lineHeight:1.6}}>
           successfully completed {he} Primary Leaving Examination<br/>(PLE) in <b>{year}</b> at <b>{school.name}.</b>
         </div>
 
-        {/* Results + info row — flex:1 so it grows to fill remaining vertical space */}
-        <div style={{flex:1,display:"flex",flexDirection:"column",justifyContent:"space-evenly"}}>
-          <div style={{display:"flex",gap:36,marginBottom:22}}>
-            {/* Results box */}
-            <div style={{border:"2.5px solid #d4af37",borderRadius:4,padding:"14px 22px",background:"#fffdf5",minWidth:230}}>
-              <div style={{fontWeight:900,fontSize:15,marginBottom:8}}>PLE RESULTS</div>
-              <table style={{fontSize:16,borderCollapse:"collapse"}}><tbody>
-                {PLE_SUBJECTS.map(sub=>(
-                  <tr key={sub}>
-                    <td style={{padding:"3px 18px 3px 0"}}>{pleSubLabel(sub)}:</td>
-                    <td style={{padding:"3px 0",fontWeight:700}}>{s.results?.[sub]||"—"}</td>
-                  </tr>
-                ))}
-              </tbody></table>
-              <div style={{marginTop:10}}>
-                <div style={{fontSize:16}}>Total Agg: <b>{s.totalAgg||"—"}</b></div>
-                <div style={{fontSize:16}}>Div: <b>{s.division||"—"}</b></div>
-              </div>
-            </div>
-            {/* Extra info */}
-            <div style={{display:"flex",flexDirection:"column",gap:14,fontSize:14,justifyContent:"center"}}>
-              <div><b>LIN:</b> <span style={{color:"#2563eb"}}>{s.lin||""}</span></div>
-              <div><b>Co-curricular activities</b><br/><span style={{color:"#2563eb"}}>{s.cocurricular||""}</span></div>
-              <div><b>Leadership position</b><br/><span style={{color:"#2563eb"}}>{s.leadership||"-"}</span></div>
-              <div><b>Conduct:</b> <span style={{color:"#2563eb"}}>{s.conduct||"Good"}</span></div>
+        {/* Results + info row */}
+        <div style={{display:"flex",gap:36,marginBottom:16}}>
+          {/* Results box */}
+          <div style={{border:"2.5px solid #d4af37",borderRadius:4,padding:"12px 20px",background:"#fffdf5",minWidth:230}}>
+            <div style={{fontWeight:900,fontSize:14,marginBottom:6}}>PLE RESULTS</div>
+            <table style={{fontSize:15,borderCollapse:"collapse"}}><tbody>
+              {PLE_SUBJECTS.map(sub=>(
+                <tr key={sub}>
+                  <td style={{padding:"2px 18px 2px 0"}}>{pleSubLabel(sub)}:</td>
+                  <td style={{padding:"2px 0",fontWeight:700}}>{s.results?.[sub]||"—"}</td>
+                </tr>
+              ))}
+            </tbody></table>
+            <div style={{marginTop:8}}>
+              <div style={{fontSize:15}}>Total Agg: <b>{s.totalAgg||"—"}</b></div>
+              <div style={{fontSize:15}}>Div: <b>{s.division||"—"}</b></div>
             </div>
           </div>
-
-          {/* Recommendation */}
-          <div style={{textAlign:"center",fontSize:14,color:"#111827",marginBottom:16}}>
-            {pleRecommendation(s.name,s.gender,s.totalAgg,s.division)}
-          </div>
-          <div style={{textAlign:"center",fontSize:18,color:"#d4af37",marginBottom:16}}>★ ★ ★</div>
-
-          {/* Date of issuance */}
-          <div style={{textAlign:"right",fontSize:14,color:"#111827",marginBottom:20}}>
-            Date of Issuance: <span style={{borderBottom:"1px solid #111827",display:"inline-block",width:160}}>&nbsp;</span>
+          {/* Extra info */}
+          <div style={{display:"flex",flexDirection:"column",gap:10,fontSize:13,justifyContent:"center"}}>
+            <div><b>LIN:</b> <span style={{color:"#2563eb"}}>{s.lin||""}</span></div>
+            <div><b>Co-curricular activities</b><br/><span style={{color:"#2563eb"}}>{s.cocurricular||""}</span></div>
+            <div><b>Leadership position</b><br/><span style={{color:"#2563eb"}}>{s.leadership||"-"}</span></div>
+            <div><b>Conduct:</b> <span style={{color:"#2563eb"}}>{s.conduct||"Good"}</span></div>
           </div>
         </div>
 
-        {/* Signature — anchored near the bottom, not deep past the border */}
+        {/* Recommendation */}
+        <div style={{textAlign:"center",fontSize:14,color:"#111827",marginBottom:12}}>
+          {pleRecommendation(s.name,s.gender,s.totalAgg,s.division)}
+        </div>
+        <div style={{textAlign:"center",fontSize:17,color:"#d4af37",marginBottom:14}}>★ ★ ★</div>
+
+        {/* Date of issuance */}
+        <div style={{textAlign:"right",fontSize:14,color:"#111827",marginBottom:14}}>
+          Date of Issuance: <span style={{borderBottom:"1px solid #111827",display:"inline-block",width:160}}>&nbsp;</span>
+        </div>
+
+        {/* Spacer pushes the signature to sit just above the 0.6in bottom margin, without stretching anything above it */}
+        <div style={{flex:1}}/>
+
+        {/* Signature */}
         <div>
           <div style={{fontSize:13,color:"#111827",marginBottom:4}}>....................</div>
           <div style={{fontWeight:900,fontSize:14,textTransform:"uppercase"}}>{school.headTeacher||"HEAD TEACHER"}</div>
