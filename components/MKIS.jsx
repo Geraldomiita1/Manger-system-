@@ -3673,22 +3673,22 @@ function PleCertificateDesign4({ rec, school, year, pdfRef }) {
         <div style={{borderBottom:"2.5px solid #d4af37",display:"flex",justifyContent:"center",gap:10,paddingBottom:6,marginBottom:12,fontSize:15,color:"#d4af37"}}>★ ★ ★</div>
 
         {/* Title */}
-        <div style={{textAlign:"center",marginBottom:12}}>
-          <div style={{fontSize:22,fontWeight:900,color:"#dc2626",textTransform:"uppercase",letterSpacing:2}}>PLE Recommendation</div>
+        <div style={{textAlign:"center",marginBottom:16}}>
+          <div style={{fontSize:23,fontWeight:900,color:"#dc2626",textTransform:"uppercase",letterSpacing:2,display:"inline-block",borderBottom:"2px solid #0ea5e9",paddingBottom:4}}>PLE Recommendation</div>
         </div>
 
         {/* Certify text + name */}
-        <div style={{textAlign:"center",fontSize:14,color:"#374151",marginBottom:6}}>This is to certify that</div>
-        <div style={{textAlign:"center",marginBottom:8}}>
+        <div style={{textAlign:"center",fontSize:14,color:"#374151",marginBottom:8}}>This is to certify that</div>
+        <div style={{textAlign:"center",marginBottom:10}}>
           <span style={{fontWeight:900,fontSize:20,textTransform:"uppercase",letterSpacing:1.5,textDecoration:"underline",textUnderlineOffset:5}}>{s.name}</span>
           {s.indexNo && <span style={{fontSize:14,color:"#374151",marginLeft:14}}>Index No. <b>{s.indexNo}</b></span>}
         </div>
-        <div style={{textAlign:"center",fontSize:14,color:"#111827",marginBottom:16,lineHeight:1.6}}>
+        <div style={{textAlign:"center",fontSize:14,color:"#111827",marginBottom:24,lineHeight:1.6}}>
           successfully completed {he} Primary Leaving Examination<br/>(PLE) in <b>{year}</b> at <b>{school.name}.</b>
         </div>
 
         {/* Results + info row */}
-        <div style={{display:"flex",gap:36,marginBottom:16}}>
+        <div style={{display:"flex",gap:36,marginBottom:56}}>
           {/* Results box */}
           <div style={{border:"2.5px solid #d4af37",borderRadius:4,padding:"12px 20px",background:"#fffdf5",minWidth:230}}>
             <div style={{fontWeight:900,fontSize:14,marginBottom:6}}>PLE RESULTS</div>
@@ -3715,20 +3715,17 @@ function PleCertificateDesign4({ rec, school, year, pdfRef }) {
         </div>
 
         {/* Recommendation */}
-        <div style={{textAlign:"center",fontSize:14,color:"#111827",marginBottom:12}}>
+        <div style={{textAlign:"center",fontSize:14,color:"#111827",marginBottom:28}}>
           {pleRecommendation(s.name,s.gender,s.totalAgg,s.division)}
         </div>
-        <div style={{textAlign:"center",fontSize:17,color:"#d4af37",marginBottom:14}}>★ ★ ★</div>
+        <div style={{textAlign:"center",fontSize:17,color:"#d4af37",marginBottom:28}}>★ ★ ★</div>
 
         {/* Date of issuance */}
-        <div style={{textAlign:"right",fontSize:14,color:"#111827",marginBottom:14}}>
+        <div style={{textAlign:"right",fontSize:14,color:"#111827",marginBottom:28}}>
           Date of Issuance: <span style={{borderBottom:"1px solid #111827",display:"inline-block",width:160}}>&nbsp;</span>
         </div>
 
-        {/* Spacer pushes the signature to sit just above the 0.6in bottom margin, without stretching anything above it */}
-        <div style={{flex:1}}/>
-
-        {/* Signature */}
+        {/* Signature — fixed gap so it sits close after the date line, not stretched to the bottom */}
         <div>
           <div style={{fontSize:13,color:"#111827",marginBottom:4}}>....................</div>
           <div style={{fontWeight:900,fontSize:14,textTransform:"uppercase"}}>{school.headTeacher||"HEAD TEACHER"}</div>
