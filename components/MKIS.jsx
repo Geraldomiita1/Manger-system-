@@ -152,11 +152,16 @@ function deepMergeObjects(remote, local) {
   // sides are merged key-by-key rather than one side replacing the other,
   // so an edit to Student A's marks on one device can never wipe out a
   // concurrent edit to Student B's marks made on another device.
-  if (remote == null) return local;
-  if (local == null) return remote;
-  const remoteIsObj = typeof remote === "object" && !Array.isArray(remote);
-  const localIsObj = typeof local === "object" && !Array.isArray(local);
-  if (!remoteIsObj || !localIsObj) return local; // leaf value: local edit wins
+  //
+  // IMPORTANT: a leaf value of undefined/null is a deliberate "mark cleared"
+  // state, not "this device has no opinion". We must NOT fall back to the
+  // remote value in that case, or a cleared mark will keep reappearing
+  // (the old bug here treated `local == null` as "use remote instead").
+  // Once we're past the object-vs-leaf check below, `local` always wins,
+  // undefined/null included.
+  const remoteIsObj = remote && typeof remote === "object" && !Array.isArray(remote);
+  const localIsObj = local && typeof local === "object" && !Array.isArray(local);
+  if (!remoteIsObj || !localIsObj) return local; // leaf value (or a branch missing on one side): local's intent wins
   const out = { ...remote };
   for (const k of Object.keys(local)) out[k] = deepMergeObjects(remote[k], local[k]);
   return out;
@@ -598,14 +603,21 @@ function downloadWordHtml(title, bodyHtml, filename, opts = {}) {
   // preview instead of defaulting to landscape.
   const pageSize = opts.pageSize || "297mm 210mm";
   const pageMargin = opts.margin || "14mm";
+  // Word doesn't reliably infer orientation from the @page width/height alone
+  // (older/activation-limited Word builds in particular can still open the
+  // file as portrait). Spelling it out explicitly via mso-page-orientation
+  // is what actually makes Word's own Page Setup/orientation match the
+  // page size we're asking for.
+  const [wStr, hStr] = pageSize.split(" ");
+  const orientation = parseFloat(wStr) >= parseFloat(hStr) ? "landscape" : "portrait";
   const html = `<!DOCTYPE html>
 <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
 <head>
 <meta charset="utf-8">
 <title>${escapeHtml(title)}</title>
-<!--[if gte mso 9]><xml><w:WordDocument><w:View>Print</w:View><w:Zoom>90</w:Zoom></w:WordDocument></xml><![endif]-->
+<!--[if gte mso 9]><xml><w:WordDocument><w:View>Print</w:View><w:Zoom>90</w:Zoom><w:DoNotOptimizeForBrowser/></w:WordDocument></xml><![endif]-->
 <style>
-  @page { size: ${pageSize}; margin: ${pageMargin}; }
+  @page { size: ${pageSize}; margin: ${pageMargin}; mso-page-orientation: ${orientation}; }
   body { font-family: Calibri, Arial, sans-serif; font-size: 11pt; color:#111; }
   table { border-collapse: collapse; width: 100%; margin-bottom: 12px; }
   th, td { border: 1px solid #999; padding: 4px 6px; font-size: 9.5pt; text-align: center; }
@@ -616,7 +628,7 @@ function downloadWordHtml(title, bodyHtml, filename, opts = {}) {
   .subtitle { text-align:center; font-weight:bold; font-size:12pt; margin:6px 0 10px; }
   .section-title { font-weight:bold; font-size:11pt; margin:14px 0 6px; }
   .name-cell { text-align:left; font-weight:600; }
-  tr:nth-child(even) td { background:#f8fafc; }
+  tr:nth-child(even) td { background:#eff6ff; }
   /* Keep each pupil's full report card together as one block in the
      downloaded file -- never split a table/section across two pages. */
   .report-card-block, .report-card-block table, .report-card-block tr {
@@ -636,6 +648,111 @@ function htmlTable(headerRow, dataRows) {
   const head = `<tr>${headerRow.map(h => `<th>${escapeHtml(h)}</th>`).join("")}</tr>`;
   const body = dataRows.map(row => `<tr>${row.map((v, i) => `<td${i === 1 ? ' class="name-cell"' : ""}>${escapeHtml(v === undefined || v === null || v === "" ? "-" : v)}</td>`).join("")}</tr>`).join("");
   return `<table>${head}${body}</table>`;
+}
+// Builds the Word-export table for Result Sheets with the SAME two-row grouped
+// header (subject name spanning CA/EX/AV/AG) and the SAME cell colors used
+// on screen in ResultSheets, instead of the old flat "ENG CA | ENG EXAM | ..."
+// single-row header with no shading. POS is rendered with its ordinal suffix
+// (1st, 2nd, 3rd...) since the plain number alone was silently dropping it.
+function resultSheetHtmlTable({ subjects, isLower, sortedRows }) {
+  const thTop = "border:1px solid #999;padding:5px;font-size:9pt;";
+  let head = `<tr style="background:#1e40af;color:white;">`;
+  head += `<th style="${thTop}" rowspan="2">S/N</th>`;
+  head += `<th style="${thTop}text-align:left;min-width:150px;" rowspan="2">NAME OF PUPIL</th>`;
+  subjects.forEach(sub => {
+    head += isLower
+      ? `<th style="${thTop}" rowspan="2">${escapeHtml(sub)}${lowerSubjectMax(sub)!==100?` /${lowerSubjectMax(sub)}`:""}</th>`
+      : `<th style="${thTop}" colspan="4">${escapeHtml(sub)}</th>`;
+  });
+  head += `<th style="${thTop}" rowspan="2">TOT MK</th>`;
+  if (!isLower) head += `<th style="${thTop}" rowspan="2">TOT AGG</th><th style="${thTop}" rowspan="2">DIV</th>`;
+  head += `<th style="${thTop}" rowspan="2">POS</th></tr>`;
+  if (!isLower) {
+    head += `<tr style="background:#2563eb;color:white;font-size:8pt;">`;
+    subjects.forEach(() => {
+      head += `<th style="${thTop}background:#fef9c3;color:#713f12;">CA</th>`;
+      head += `<th style="${thTop}background:#dcfce7;color:#14532d;">EX</th>`;
+      head += `<th style="${thTop}background:#dbeafe;color:#1e3a6e;">AV</th>`;
+      head += `<th style="${thTop}background:#fed7aa;color:#7c2d12;">AG</th>`;
+    });
+    head += `</tr>`;
+  }
+  const td = "border:1px solid #999;padding:4px;text-align:center;font-size:9.5pt;";
+  let body = "";
+  sortedRows.forEach((r, i) => {
+    // Alternating light-blue / white row banding (matches the requested sample).
+    const rowBg = i % 2 === 0 ? "#ffffff" : "#eff6ff";
+    body += `<tr style="background:${rowBg};">`;
+    body += `<td style="${td}">${i + 1}</td>`;
+    body += `<td style="${td}text-align:left;font-weight:600;">${escapeHtml(r.s.name)}</td>`;
+    if (isLower) {
+      r.perSub.forEach(p => { body += `<td style="${td}">${p.isX ? "X" : (p.av ?? "-")}</td>`; });
+    } else {
+      r.perSub.forEach(p => {
+        body += `<td style="${td}background:#fefce8;">${p.isX ? "X" : (p.ca ?? "-")}</td>`;
+        body += `<td style="${td}background:#f0fdf4;">${p.isX ? "X" : (p.exam ?? "-")}</td>`;
+        body += `<td style="${td}background:#eff6ff;font-weight:600;">${p.isX ? "X" : (p.av ?? "-")}</td>`;
+        body += `<td style="${td}background:#fff7ed;">${p.isX ? "X" : (p.av !== undefined ? p.agg : "-")}</td>`;
+      });
+    }
+    body += `<td style="${td}font-weight:700;background:#ede9fe;">${r.totMk || "-"}</td>`;
+    if (!isLower) {
+      body += `<td style="${td}background:#ede9fe;${r.hasX ? "color:#dc2626;font-weight:700;" : ""}">${r.hasX ? "X" : (r.totAgg || "-")}</td>`;
+      body += `<td style="${td}font-weight:700;color:${r.hasX ? "#dc2626" : "#1e40af"};">${r.hasX ? "X" : (r.totMk ? r.div : "-")}</td>`;
+    }
+    body += `<td style="${td}">${r.pos && r.pos !== "-" ? ordinal(r.pos) : "-"}</td>`;
+    body += `</tr>`;
+  });
+  return `<table style="border-collapse:collapse;width:100%;">${head}${body}</table>`;
+}
+// Same idea for Monthly Mark Sheets: grouped MK/AGG sub-header per subject
+// with the same yellow/orange colors as MonthBlock on screen, alternating
+// row banding, and ordinal-suffixed positions.
+function monthlySheetHtmlTable({ subjects, isLower, sortedRows }) {
+  const thTop = "border:1px solid #999;padding:5px;font-size:9pt;";
+  let head = `<tr style="background:#1e40af;color:white;">`;
+  head += `<th style="${thTop}" rowspan="2">S/N</th>`;
+  head += `<th style="${thTop}text-align:left;min-width:150px;" rowspan="2">NAME OF PUPIL</th>`;
+  subjects.forEach(sub => {
+    head += isLower
+      ? `<th style="${thTop}" rowspan="2">${escapeHtml(sub)}${lowerSubjectMax(sub)!==100?` /${lowerSubjectMax(sub)}`:""}</th>`
+      : `<th style="${thTop}" colspan="2">${escapeHtml(sub)}</th>`;
+  });
+  head += `<th style="${thTop}" rowspan="2">TOT MK</th>`;
+  if (!isLower) head += `<th style="${thTop}" rowspan="2">TOT AGG</th><th style="${thTop}" rowspan="2">DIV</th>`;
+  head += `<th style="${thTop}" rowspan="2">POS</th></tr>`;
+  if (!isLower) {
+    head += `<tr style="background:#2563eb;color:white;font-size:8pt;">`;
+    subjects.forEach(() => {
+      head += `<th style="${thTop}background:#fef9c3;color:#713f12;">MK</th>`;
+      head += `<th style="${thTop}background:#fed7aa;color:#7c2d12;">AGG</th>`;
+    });
+    head += `</tr>`;
+  }
+  const td = "border:1px solid #999;padding:4px;text-align:center;font-size:9.5pt;";
+  let body = "";
+  sortedRows.forEach((r, i) => {
+    const rowBg = i % 2 === 0 ? "#ffffff" : "#eff6ff";
+    body += `<tr style="background:${rowBg};">`;
+    body += `<td style="${td}">${i + 1}</td>`;
+    body += `<td style="${td}text-align:left;font-weight:600;">${escapeHtml(r.s.name)}</td>`;
+    r.perSub.forEach(p => {
+      if (isLower) {
+        body += `<td style="${td}background:#fefce8;">${p.mk !== undefined ? p.mk : "-"}</td>`;
+      } else {
+        body += `<td style="${td}background:#fefce8;">${p.mk !== undefined ? p.mk : "-"}</td>`;
+        body += `<td style="${td}background:#fff7ed;font-weight:600;${p.isX ? "color:#dc2626;" : ""}">${p.isX ? "X" : (p.mk !== undefined ? p.agg : "-")}</td>`;
+      }
+    });
+    body += `<td style="${td}font-weight:700;background:#ede9fe;">${r.totMk || "-"}</td>`;
+    if (!isLower) {
+      body += `<td style="${td}background:#ede9fe;${r.hasX ? "color:#dc2626;font-weight:700;" : ""}">${r.hasX ? "X" : (r.totAgg || "-")}</td>`;
+      body += `<td style="${td}font-weight:700;color:${r.hasX ? "#dc2626" : "#1e40af"};">${r.hasX ? "X" : (r.totMk ? r.div : "-")}</td>`;
+    }
+    body += `<td style="${td}">${r.pos && r.pos !== "-" ? ordinal(r.pos) : "-"}</td>`;
+    body += `</tr>`;
+  });
+  return `<table style="border-collapse:collapse;width:100%;">${head}${body}</table>`;
 }
 function titleBlockHtml(school, subtitle) {
   let html = `<div class="title">${escapeHtml(school.name || "")}</div>`;
@@ -710,10 +827,8 @@ function exportResultSheetExcel({ school, cls, term, year, isLower, subjects, so
   XLSX.writeFile(wb, `${safeFileName(cls)}_${safeFileName(term)}_${year}_Result_Sheet.xlsx`);
 }
 function exportResultSheetWord({ school, cls, term, year, isLower, subjects, sortedRows, best, worst, avg, subjectAnalysis, gradeKeys, divCounts, classCount }) {
-  const headerRow = resultSheetHeaderRow(isLower, subjects);
-  const dataRows = sortedRows.map((r, i) => resultSheetDataRow(r, i, isLower));
   let body = titleBlockHtml(school, `END OF ${term.toUpperCase()} ${year} - ${cls} RESULT SHEET`);
-  body += htmlTable(headerRow, dataRows);
+  body += resultSheetHtmlTable({ subjects, isLower, sortedRows });
   body += `<p><b>Highest:</b> ${escapeHtml(best || "-")} &nbsp; <b>Lowest:</b> ${escapeHtml(worst || "-")} &nbsp; <b>Class Average:</b> ${escapeHtml(avg || "-")} &nbsp; <b>Best Pupil:</b> ${escapeHtml(sortedRows[0]?.s.name || "-")}</p>`;
   if (!isLower && subjectAnalysis?.length) {
     const aHead = ["SUBJECT", ...gradeKeys, "X", "TOTAL"];
@@ -798,12 +913,10 @@ function exportMonthlyExcel({ school, cls, term, year, isLower, subjects, months
   XLSX.writeFile(wb, `${safeFileName(cls)}_${safeFileName(term)}_${year}_Monthly_Mark_Sheets.xlsx`);
 }
 function exportMonthlyWord({ school, cls, term, year, isLower, subjects, monthsData }) {
-  const headerRow = monthlySheetHeaderRow(isLower, subjects);
   let body = titleBlockHtml(school, `MONTHLY MARK SHEETS - ${term.toUpperCase()} ${year} - ${cls}`);
   monthsData.forEach(({ month, sortedRows, divCounts }) => {
-    const dataRows = sortedRows.map((r, i) => monthlySheetDataRow(r, i, isLower));
     body += `<div class="section-title">${escapeHtml(month)} - ${escapeHtml(term)} ${escapeHtml(year)}</div>`;
-    body += htmlTable(headerRow, dataRows);
+    body += monthlySheetHtmlTable({ subjects, isLower, sortedRows });
     if (!isLower && divCounts) {
       const gHead = ["NO. OF PUPILS", "DIV I", "DIV II", "DIV III", "DIV IV", "U", "X"];
       const gRow = [sortedRows.length, divCounts.I, divCounts.II, divCounts.III, divCounts.IV, divCounts.U, divCounts.X];
