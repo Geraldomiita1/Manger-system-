@@ -560,7 +560,7 @@ function rankWithTies(totals, aggs) {
 }
 function ordinal(n) {
   if (n === "-" || !n) return "-";
-  const s = ["th","st","nd","rd"];
+  const s = ["TH","ST","ND","RD"];
   const v = n % 100;
   return n + (s[(v-20)%10] || s[v] || s[0]);
 }
@@ -1088,10 +1088,22 @@ async function nodeToPdfPageSlices(node, scale = 3, orientation = "portrait") {
   const pageWmm = orientation === "landscape" ? PDF_PAGE_H_MM : PDF_PAGE_W_MM;
   const pageHmm = orientation === "landscape" ? PDF_PAGE_W_MM : PDF_PAGE_H_MM;
   const restore = expandOverflowForCapture(node);
+  // Guard against html2canvas silently producing a corrupted/garbled canvas
+  // (random-colored blocks instead of the real content) when the rasterized
+  // size would exceed what a browser/GPU can safely allocate for a single
+  // canvas -- some devices don't error on overflow, they just hand back
+  // garbage pixels. Large, many-column, many-row mark sheets at a fixed
+  // scale=3 are exactly the case that can tip over that limit, so we shrink
+  // the effective scale just enough to keep the rasterized canvas under a
+  // safe ceiling, rather than always using the requested scale blindly.
+  const MAX_CANVAS_DIMENSION = 4096;
+  const rawW = node.scrollWidth || node.offsetWidth || 1;
+  const rawH = node.scrollHeight || node.offsetHeight || 1;
+  const effectiveScale = Math.max(1, Math.min(scale, MAX_CANVAS_DIMENSION / rawW, MAX_CANVAS_DIMENSION / rawH));
   let canvas;
   try {
     canvas = await html2canvas(node, {
-      scale, useCORS: true, backgroundColor: "#ffffff",
+      scale: effectiveScale, useCORS: true, backgroundColor: "#ffffff",
       // Some captured sections (e.g. Monthly Exams) embed their own on-screen
       // toolbar buttons (Save/Lock, sort toggle) right inside the block being
       // captured. Hide anything marked .no-print in the captured clone only,
@@ -2856,7 +2868,7 @@ function MonthlyExams({ students, monthlyMarks, updateMonthlyMark, requestOrAppl
             setPdfBusy(true);
             try {
               const nodes = Array.from(monthBlocksRef.current?.querySelectorAll(".month-block-sheet") || []);
-              await downloadNodesAsPdf(nodes, `${safeFileName(cls)}_${safeFileName(term)}_${year}_Monthly_Results.pdf`);
+              await downloadNodesAsPdf(nodes, `${safeFileName(cls)}_${safeFileName(term)}_${year}_Monthly_Results.pdf`, "landscape");
             } finally { setPdfBusy(false); }
           }} style={pdfBusy?btnPdfBusy:btnPdf}>{pdfBusy?"⏳ Generating...":"📕 Download PDF"}</button>
           <button onClick={()=>window.print()} style={btnPrimary}>🖨️ Print</button>
@@ -4298,7 +4310,8 @@ function ResultSheets({ students, termMarks, bands, divisions, school }) {
             try {
               await downloadNodesAsPdf(
                 [sheetCardRef.current, !isLower ? analysisCardRef.current : null],
-                `${safeFileName(cls)}_${safeFileName(term)}_${year}_Result_Sheet.pdf`
+                `${safeFileName(cls)}_${safeFileName(term)}_${year}_Result_Sheet.pdf`,
+                "landscape"
               );
             } finally { setPdfBusy(false); }
           }} style={pdfBusy?btnPdfBusy:btnPdf}>{pdfBusy?"⏳ Generating...":"📕 Download PDF"}</button>
