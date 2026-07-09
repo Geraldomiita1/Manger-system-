@@ -37,6 +37,12 @@ const DEFAULT_BANDS = [
   { min:25, max:34,  grade:"P8", label:"Weak" },
   { min:0,  max:24,  grade:"F9", label:"Fail" },
 ];
+// Special Grading Scale: an optional, per-class override of the bands above.
+// Keyed by class name (e.g. "P7"); a class with no entry here just uses the
+// default DEFAULT_BANDS/bands scale as normal. Lets a school apply a
+// different grading scale to one class (commonly P7, for PLE-style grading)
+// without touching the scale every other class uses.
+const DEFAULT_SPECIAL_BANDS = {};
 const DEFAULT_DIVISIONS = [
   { name:"I",   min:4,  max:12 },
   { name:"II",  min:13, max:24 },
@@ -64,7 +70,7 @@ const DEFAULT_SCHOOL = {
 // localStorage copies. This is what makes data appear identically everywhere.
 const STORAGE_KEYS = [
   "mkis_students","mkis_termmarks","mkis_monthlymarks","mkis_initials",
-  "mkis_bands","mkis_divisions","mkis_school","mkis_accounts","mkis_changerequests",
+  "mkis_bands","mkis_special_bands","mkis_divisions","mkis_school","mkis_accounts","mkis_changerequests",
   "mkis_locked_term","mkis_locked_monthly",
 ];
 // One-time migration: if a browser still has old localStorage data and the
@@ -120,7 +126,7 @@ async function saveShared(key, val) {
 // Friendly key → section label map
 const KEY_LABEL = {
   mkis_students:"Students", mkis_termmarks:"Term Marks", mkis_monthlymarks:"Monthly Marks",
-  mkis_bands:"Grade Bands", mkis_divisions:"Divisions", mkis_school:"School Settings",
+  mkis_bands:"Grade Bands", mkis_special_bands:"Special Grading Scale", mkis_divisions:"Divisions", mkis_school:"School Settings",
   mkis_accounts:"Accounts", mkis_changerequests:"Change Requests", mkis_initials:"Initials",
   mkis_locked_term:"Term Lock", mkis_locked_monthly:"Monthly Lock",
 };
@@ -175,6 +181,7 @@ const MERGE_STRATEGIES = {
   mkis_termmarks: (remote, local) => deepMergeObjects(remote, local),
   mkis_monthlymarks: (remote, local) => deepMergeObjects(remote, local),
   mkis_bands: (remote, local) => local,
+  mkis_special_bands: (remote, local) => deepMergeObjects(remote, local),
   mkis_divisions: (remote, local) => local,
   mkis_school: (remote, local) => local,
   mkis_accounts: (remote, local) => deepMergeObjects(remote, local),
@@ -253,6 +260,13 @@ async function verifyAccountLogin(accounts, usernameInput, passwordInput) {
 }
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
 const toUpper = (s) => (s || "").toUpperCase();
+// Resolves which grading scale actually applies to a class: its Special
+// Grading Scale override if the school has set one up (and it isn't empty),
+// otherwise the normal default bands used everywhere else.
+function bandsForClass(cls, bands, specialBands) {
+  const special = specialBands?.[cls];
+  return (Array.isArray(special) && special.length) ? special : bands;
+}
 function gradeFor(score, bands) {
   if (score === undefined || score === null || isNaN(score)) return null;
   return bands.find(b => score >= b.min && score <= b.max) || null;
@@ -1279,6 +1293,7 @@ export default function App() {
   const [termMarks, setTermMarks] = useState({});
   const [monthlyMarks, setMonthlyMarks] = useState({});
   const [bands, setBands] = useState(DEFAULT_BANDS);
+  const [specialBands, setSpecialBands] = useState(DEFAULT_SPECIAL_BANDS);
   const [divisions, setDivisions] = useState(DEFAULT_DIVISIONS);
   const [school, setSchool] = useState(DEFAULT_SCHOOL);
   const [accounts, setAccounts] = useState({});
@@ -1304,11 +1319,11 @@ export default function App() {
   // setter map + a ref mirror of the latest state, used by both the save
   // effects and the poll loop so neither has to be re-created on every render
   const setters = { mkis_students: setStudents, mkis_termmarks: setTermMarks, mkis_monthlymarks: setMonthlyMarks,
-    mkis_bands: setBands, mkis_divisions: setDivisions, mkis_school: setSchool, mkis_accounts: setAccounts, mkis_changerequests: setChangeRequests, mkis_initials: setInitials,
+    mkis_bands: setBands, mkis_special_bands: setSpecialBands, mkis_divisions: setDivisions, mkis_school: setSchool, mkis_accounts: setAccounts, mkis_changerequests: setChangeRequests, mkis_initials: setInitials,
     mkis_locked_term: setLockedTerm, mkis_locked_monthly: setLockedMonthly };
   const stateRef = useRef({});
   stateRef.current = { mkis_students: students, mkis_termmarks: termMarks, mkis_monthlymarks: monthlyMarks,
-    mkis_bands: bands, mkis_divisions: divisions, mkis_school: school, mkis_accounts: accounts, mkis_changerequests: changeRequests, mkis_initials: initials,
+    mkis_bands: bands, mkis_special_bands: specialBands, mkis_divisions: divisions, mkis_school: school, mkis_accounts: accounts, mkis_changerequests: changeRequests, mkis_initials: initials,
     mkis_locked_term: lockedTerm, mkis_locked_monthly: lockedMonthly };
   // last value WE wrote (or loaded) per key, serialized -- used to tell "a
   // remote device changed this" apart from "this is just our own save echoing back"
@@ -1336,11 +1351,12 @@ export default function App() {
     let mounted = true;
     (async () => {
       await migrateLocalStorageOnce();
-      const [s, tm, mm, b, d, sc, acc, reqs, ini, lt, lm] = await Promise.all([
+      const [s, tm, mm, b, sb, d, sc, acc, reqs, ini, lt, lm] = await Promise.all([
         loadShared("mkis_students", []),
         loadShared("mkis_termmarks", {}),
         loadShared("mkis_monthlymarks", {}),
         loadShared("mkis_bands", DEFAULT_BANDS),
+        loadShared("mkis_special_bands", DEFAULT_SPECIAL_BANDS),
         loadShared("mkis_divisions", DEFAULT_DIVISIONS),
         loadShared("mkis_school", DEFAULT_SCHOOL),
         loadShared("mkis_accounts", null),
@@ -1358,14 +1374,14 @@ export default function App() {
         finalAccounts = await buildDefaultAccounts();
         await saveShared("mkis_accounts", finalAccounts);
       }
-      setBands(b); setDivisions(d);
+      setBands(b); setSpecialBands(sb || {}); setDivisions(d);
       // Always spread DEFAULT_SCHOOL first so any new fields added since
       // the last save (e.g. nextOpens, nextEnds, requirements) are never
       // missing if an older save predates them being added.
       setSchool({ ...DEFAULT_SCHOOL, ...sc }); setAccounts(finalAccounts); setChangeRequests(reqs || []); setInitials(ini);
       setLockedTerm(lt || {}); setLockedMonthly(lm || {});
       lastSeenRef.current = { mkis_students: JSON.stringify(s), mkis_termmarks: JSON.stringify(tm),
-        mkis_monthlymarks: JSON.stringify(mm), mkis_bands: JSON.stringify(b), mkis_divisions: JSON.stringify(d),
+        mkis_monthlymarks: JSON.stringify(mm), mkis_bands: JSON.stringify(b), mkis_special_bands: JSON.stringify(sb || {}), mkis_divisions: JSON.stringify(d),
         mkis_school: JSON.stringify(sc), mkis_accounts: JSON.stringify(finalAccounts), mkis_changerequests: JSON.stringify(reqs || []), mkis_initials: JSON.stringify(ini),
         mkis_locked_term: JSON.stringify(lt || {}), mkis_locked_monthly: JSON.stringify(lm || {}) };
       setDataReady(true);
@@ -1440,6 +1456,15 @@ export default function App() {
     if (JSON.stringify(merged) !== JSON.stringify(monthlyMarks)) setMonthlyMarks(merged);
   })(); } }, [monthlyMarks, dataReady]);
   useEffect(() => { if (dataReady) { lastSeenRef.current.mkis_bands = JSON.stringify(bands); saveShared("mkis_bands", bands); writeAuditEntry("mkis_bands","UPDATE","Grade bands / thresholds updated"); } }, [bands, dataReady]);
+  useEffect(() => { if (dataReady) { (async () => {
+    const merged = await updateShared("mkis_special_bands", specialBands);
+    if (JSON.stringify(merged) !== JSON.stringify(specialBands)) {
+      await writeAuditEntry("mkis_special_bands", "UPDATE", lastAuditDetail.current["mkis_special_bands"] || "Special grading scale updated");
+      lastAuditDetail.current["mkis_special_bands"] = "";
+    }
+    lastSeenRef.current.mkis_special_bands = JSON.stringify(merged);
+    if (JSON.stringify(merged) !== JSON.stringify(specialBands)) setSpecialBands(merged);
+  })(); } }, [specialBands, dataReady]);
   useEffect(() => { if (dataReady) { lastSeenRef.current.mkis_divisions = JSON.stringify(divisions); saveShared("mkis_divisions", divisions); writeAuditEntry("mkis_divisions","UPDATE","Division pass-mark thresholds updated"); } }, [divisions, dataReady]);
   useEffect(() => { if (dataReady) { lastSeenRef.current.mkis_school = JSON.stringify(school); saveShared("mkis_school", school); writeAuditEntry("mkis_school","UPDATE",`School settings updated — ${school.name||""}`); } }, [school, dataReady]);
   useEffect(() => { if (dataReady) { (async () => {
@@ -1663,6 +1688,7 @@ export default function App() {
     if (d.termMarks)    { forceWriteRef.current.add("mkis_termmarks"); setTermMarks(d.termMarks); }
     if (d.monthlyMarks) { forceWriteRef.current.add("mkis_monthlymarks"); setMonthlyMarks(d.monthlyMarks); }
     if (d.bands)         setBands(d.bands);
+    if (d.specialBands)  setSpecialBands(d.specialBands);
     if (d.divisions)     setDivisions(d.divisions);
     if (d.school)        setSchool(d.school);
     if (d.accounts) {    setAccounts(d.accounts); }
@@ -1731,7 +1757,7 @@ export default function App() {
       </div>
     );
   }
-  const props = { students, setStudents, termMarks, setTermMarks, monthlyMarks, setMonthlyMarks, bands, setBands, divisions, setDivisions, school, setSchool, accounts, setAccounts, initials, setInitials, updateTermMark, updateMonthlyMark, requestOrApplyTermMark, requestOrApplyMonthlyMark, addStudent, deleteStudent, forceRestoreData, promoteStudents, role, currentUser, changeRequests, submitChangeRequest, approveChangeRequest, rejectChangeRequest, lockedTerm, lockTermEntry, unlockTermEntry, lockedMonthly, lockMonthlyEntry, unlockMonthlyEntry, requestUnlockTerm, requestUnlockMonthly, markEditing, stampAudit };
+  const props = { students, setStudents, termMarks, setTermMarks, monthlyMarks, setMonthlyMarks, bands, setBands, specialBands, setSpecialBands, divisions, setDivisions, school, setSchool, accounts, setAccounts, initials, setInitials, updateTermMark, updateMonthlyMark, requestOrApplyTermMark, requestOrApplyMonthlyMark, addStudent, deleteStudent, forceRestoreData, promoteStudents, role, currentUser, changeRequests, submitChangeRequest, approveChangeRequest, rejectChangeRequest, lockedTerm, lockTermEntry, unlockTermEntry, lockedMonthly, lockMonthlyEntry, unlockMonthlyEntry, requestUnlockTerm, requestUnlockMonthly, markEditing, stampAudit };
   return (
     <div className="app-shell" style={{display:"flex",minHeight:"100vh",fontFamily:"'Segoe UI',system-ui,sans-serif",background:"#f1f5f9"}}>
       {/* SIDEBAR */}
@@ -2340,7 +2366,7 @@ function Students({ students, setStudents, addStudent, deleteStudent, promoteStu
   );
 }
 // ─── MARK ENTRY ──────────────────────────────────────────────────────────────
-function MarkEntry({ students, termMarks, setTermMarks, updateTermMark, requestOrApplyTermMark, role, bands, divisions, school, lockedTerm, lockTermEntry, unlockTermEntry, changeRequests, requestUnlockTerm }) {
+function MarkEntry({ students, termMarks, setTermMarks, updateTermMark, requestOrApplyTermMark, role, bands: defaultBands, specialBands, divisions, school, lockedTerm, lockTermEntry, unlockTermEntry, changeRequests, requestUnlockTerm }) {
   const [cls, setCls] = useState("P1");
   const [term, setTerm] = useState("Term I");
   const [year, setYear] = useState(school.year||String(new Date().getFullYear()));
@@ -2350,6 +2376,11 @@ function MarkEntry({ students, termMarks, setTermMarks, updateTermMark, requestO
   const [pendingToast, setPendingToast] = useState("");
   const [sortByPos, setSortByPos] = useState(false);
   const bulkMarkFileRef = useRef();
+  // Grading scale actually in effect for the selected class -- the Special
+  // Grading Scale override if one's been set up for it, otherwise the
+  // school's normal default bands. Named `bands` so nothing below needs to
+  // change to pick this up.
+  const bands = useMemo(() => bandsForClass(cls, defaultBands, specialBands), [cls, defaultBands, specialBands]);
   // Wraps requestOrApplyTermMark to surface a brief toast whenever an edit
   // was filed for admin approval rather than saved immediately, so teachers
   // aren't left wondering why a number they typed doesn't show up yet.
@@ -2706,7 +2737,7 @@ function MarkEntry({ students, termMarks, setTermMarks, updateTermMark, requestO
   );
 }
 // ─── MONTHLY EXAMS ───────────────────────────────────────────────────────────
-function MonthlyExams({ students, monthlyMarks, updateMonthlyMark, requestOrApplyMonthlyMark, role, bands, divisions, school, lockedMonthly, lockMonthlyEntry, unlockMonthlyEntry, changeRequests, requestUnlockMonthly }) {
+function MonthlyExams({ students, monthlyMarks, updateMonthlyMark, requestOrApplyMonthlyMark, role, bands: defaultBands, specialBands, divisions, school, lockedMonthly, lockMonthlyEntry, unlockMonthlyEntry, changeRequests, requestUnlockMonthly }) {
   const [cls, setCls] = useState("P4");
   const [term, setTerm] = useState("Term I");
   const [year, setYear] = useState(school.year||String(new Date().getFullYear()));
@@ -2717,6 +2748,8 @@ function MonthlyExams({ students, monthlyMarks, updateMonthlyMark, requestOrAppl
   const tk = `${term}__${year}`;
   const isLower = LOWER_CLASSES.includes(cls);
   const subjects = isLower ? LOWER_MONTHLY_SUBJECTS : MONTHLY_SUBJECTS;
+  // Special Grading Scale override for the selected class, if any.
+  const bands = useMemo(() => bandsForClass(cls, defaultBands, specialBands), [cls, defaultBands, specialBands]);
   // ── Bulk Mark Sheet import: accepts either an uploaded CSV file or a
   // marksheet pasted straight from Excel/Sheets (tab-separated) into a
   // textarea. Both paths flow through the same parser below. ──────────────
@@ -3135,13 +3168,15 @@ function MonthBlock({ month, cls, classStudents, monthlyMarks, updateMonthlyMark
   );
 }
 // ─── MONTHLY REPORT CARDS ────────────────────────────────────────────────────
-function MonthlyCards({ students, monthlyMarks, bands, divisions, school }) {
+function MonthlyCards({ students, monthlyMarks, bands: defaultBands, specialBands, divisions, school }) {
   const [cls, setCls] = useState("P4");
   const [term, setTerm] = useState("Term I");
   const [year, setYear] = useState(school.year||String(new Date().getFullYear()));
   const [search, setSearch] = useState("");
   const isLower = LOWER_CLASSES.includes(cls);
   const subjects = isLower ? LOWER_MONTHLY_SUBJECTS : MONTHLY_SUBJECTS;
+  // Special Grading Scale override for the selected class, if any.
+  const bands = useMemo(() => bandsForClass(cls, defaultBands, specialBands), [cls, defaultBands, specialBands]);
   const tk = `${term}__${year}`;
   const months = TERM_MONTHS[term] || [];
   const classStudents = useMemo(()=>
@@ -3310,7 +3345,7 @@ function TermlyMonthlyCard({ school, student, monthData, term, year, cls, isLowe
 // A pocket-sized version of the Monthly Card -- same school header, pupil
 // info, and full months/subjects table, just without the two comment lines,
 // printed at an exact 8cm x 6cm so many can be cut out per pupil per page.
-function MonthlySlips({ students, monthlyMarks, bands, divisions, school }) {
+function MonthlySlips({ students, monthlyMarks, bands: defaultBands, specialBands, divisions, school }) {
   const [cls, setCls] = useState("P4");
   const [term, setTerm] = useState("Term I");
   const [year, setYear] = useState(school.year||String(new Date().getFullYear()));
@@ -3319,6 +3354,8 @@ function MonthlySlips({ students, monthlyMarks, bands, divisions, school }) {
   const pagesWrapRef = useRef(null);
   const isLower = LOWER_CLASSES.includes(cls);
   const subjects = isLower ? LOWER_MONTHLY_SUBJECTS : MONTHLY_SUBJECTS;
+  // Special Grading Scale override for the selected class, if any.
+  const bands = useMemo(() => bandsForClass(cls, defaultBands, specialBands), [cls, defaultBands, specialBands]);
   const tk = `${term}__${year}`;
   const months = TERM_MONTHS[term] || [];
   const classStudents = useMemo(()=>
@@ -4244,7 +4281,7 @@ function PleInfo({ students, setStudents, school, markEditing }) {
     </div>
   );
 }
-function ResultSheets({ students, termMarks, bands, divisions, school }) {
+function ResultSheets({ students, termMarks, bands: defaultBands, specialBands, divisions, school }) {
   const [cls, setCls] = useState("P4");
   const [term, setTerm] = useState("Term I");
   const [year, setYear] = useState(school.year||String(new Date().getFullYear()));
@@ -4253,6 +4290,8 @@ function ResultSheets({ students, termMarks, bands, divisions, school }) {
   const analysisCardRef = useRef(null);
   const isLower = LOWER_CLASSES.includes(cls);
   const subjects = isLower ? LOWER_SUBJECTS : UPPER_SUBJECTS;
+  // Special Grading Scale override for the selected class, if any.
+  const bands = useMemo(() => bandsForClass(cls, defaultBands, specialBands), [cls, defaultBands, specialBands]);
   const tk = `${term}__${year}`;
   const classStudents = useMemo(()=>
     students.filter(s=>s.className===cls).sort((a,b)=>a.name.localeCompare(b.name)),
@@ -4437,7 +4476,7 @@ function ResultSheets({ students, termMarks, bands, divisions, school }) {
   );
 }
 // ─── REPORT CARDS ────────────────────────────────────────────────────────────
-function ReportCards({ students, termMarks, bands, divisions, school, initials }) {
+function ReportCards({ students, termMarks, bands: defaultBands, specialBands, divisions, school, initials }) {
   const [cls, setCls] = useState("P5");
   const [term, setTerm] = useState("Term I");
   const [year, setYear] = useState(school.year||String(new Date().getFullYear()));
@@ -4446,6 +4485,8 @@ function ReportCards({ students, termMarks, bands, divisions, school, initials }
   const cardListRef = useRef(null);
   const isLower = LOWER_CLASSES.includes(cls);
   const subjects = isLower ? LOWER_SUBJECTS : UPPER_SUBJECTS;
+  // Special Grading Scale override for the selected class, if any.
+  const bands = useMemo(() => bandsForClass(cls, defaultBands, specialBands), [cls, defaultBands, specialBands]);
   const tk = `${term}__${year}`;
   const classStudents = useMemo(()=>
     students.filter(s=>s.className===cls&&s.name.toLowerCase().includes(search.toLowerCase())).sort((a,b)=>a.name.localeCompare(b.name)),
@@ -4920,13 +4961,15 @@ function AccountManager({ accounts, setAccounts, currentUser }) {
   );
 }
 // ─── SETTINGS ────────────────────────────────────────────────────────────────
-function Settings({ school, setSchool, bands, setBands, divisions, setDivisions, accounts, setAccounts, role, currentUser, students, setStudents, setTermMarks, setMonthlyMarks, initials, setInitials, markEditing }) {
+function Settings({ school, setSchool, bands, setBands, specialBands, setSpecialBands, divisions, setDivisions, accounts, setAccounts, role, currentUser, students, setStudents, setTermMarks, setMonthlyMarks, initials, setInitials, markEditing }) {
   const [curPw, setCurPw] = useState("");
   const [newPw, setNewPw] = useState("");
   const [confirmPw, setConfirmPw] = useState("");
   const [pwMsg, setPwMsg] = useState("");
   const [dangerConfirm, setDangerConfirm] = useState(null); // null | 'students' | 'results' | 'everything'
   const [dangerInput, setDangerInput] = useState("");
+  const [specialCls, setSpecialCls] = useState(ALL_CLASSES[0]);
+  const specialScaleActive = Array.isArray(specialBands?.[specialCls]) && specialBands[specialCls].length > 0;
   const handlePwChange = () => {
     if (!curPw) { setPwMsg("Enter your current password."); return; }
     if (!newPw) { setPwMsg("Enter new password."); return; }
@@ -5048,6 +5091,42 @@ function Settings({ school, setSchool, bands, setBands, divisions, setDivisions,
       </div>
       <AccountManager accounts={accounts} setAccounts={setAccounts} currentUser={currentUser} />
       <div style={{background:"white",borderRadius:12,padding:20,border:"1px solid #e5e7eb"}}>
+        <h3 style={{margin:"0 0 6px",color:"#1e3a6e",fontSize:15,fontWeight:700}}>🌟 Special Grading Scale</h3>
+        <div style={{fontSize:12,color:"#6b7280",marginBottom:14}}>An optional alternate grading scale for a single class. Pick a class below — if it has a special scale enabled, it's used everywhere for that class (Mark Entry, Monthly Exams, Result Sheets, Report Cards, and their downloads) instead of the standard Grade Bands. Every other class keeps using the standard scale below untouched.</div>
+        <div style={{display:"flex",gap:10,alignItems:"flex-end",marginBottom:14,flexWrap:"wrap"}}>
+          <Sel label="Class" value={specialCls} onChange={setSpecialCls} opts={ALL_CLASSES}/>
+          {specialScaleActive
+            ? <button onClick={()=>{ markEditing(); setSpecialBands(prev=>({...prev,[specialCls]:undefined})); }} style={{...btnDanger,padding:"8px 14px",fontSize:12,alignSelf:"flex-end"}}>✕ Disable for {specialCls}</button>
+            : <button onClick={()=>{ markEditing(); setSpecialBands(prev=>({...prev,[specialCls]: bands.map(b=>({...b}))})); }} style={{...btnPrimary,padding:"8px 14px",fontSize:12,alignSelf:"flex-end"}}>+ Enable Special Grading Scale for {specialCls}</button>
+          }
+        </div>
+        {specialScaleActive ? (
+          <div style={{overflowX:"auto"}}>
+            <table style={{width:"100%",fontSize:13}}>
+              <thead><tr style={{background:"#fef3c7"}}>{["Min","Max","Grade","Label",""].map(h=><th key={h} style={{padding:"8px 10px",textAlign:"left",color:"#92400e",fontWeight:700}}>{h}</th>)}</tr></thead>
+              <tbody>
+                {specialBands[specialCls].map((b,i)=>(
+                  <tr key={i} style={{background:i%2===0?"white":"#fffbeb"}}>
+                    {["min","max","grade","label"].map(f=>(
+                      <td key={f} style={{padding:"4px 6px"}}>
+                        <input value={b[f]} onChange={e=>{
+                          const val = f==="min"||f==="max" ? Number(e.target.value) : e.target.value;
+                          setSpecialBands(prev=>({...prev,[specialCls]: prev[specialCls].map((x,j)=>j===i?{...x,[f]:val}:x)}));
+                        }} style={{...inp,width:f==="label"?120:70,padding:"4px 6px",fontSize:12}}/>
+                      </td>
+                    ))}
+                    <td style={{padding:"4px 6px"}}><button onClick={()=>setSpecialBands(prev=>({...prev,[specialCls]: prev[specialCls].filter((_,j)=>j!==i)}))} style={{...btnDanger,padding:"3px 8px",fontSize:11}}>✕</button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <button onClick={()=>setSpecialBands(prev=>({...prev,[specialCls]: [...prev[specialCls],{min:0,max:0,grade:"",label:""}]}))} style={{...btnGhost,marginTop:8,fontSize:12}}>+ Add Band</button>
+          </div>
+        ) : (
+          <div style={{fontSize:12,color:"#9ca3af",fontStyle:"italic",padding:"10px 12px",background:"#f9fafb",borderRadius:8}}>No special grading scale set for {specialCls}. It currently follows the standard Grade Bands below.</div>
+        )}
+      </div>
+      <div style={{background:"white",borderRadius:12,padding:20,border:"1px solid #e5e7eb"}}>
         <h3 style={{margin:"0 0 16px",color:"#1e3a6e",fontSize:15,fontWeight:700}}>🎯 Grade Bands</h3>
         <div style={{overflowX:"auto"}}>
           <table style={{width:"100%",fontSize:13}}>
@@ -5148,7 +5227,7 @@ function Settings({ school, setSchool, bands, setBands, divisions, setDivisions,
   );
 }
 // ─── DOWNLOAD CENTRE ─────────────────────────────────────────────────────────
-function DownloadCentre({ students, termMarks, monthlyMarks, bands, divisions, school, accounts, role, currentUser, forceRestoreData }) {
+function DownloadCentre({ students, termMarks, monthlyMarks, bands, specialBands, divisions, school, accounts, role, currentUser, forceRestoreData }) {
   const [importStatus, setImportStatus] = useState("");
   const [importError, setImportError] = useState("");
   const [restoreConfirm, setRestoreConfirm] = useState(false);
@@ -5170,7 +5249,7 @@ function DownloadCentre({ students, termMarks, monthlyMarks, bands, divisions, s
   const downloadFullBackup = () => {
     const data = {
       _meta: { version: 2, exportedAt: new Date().toISOString(), school: school.name },
-      school, bands, divisions, accounts,
+      school, bands, specialBands, divisions, accounts,
       students, termMarks, monthlyMarks,
     };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
@@ -5213,7 +5292,7 @@ function DownloadCentre({ students, termMarks, monthlyMarks, bands, divisions, s
   };
   // ── Settings JSON only ──
   const downloadSettingsJSON = () => {
-    const data = { _meta: { version: 2, exportedAt: new Date().toISOString() }, school, bands, divisions };
+    const data = { _meta: { version: 2, exportedAt: new Date().toISOString() }, school, bands, specialBands, divisions };
     triggerBlobDownload(new Blob([JSON.stringify(data, null, 2)], { type:"application/json" }), `settings_backup_${ts()}.json`);
   };
   // ── Download a complete, runnable Next.js project (.zip) ──
@@ -5634,7 +5713,7 @@ function AuditLog() {
   const fmt = (s) => { try { return new Date(s).toLocaleString(); } catch { return s; } };
   const keyLabel = (key) => ({
     mkis_students:"Students", mkis_termmarks:"Term Marks", mkis_monthlymarks:"Monthly Marks",
-    mkis_bands:"Grade Bands", mkis_divisions:"Divisions", mkis_school:"School Settings",
+    mkis_bands:"Grade Bands", mkis_special_bands:"Special Grading Scale", mkis_divisions:"Divisions", mkis_school:"School Settings",
     mkis_accounts:"Accounts", mkis_changerequests:"Change Requests", mkis_initials:"Initials",
     mkis_locked_term:"Term Lock", mkis_locked_monthly:"Monthly Lock",
   }[key] || key);
