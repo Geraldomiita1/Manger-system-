@@ -1304,17 +1304,81 @@ function Sel({ label, value, onChange, opts }) {
   );
 }
 // ── Fixed PositionBadge: suffix sits as a superscript to the RIGHT of the number ──
-function PositionBadge({ pos, color = "#dc2626", size = 15 }) {
-  if (pos === "-" || !pos) return <span style={{color, fontWeight:700, fontSize:size}}>-</span>;
-  const suffix = ordinalSuffix(pos);
-  // Use <sup> so the browser itself handles the vertical offset -- this works
-  // reliably at any font size, including the very small sizes used in slips,
-  // unlike a manual marginTop which can push the suffix onto the same baseline
-  // as the number when the container is too narrow to expand vertically.
+// ─── OCR (Optical Character Recognition) ────────────────────────────────────
+// Tesseract.js is loaded lazily from a CDN the first time OCR is actually
+// used, instead of being bundled -- most sessions never touch OCR, so this
+// avoids adding load time/weight for everyone else. Cached on window so a
+// second scan in the same session doesn't refetch the library or model.
+let _tesseractLoadPromise = null;
+function loadTesseract() {
+  if (window.Tesseract) return Promise.resolve(window.Tesseract);
+  if (_tesseractLoadPromise) return _tesseractLoadPromise;
+  _tesseractLoadPromise = new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
+    script.onload = () => resolve(window.Tesseract);
+    script.onerror = () => { _tesseractLoadPromise = null; reject(new Error("Could not load the OCR engine. Check your internet connection and try again.")); };
+    document.head.appendChild(script);
+  });
+  return _tesseractLoadPromise;
+}
+// Runs OCR on an image File and resolves to the recognized raw text.
+// onProgress receives a 0-100 number for a simple progress indicator.
+async function runOcr(file, onProgress) {
+  const Tesseract = await loadTesseract();
+  const { data } = await Tesseract.recognize(file, "eng", {
+    logger: (m) => { if (m.status === "recognizing text" && onProgress) onProgress(Math.round((m.progress||0) * 100)); },
+  });
+  return data.text || "";
+}
+// Reusable "scan a photo" button used by Mark Entry, Monthly Exams, Students
+// Upload, and PLE Info. Handles the whole OCR flow itself: pick/photograph an
+// image, run recognition with a progress bar, then show the recognized text
+// in an editable box (OCR always has some misreads, especially on handwriting
+// or phone-camera photos of a marksheet, so the person gets a chance to fix
+// mistakes before anything is applied) with Use / Cancel actions.
+function OcrScanButton({ label = "📷 Scan (OCR)", instructions, onUseText, accentColor = "#7c3aed" }) {
+  const fileRef = useRef();
+  const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [error, setError] = useState("");
+  const [recognized, setRecognized] = useState(null); // string | null
+  const handleFile = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setError(""); setBusy(true); setProgress(0); setRecognized(null);
+    try {
+      const text = await runOcr(file, setProgress);
+      if (!text.trim()) setError("No text could be recognized in that photo. Try a clearer, well-lit, straight-on shot.");
+      else setRecognized(text);
+    } catch (err) {
+      setError(err.message || "OCR failed. Please try again.");
+    } finally {
+      setBusy(false);
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  };
   return (
-    <span style={{color, fontWeight:700, fontSize:size, whiteSpace:"nowrap"}}>
-      {pos}<sup style={{fontSize:Math.max(6, Math.round(size * 0.5)), fontWeight:700, verticalAlign:"super"}}>{suffix}</sup>
-    </span>
+    <div style={{display:"inline-block"}}>
+      <input ref={fileRef} type="file" accept="image/*" capture="environment" style={{display:"none"}} onChange={handleFile}/>
+      <button type="button" disabled={busy} onClick={()=>fileRef.current?.click()}
+        style={{padding:"8px 16px",background:busy?"#c4b5fd":accentColor,color:"white",border:"none",borderRadius:8,fontWeight:700,fontSize:13,cursor:busy?"not-allowed":"pointer"}}>
+        {busy ? `⏳ Reading photo... ${progress}%` : label}
+      </button>
+      {error && <div style={{marginTop:8,fontSize:12,color:"#dc2626",maxWidth:420}}>⚠️ {error}</div>}
+      {recognized !== null && (
+        <div style={{marginTop:10,padding:14,background:"#faf5ff",border:`1.5px solid ${accentColor}`,borderRadius:10,maxWidth:520}}>
+          {instructions && <div style={{fontSize:12,color:"#6b21a8",marginBottom:8}}>{instructions}</div>}
+          <div style={{fontSize:11,color:"#7c3aed",fontWeight:700,marginBottom:4,textTransform:"uppercase",letterSpacing:0.5}}>Recognized text — check &amp; fix before using</div>
+          <textarea value={recognized} onChange={e=>setRecognized(e.target.value)}
+            style={{width:"100%",minHeight:130,padding:"8px 10px",border:"1.5px solid #d1d5db",borderRadius:7,fontSize:12,fontFamily:"monospace",resize:"vertical",boxSizing:"border-box"}}/>
+          <div style={{display:"flex",gap:8,marginTop:8}}>
+            <button onClick={()=>{ onUseText(recognized); setRecognized(null); }} style={{...btnPrimary,background:`linear-gradient(135deg,${accentColor},${accentColor})`}}>✓ Use This Text</button>
+            <button onClick={()=>setRecognized(null)} style={btnGhost}>Cancel</button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 // ── School crest: St. Kizito's P.S Tororo badge, reproduced as inline SVG ──
@@ -2341,6 +2405,11 @@ function Students({ students, setStudents, addStudent, deleteStudent, promoteStu
             />
             <div style={{fontSize:11,color:"#6b7280",marginTop:3}}>Type or paste pupil names - one per line. You can adjust gender and class individually in the preview.</div>
           </div>
+          <div style={{marginBottom:10}}>
+            <OcrScanButton label="📷 Scan Class Register (OCR)"
+              instructions="Photograph a class list/register. Each recognized line will be treated as one pupil's name — delete any stray lines (headers, page numbers) before using."
+              onUseText={(text)=>setBulkText(prev => (prev.trim() ? prev + "\n" : "") + text.split(/\r?\n/).map(l=>l.trim()).filter(Boolean).join("\n"))}/>
+          </div>
           <button onClick={handleBulkTextPreview} disabled={!bulkText.trim()} style={{...btnPrimary,opacity:bulkText.trim()?1:0.5}}>🔍 Preview ({bulkText.split(/\r?\n/).filter(l=>l.trim()).length} names)</button>
           {bulkPreview && (
             <>
@@ -2530,61 +2599,77 @@ function MarkEntry({ students, termMarks, setTermMarks, updateTermMark, requestO
   const sortedRows = useMemo(()=>{
     return [...indexedRows].sort((a,b)=>{ if(a.pos==="-") return 1; if(b.pos==="-") return -1; return a.pos - b.pos; });
   }, [indexedRows]);
+  const parseTermMarksheetText = useCallback((text) => {
+    const lines = text.split(/\r?\n/).filter(l=>l.trim());
+    if (lines.length < 2) throw new Error("Data must have a header row and at least one data row.");
+    // Accept either comma-delimited (CSV) or tab-delimited (pasted from
+    // Excel/Sheets, or OCR output that happened to preserve column spacing
+    // as tabs) -- whichever the header row actually uses.
+    const delim = lines[0].includes("\t") ? "\t" : ",";
+    const headers = lines[0].split(delim).map(h=>h.trim().toUpperCase());
+    const nameIdx = headers.findIndex(h=>h==="NAME"||h==="PUPIL"||h==="STUDENT");
+    if (nameIdx === -1) throw new Error("The header row must include a column named NAME, PUPIL, or STUDENT.");
+    const curSubjects = isLower ? LOWER_SUBJECTS : UPPER_SUBJECTS;
+    // Build column map: subject -> { caIdx, examIdx } or { markIdx }
+    const subjectCols = {};
+    curSubjects.forEach(sub => {
+      if (isLower) {
+        const idx = headers.findIndex(h=>h===sub||h===sub.replace(" ","_"));
+        if (idx !== -1) subjectCols[sub] = { markIdx: idx };
+      } else {
+        const caIdx = headers.findIndex(h=>h===`${sub}_CA`||h===`${sub} CA`||h===`${sub}CA`);
+        const exIdx = headers.findIndex(h=>h===`${sub}_EXAM`||h===`${sub} EXAM`||h===`${sub}EXAM`||h===`${sub}_EX`||h===`${sub} EX`);
+        if (caIdx !== -1 || exIdx !== -1) subjectCols[sub] = { caIdx, examIdx: exIdx };
+      }
+    });
+    const rows = lines.slice(1).map((line, i) => {
+      const cells = line.split(delim).map(c=>c.trim());
+      const rawName = toUpper(cells[nameIdx] || "");
+      const matched = students.find(s =>
+        s.className === cls && (
+          s.name === rawName ||
+          s.name.toLowerCase().includes(rawName.toLowerCase().split(" ")[0]) ||
+          rawName.toLowerCase().includes(s.name.toLowerCase().split(" ")[0])
+        )
+      );
+      const marks = {};
+      curSubjects.forEach(sub => {
+        const col = subjectCols[sub];
+        if (!col) return;
+        if (isLower) {
+          const v = cells[col.markIdx];
+          marks[sub] = { mk: v !== undefined && v !== "" && !isNaN(Number(v)) ? Number(v) : null };
+        } else {
+          const ca = col.caIdx !== undefined && col.caIdx !== -1 && cells[col.caIdx] !== "" && !isNaN(Number(cells[col.caIdx])) ? Number(cells[col.caIdx]) : null;
+          const exam = col.examIdx !== undefined && col.examIdx !== -1 && cells[col.examIdx] !== "" && !isNaN(Number(cells[col.examIdx])) ? Number(cells[col.examIdx]) : null;
+          marks[sub] = { ca, exam };
+        }
+      });
+      return { id:`bmr_${i}`, rawName, studentId: matched?.id || null, include: true, marks };
+    }).filter(r => r.rawName);
+    if (rows.length === 0) throw new Error("No data rows found.");
+    return { rows, subjectCols, headers };
+  }, [isLower, students, cls]);
   const handleBulkMarkFile = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
     setBulkMarkError("");
     try {
       const text = await file.text();
-      const lines = text.split(/\r?\n/).filter(l=>l.trim());
-      if (lines.length < 2) { setBulkMarkError("File must have a header row and at least one data row."); return; }
-      const headers = lines[0].split(",").map(h=>h.trim().toUpperCase());
-      const nameIdx = headers.findIndex(h=>h==="NAME"||h==="PUPIL"||h==="STUDENT");
-      if (nameIdx === -1) { setBulkMarkError("CSV must have a column named NAME, PUPIL, or STUDENT."); return; }
-      const curSubjects = isLower ? LOWER_SUBJECTS : UPPER_SUBJECTS;
-      // Build column map: subject -> { caIdx, examIdx } or { markIdx }
-      const subjectCols = {};
-      curSubjects.forEach(sub => {
-        if (isLower) {
-          const idx = headers.findIndex(h=>h===sub||h===sub.replace(" ","_"));
-          if (idx !== -1) subjectCols[sub] = { markIdx: idx };
-        } else {
-          const caIdx = headers.findIndex(h=>h===`${sub}_CA`||h===`${sub} CA`||h===`${sub}CA`);
-          const exIdx = headers.findIndex(h=>h===`${sub}_EXAM`||h===`${sub} EXAM`||h===`${sub}EXAM`||h===`${sub}_EX`||h===`${sub} EX`);
-          if (caIdx !== -1 || exIdx !== -1) subjectCols[sub] = { caIdx, examIdx: exIdx };
-        }
-      });
-      const rows = lines.slice(1).map((line, i) => {
-        const cells = line.split(",").map(c=>c.trim());
-        const rawName = toUpper(cells[nameIdx] || "");
-        const matched = students.find(s =>
-          s.className === cls && (
-            s.name === rawName ||
-            s.name.toLowerCase().includes(rawName.toLowerCase().split(" ")[0]) ||
-            rawName.toLowerCase().includes(s.name.toLowerCase().split(" ")[0])
-          )
-        );
-        const marks = {};
-        curSubjects.forEach(sub => {
-          const col = subjectCols[sub];
-          if (!col) return;
-          if (isLower) {
-            const v = cells[col.markIdx];
-            marks[sub] = { mk: v !== undefined && v !== "" ? Number(v) : null };
-          } else {
-            const ca = col.caIdx !== undefined && col.caIdx !== -1 && cells[col.caIdx] !== "" ? Number(cells[col.caIdx]) : null;
-            const exam = col.examIdx !== undefined && col.examIdx !== -1 && cells[col.examIdx] !== "" ? Number(cells[col.examIdx]) : null;
-            marks[sub] = { ca, exam };
-          }
-        });
-        return { id:`bmr_${i}`, rawName, studentId: matched?.id || null, include: true, marks };
-      }).filter(r => r.rawName);
-      if (rows.length === 0) { setBulkMarkError("No data rows found in the file."); return; }
-      setBulkMarkPreview({ rows, subjectCols, headers });
+      setBulkMarkPreview(parseTermMarksheetText(text));
     } catch(err) {
-      setBulkMarkError("Could not read file: " + err.message);
+      setBulkMarkError(err.message || "Could not read file.");
     }
     if (bulkMarkFileRef.current) bulkMarkFileRef.current.value = "";
+  };
+  const [bulkMarkPastedText, setBulkMarkPastedText] = useState("");
+  const handleLoadPastedMarks = () => {
+    setBulkMarkError("");
+    try {
+      setBulkMarkPreview(parseTermMarksheetText(bulkMarkPastedText));
+    } catch(err) {
+      setBulkMarkError(err.message || "Could not read the pasted/scanned text.");
+    }
   };
   const confirmBulkMarks = () => {
     if (!bulkMarkPreview) return;
@@ -2681,6 +2766,18 @@ function MarkEntry({ students, termMarks, setTermMarks, updateTermMark, requestO
               <label style={{...lbl,margin:0}}>Upload CSV:</label>
               <input ref={bulkMarkFileRef} type="file" accept=".csv,.txt" onChange={handleBulkMarkFile}
                 style={{padding:"6px",border:"1.5px solid #d1d5db",borderRadius:7,fontSize:13,background:"white"}}/>
+            </div>
+          </div>
+          <div style={{background:"white",border:"1px solid #fde68a",borderRadius:8,padding:14,marginBottom:12}}>
+            <div style={{fontWeight:700,fontSize:12,color:"#92400e",marginBottom:8}}>OR paste the marksheet / scan a photo (OCR)</div>
+            <textarea value={bulkMarkPastedText} onChange={e=>setBulkMarkPastedText(e.target.value)}
+              placeholder={isLower ? `NAME\t${LOWER_SUBJECTS.join("\t")}\nJOHN OKELLO\t78\t65\t70\t82\t90\t88\t91` : `NAME\tENG_CA\tENG_EXAM\t...\nJOHN OKELLO\t28\t50`}
+              rows={3} style={{width:"100%",padding:8,border:"1.5px solid #d1d5db",borderRadius:7,fontSize:12,fontFamily:"monospace",resize:"vertical",marginBottom:8,boxSizing:"border-box"}}/>
+            <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"flex-start"}}>
+              <button onClick={handleLoadPastedMarks} disabled={!bulkMarkPastedText.trim()} style={{...btnWarning,fontSize:12,padding:"6px 12px",opacity:bulkMarkPastedText.trim()?1:0.5}}>📥 Load Pasted Data</button>
+              <OcrScanButton label="📷 Scan Marksheet Photo"
+                instructions="After scanning, check every name and mark below — camera photos of marksheets are the hardest case for OCR. Once it looks right, it drops into the paste box above so you can hit Load Pasted Data."
+                onUseText={(text)=>setBulkMarkPastedText(text)}/>
             </div>
           </div>
           {bulkMarkError && <div style={{background:"#fef2f2",border:"1px solid #fca5a5",borderRadius:8,padding:10,marginBottom:12,color:"#dc2626",fontSize:13}}>{bulkMarkError}</div>}
@@ -3024,6 +3121,12 @@ function MonthlyExams({ students, monthlyMarks, updateMonthlyMark, requestOrAppl
                 placeholder={`NAME\t${subjects.join("\t")}\nJOHN OKELLO\t78\t65\t70\t82`}
                 rows={3} style={{width:"100%",padding:8,border:"1.5px solid #d1d5db",borderRadius:7,fontSize:12,fontFamily:"monospace",resize:"vertical",marginBottom:8}}/>
               <button onClick={handleLoadPastedMonthly} disabled={!bulkMonthlyText.trim()} style={{...btnWarning,fontSize:12,padding:"6px 12px",opacity:bulkMonthlyText.trim()?1:0.5}}>📥 Load Pasted Data</button>
+            </div>
+            <div style={{background:"white",border:"1px solid #fde68a",borderRadius:8,padding:14}}>
+              <div style={{fontWeight:700,fontSize:12,color:"#92400e",marginBottom:8}}>OPTION 3 - Scan a photo of the marksheet (OCR)</div>
+              <OcrScanButton label="📷 Scan Marksheet Photo"
+                instructions="After scanning, check every name and mark below — camera photos of marksheets are the hardest case for OCR. Once it looks right, it drops straight into the paste box above (Option 2) so you can hit Load Pasted Data."
+                onUseText={(text)=>setBulkMonthlyText(text)}/>
             </div>
           </div>
           {bulkMonthlyError && <div style={{background:"#fef2f2",border:"1px solid #fca5a5",borderRadius:8,padding:10,marginBottom:12,color:"#dc2626",fontSize:13}}>{bulkMonthlyError}</div>}
@@ -3850,6 +3953,40 @@ function MonthlySlip({ school, student, monthData, term, year, cls, isLower, sub
 }
 // ─── PLE INFO ────────────────────────────────────────────────────────────────
 const PLE_SUBJECTS = ["ENG","SCI","SST","MTC"]; // UNEB column order
+// Best-effort extraction of PLE fields from OCR'd/pasted text of a result
+// slip (e.g. a printed PLE Recommendation certificate or a UNEB results
+// notice). This is intentionally forgiving about layout since OCR text
+// rarely lines up into neat columns -- it just looks for recognizable
+// labels anywhere in the text. The caller always shows the result back to
+// the person to check/edit before it's applied to a pupil's record.
+function parsePleSlipText(text) {
+  const norm = text.replace(/\r/g, "");
+  const out = { indexNo:"", results:{}, lin:"", cocurricular:"", leadership:"", conduct:"" };
+  const grab = (re) => { const m = norm.match(re); return m ? m[1].trim() : ""; };
+  out.indexNo = grab(/index\s*no\.?\s*[:.\-]?\s*([0-9]{3,6}\s*\/\s*[0-9]{2,4})/i).replace(/\s+/g,"");
+  out.results.ENG = grab(/english[:\s]+([1-9])\b/i);
+  out.results.SCI = grab(/science[:\s]+([1-9])\b/i);
+  out.results.SST = grab(/social\s*studies[:\s]+([1-9])\b/i);
+  out.results.MTC = grab(/math(?:ematics)?[:\s]+([1-9])\b/i);
+  out.lin = grab(/\bLIN\s*[:.\-]?\s*([A-Z0-9]{6,})/i).toUpperCase();
+  out.conduct = grab(/conduct\s*[:.\-]?\s*([A-Za-z]+)/i);
+  // "Co-curricular activities" / "Leadership position" are usually printed as
+  // a label line followed by the actual value on the next non-empty line.
+  const lines = norm.split(/\n/).map(l=>l.trim());
+  for (let i=0;i<lines.length;i++) {
+    if (/co-?curricular/i.test(lines[i]) && !out.cocurricular) {
+      const next = lines.slice(i+1).find(l=>l && !/^leadership/i.test(l));
+      if (next) out.cocurricular = next.replace(/^[_\-\s]+|[_\-\s]+$/g,"");
+    }
+    if (/leadership/i.test(lines[i]) && !out.leadership) {
+      const next = lines.slice(i+1).find(l=>l);
+      if (next) out.leadership = next.replace(/^[_\-\s]+|[_\-\s]+$/g,"");
+    }
+  }
+  const vals = PLE_SUBJECTS.map(s=>parseInt(out.results[s]||0,10));
+  if (vals.every(v=>!isNaN(v)&&v>0)) out.totalAgg = String(vals.reduce((a,b)=>a+b,0));
+  return out;
+}
 const PLE_SUBJECT_LABELS = { ENG:"English", SCI:"Science", SST:"Social Studies", MTC:"Mathematics" };
 const pleSubLabel = (code) => PLE_SUBJECT_LABELS[code] || code;
 // Auto-generate a recommendation sentence based on total aggregate
@@ -4207,6 +4344,8 @@ function PleInfo({ students, setStudents, school, markEditing }) {
   const [allPdfBusy, setAllPdfBusy] = useState(false);
   const [csvMsg, setCsvMsg] = useState("");
   const [toDelete, setToDelete] = useState([]); // ids to delete from unmatched after confirm
+  const [ocrStudentId, setOcrStudentId] = useState("");
+  const [ocrParsed, setOcrParsed] = useState(null); // {indexNo, results, lin, cocurricular, leadership, conduct, totalAgg}
   const certRef = useRef(null);
   const allCertsRef = useRef(null);
   const p7Students = students.filter(s=>s.className==="P7"||s.className==="Completed");
@@ -4221,6 +4360,32 @@ function PleInfo({ students, setStudents, school, markEditing }) {
       const totalAgg = allEntered ? vals.reduce((a,b)=>a+b,0).toString() : rec.totalAgg||"";
       const division = totalAgg ? (Number(totalAgg)<=12?"1":Number(totalAgg)<=24?"2":Number(totalAgg)<=36?"3":Number(totalAgg)<=48?"4":"U") : rec.division||"";
       return {...prev,[sid]:{...rec,totalAgg,division}};
+    });
+  };
+  // Applies the reviewed/edited OCR-parsed fields onto the chosen pupil's
+  // PLE record in one go (recomputing totalAgg/division the same way
+  // updateResult does, rather than duplicating that logic per field).
+  const applyOcrToStudent = (sid, parsed) => {
+    markEditing();
+    setPleData(prev=>{
+      const existing = prev[sid] || {};
+      const results = { ...(existing.results||{}) };
+      PLE_SUBJECTS.forEach(sub => { if (parsed.results?.[sub]) results[sub] = parsed.results[sub]; });
+      const vals = PLE_SUBJECTS.map(s=>parseInt(results[s]||0,10));
+      const allEntered = vals.every(v=>!isNaN(v)&&v>0);
+      const totalAgg = allEntered ? String(vals.reduce((a,b)=>a+b,0)) : existing.totalAgg||"";
+      const division = totalAgg ? (Number(totalAgg)<=12?"1":Number(totalAgg)<=24?"2":Number(totalAgg)<=36?"3":Number(totalAgg)<=48?"4":"U") : existing.division||"";
+      return {
+        ...prev,
+        [sid]: {
+          ...existing, results, totalAgg, division,
+          indexNo: parsed.indexNo || existing.indexNo || "",
+          lin: parsed.lin || existing.lin || "",
+          cocurricular: parsed.cocurricular || existing.cocurricular || "",
+          leadership: parsed.leadership || existing.leadership || "",
+          conduct: parsed.conduct || existing.conduct || "",
+        },
+      };
     });
   };
 
@@ -4340,6 +4505,46 @@ function PleInfo({ students, setStudents, school, markEditing }) {
                 </div>
               </div>
               {csvMsg && <div style={{marginTop:10,fontSize:13,fontWeight:600,color:csvMsg.startsWith("✅")?"#15803d":"#92400e",padding:"8px 12px",background:csvMsg.startsWith("✅")?"#f0fdf4":"#fef9c3",borderRadius:8}}>{csvMsg}</div>}
+            </div>
+
+            {/* Scan an individual PLE result slip (OCR) */}
+            <div style={{background:"#faf5ff",border:"1px solid #e9d5ff",borderRadius:10,padding:16,marginBottom:16}}>
+              <div style={{fontWeight:700,color:"#6b21a8",fontSize:14,marginBottom:8}}>📷 Scan a Result Slip (OCR)</div>
+              <div style={{fontSize:12,color:"#374151",marginBottom:10}}>
+                Photograph one pupil's printed result slip/PLE recommendation and the system will try to pull out the Index No., subject scores, LIN, Co-curricular activities, Leadership position, and Conduct. Always double-check the fields below before applying — OCR can misread numbers.
+              </div>
+              <div style={{display:"flex",gap:12,alignItems:"flex-end",flexWrap:"wrap",marginBottom:12}}>
+                <div>
+                  <label style={lbl}>Pupil</label>
+                  <select value={ocrStudentId} onChange={e=>{setOcrStudentId(e.target.value); setOcrParsed(null);}} style={{...inp,minWidth:220}}>
+                    <option value="">Select a P7 pupil...</option>
+                    {p7Students.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}
+                  </select>
+                </div>
+                <OcrScanButton label="📷 Scan Result Slip"
+                  instructions="Recognized text below — this is just the raw OCR output, the parsed fields will appear underneath once you click Use This Text."
+                  onUseText={(text)=>setOcrParsed(parsePleSlipText(text))}/>
+              </div>
+              {ocrParsed && (
+                <div style={{background:"white",border:"1.5px solid #d8b4fe",borderRadius:8,padding:14}}>
+                  <div style={{fontSize:11,fontWeight:700,color:"#6b21a8",marginBottom:8,textTransform:"uppercase",letterSpacing:0.5}}>Review before applying{ocrStudentId?` — ${p7Students.find(s=>s.id===ocrStudentId)?.name}`:""}</div>
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))",gap:10,marginBottom:10}}>
+                    <div><label style={lbl}>Index No.</label><input value={ocrParsed.indexNo} onChange={e=>setOcrParsed(p=>({...p,indexNo:e.target.value}))} style={inp}/></div>
+                    {PLE_SUBJECTS.map(sub=>(
+                      <div key={sub}><label style={lbl}>{sub}</label><input type="number" min={1} max={9} value={ocrParsed.results?.[sub]||""} onChange={e=>setOcrParsed(p=>({...p,results:{...p.results,[sub]:e.target.value}}))} style={inp}/></div>
+                    ))}
+                    <div><label style={lbl}>LIN</label><input value={ocrParsed.lin} onChange={e=>setOcrParsed(p=>({...p,lin:e.target.value}))} style={inp}/></div>
+                    <div><label style={lbl}>Conduct</label><input value={ocrParsed.conduct} onChange={e=>setOcrParsed(p=>({...p,conduct:e.target.value}))} style={inp}/></div>
+                    <div><label style={lbl}>Co-curricular</label><input value={ocrParsed.cocurricular} onChange={e=>setOcrParsed(p=>({...p,cocurricular:e.target.value}))} style={inp}/></div>
+                    <div><label style={lbl}>Leadership</label><input value={ocrParsed.leadership} onChange={e=>setOcrParsed(p=>({...p,leadership:e.target.value}))} style={inp}/></div>
+                  </div>
+                  <div style={{display:"flex",gap:8}}>
+                    <button disabled={!ocrStudentId} onClick={()=>{ applyOcrToStudent(ocrStudentId, ocrParsed); setOcrParsed(null); }}
+                      style={{...btnPrimary,opacity:ocrStudentId?1:0.5}}>{ocrStudentId?`✓ Apply to ${p7Students.find(s=>s.id===ocrStudentId)?.name}`:"Select a pupil above first"}</button>
+                    <button onClick={()=>setOcrParsed(null)} style={btnGhost}>Discard</button>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Unmatched names (red flagged) */}
