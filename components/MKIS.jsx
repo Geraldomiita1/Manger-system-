@@ -1304,6 +1304,19 @@ function Sel({ label, value, onChange, opts }) {
   );
 }
 // ── Fixed PositionBadge: suffix sits as a superscript to the RIGHT of the number ──
+function PositionBadge({ pos, color = "#dc2626", size = 15 }) {
+  if (pos === "-" || !pos) return <span style={{color, fontWeight:700, fontSize:size}}>-</span>;
+  const suffix = ordinalSuffix(pos);
+  // Use <sup> so the browser itself handles the vertical offset -- this works
+  // reliably at any font size, including the very small sizes used in slips,
+  // unlike a manual marginTop which can push the suffix onto the same baseline
+  // as the number when the container is too narrow to expand vertically.
+  return (
+    <span style={{color, fontWeight:700, fontSize:size, whiteSpace:"nowrap"}}>
+      {pos}<sup style={{fontSize:Math.max(6, Math.round(size * 0.5)), fontWeight:700, verticalAlign:"super"}}>{suffix}</sup>
+    </span>
+  );
+}
 // ─── OCR (Optical Character Recognition) ────────────────────────────────────
 // Tesseract.js is loaded lazily from a CDN the first time OCR is actually
 // used, instead of being bundled -- most sessions never touch OCR, so this
@@ -4122,7 +4135,7 @@ function PleCertificateDesign2({ rec, school, year, pdfRef }) {
                 <span style={{fontWeight:900,fontSize:18,color:"#1e40af"}}>{s.results?.[sub]||"—"}</span>
               </div>
             ))}
-            <div style={{marginTop:12,display:"flex",justifyContent:"space-between",fontWeight:900,fontSize:20,color:"#1e3a6e",borderTop:"2px solid #1e40af",paddingTop:10,marginTop:"auto"}}>
+            <div style={{marginTop:"auto",display:"flex",justifyContent:"space-between",fontWeight:900,fontSize:20,color:"#1e3a6e",borderTop:"2px solid #1e40af",paddingTop:10}}>
               <span>Total Agg</span><span>{s.totalAgg||"—"}</span>
             </div>
             <div style={{display:"flex",justifyContent:"space-between",fontWeight:900,fontSize:20,color:"#dc2626",marginTop:4}}>
