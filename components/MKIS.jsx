@@ -830,11 +830,14 @@ function exportGroupWorkWord({ school, cls, term, year, testNo, isLower, subject
   downloadWordHtml(`${cls} ${term} ${year} ${testNo}`, body, `${safeFileName(cls)}_${safeFileName(term)}_${year}_${safeFileName(testNo)}.doc`);
 }
 function titleBlockHtml(school, subtitle) {
-  let html = `<div class="title">${escapeHtml(school.name || "")}</div>`;
+  let html = `<div style="text-align:center;">`;
+  if (school.logo) html += `<img src="${school.logo}" alt="logo" style="width:60px;height:60px;object-fit:contain;display:block;margin:0 auto 6px;"/>`;
+  html += `<div class="title">${escapeHtml(school.name || "")}</div>`;
   if (school.motto) html += `<div class="motto">"${escapeHtml(school.motto)}"</div>`;
   const addr = [school.poBox, school.email].filter(Boolean).map(escapeHtml).join(" &bull; ");
   if (addr) html += `<div class="addr">${addr}</div>`;
   html += `<div class="subtitle">${escapeHtml(subtitle)}</div>`;
+  html += `</div>`;
   return html;
 }
 // ── End-of-term Result Sheet: row builders shared by Excel + Word ──
@@ -3084,7 +3087,7 @@ function MonthlyExams({ students, monthlyMarks, updateMonthlyMark, requestOrAppl
       )}
       <div ref={monthBlocksRef}>
         {months.map(month=>(
-          <MonthBlock key={month} month={month} term={term} year={year} cls={cls}
+          <MonthBlock key={month} month={month} term={term} year={year} cls={cls} school={school}
             classStudents={classStudents} monthlyMarks={monthlyMarks} role={role}
             updateMonthlyMark={updateMonthlyMark} requestOrApplyMonthlyMark={handleMarkChange} bands={bands} divisions={divisions} tk={tk}
             lockedMonthly={lockedMonthly} lockMonthlyEntry={lockMonthlyEntry} unlockMonthlyEntry={unlockMonthlyEntry}
@@ -3094,7 +3097,7 @@ function MonthlyExams({ students, monthlyMarks, updateMonthlyMark, requestOrAppl
     </div>
   );
 }
-function MonthBlock({ month, cls, classStudents, monthlyMarks, updateMonthlyMark, requestOrApplyMonthlyMark, bands, divisions, tk, year, term, role, lockedMonthly, lockMonthlyEntry, unlockMonthlyEntry, changeRequests, requestUnlockMonthly }) {
+function MonthBlock({ month, cls, classStudents, monthlyMarks, updateMonthlyMark, requestOrApplyMonthlyMark, bands, divisions, tk, year, term, role, lockedMonthly, lockMonthlyEntry, unlockMonthlyEntry, changeRequests, requestUnlockMonthly, school }) {
   const isLower = LOWER_CLASSES.includes(cls);
   const subjects = isLower ? LOWER_MONTHLY_SUBJECTS : MONTHLY_SUBJECTS;
   const rows = useMemo(()=> classStudents.map(s=>{
@@ -3138,7 +3141,10 @@ function MonthBlock({ month, cls, classStudents, monthlyMarks, updateMonthlyMark
   return (
     <div className="month-block-sheet" style={{marginBottom:24}}>
       <div style={{background:"#1e3a6e",color:"white",padding:"10px 16px",borderRadius:"8px 8px 0 0",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
-        <span style={{fontWeight:700,fontSize:14}}>{month} - {term} {year}</span>
+        <div style={{display:"flex",alignItems:"center",gap:8}}>
+          {school?.logo && <img src={school.logo} alt="logo" style={{width:26,height:26,objectFit:"contain",flexShrink:0}}/>}
+          <span style={{fontWeight:700,fontSize:14}}>{school?.name ? `${school.name} — ` : ""}{month} - {term} {year}</span>
+        </div>
         <div className="no-print" style={{display:"flex",alignItems:"center",gap:8}}>
           {isLocked && (
             <span style={{background:"#fee2e2",color:"#991b1b",borderRadius:20,padding:"3px 10px",fontSize:11,fontWeight:700}}>
@@ -3866,6 +3872,7 @@ function PleCertificateDesign1({ rec, school, year, pdfRef }) {
       <div style={{position:"relative",zIndex:1,padding:"28px 40px 24px",display:"flex",flexDirection:"column",height:"100%",boxSizing:"border-box"}}>
         {/* School header */}
         <div style={{textAlign:"center",marginBottom:18}}>
+          {school.logo && <img src={school.logo} alt="logo" style={{width:56,height:56,objectFit:"contain",display:"block",margin:"0 auto 8px"}}/>}
           <div style={{fontWeight:900,fontSize:28,color:"#1e3a6e",letterSpacing:1.5,textTransform:"uppercase",lineHeight:1.2}}>{school.name}</div>
           <div style={{fontSize:14,color:"#374151",marginTop:6,lineHeight:1.6}}>{school.poBox} &nbsp;|&nbsp; Tel: {school.tel||"N/A"} &nbsp;|&nbsp; <span style={{color:"#1d4ed8",fontStyle:"italic"}}>{school.email||""}</span></div>
           <div style={{display:"flex",justifyContent:"center",gap:12,marginTop:10,fontSize:25,color:"#b8860b"}}>★ ★ ★</div>
@@ -3950,6 +3957,7 @@ function PleCertificateDesign2({ rec, school, year, pdfRef }) {
     <div ref={pdfRef} className="ple-cert" style={{width:"210mm",height:"297mm",boxSizing:"border-box",background:"white",fontFamily:"'Segoe UI',system-ui,sans-serif",overflow:"hidden",display:"flex",flexDirection:"column"}}>
       {/* Top gradient banner */}
       <div style={{background:"linear-gradient(135deg,#1e3a6e 0%,#1e40af 55%,#0ea5e9 100%)",color:"white",padding:"30px 36px",textAlign:"center",flexShrink:0}}>
+        {school.logo && <img src={school.logo} alt="logo" style={{width:52,height:52,objectFit:"contain",display:"block",margin:"0 auto 8px"}}/>}
         <div style={{fontWeight:900,fontSize:26,letterSpacing:1.5,marginBottom:6}}>{school.name}</div>
         <div style={{fontSize:14,opacity:0.88,marginBottom:12}}>{school.poBox} &nbsp;|&nbsp; Tel: {school.tel||""} &nbsp;|&nbsp; {school.email||""}</div>
         <div style={{display:"inline-block",background:"rgba(255,255,255,0.18)",borderRadius:24,padding:"7px 28px",fontSize:15,fontWeight:800,letterSpacing:2,textTransform:"uppercase",border:"1.5px solid rgba(255,255,255,0.4)"}}>
@@ -4026,6 +4034,7 @@ function PleCertificateDesign3({ rec, school, year, pdfRef }) {
       <div style={{position:"relative",zIndex:1,padding:"32px 44px 28px",display:"flex",flexDirection:"column",height:"100%",boxSizing:"border-box"}}>
         {/* Header */}
         <div style={{textAlign:"center",borderBottom:"2.5px solid #d4af37",paddingBottom:14,marginBottom:18}}>
+          {school.logo && <img src={school.logo} alt="logo" style={{width:52,height:52,objectFit:"contain",display:"block",margin:"0 auto 8px"}}/>}
           <div style={{fontWeight:900,fontSize:26,color:"#7b1c1c",textTransform:"uppercase",letterSpacing:2,lineHeight:1.3}}>{school.name}</div>
           <div style={{fontSize:14,color:"#374151",marginTop:6}}>{school.poBox} &nbsp;·&nbsp; Tel: {school.tel||""} &nbsp;·&nbsp; {school.email||""}</div>
         </div>
@@ -4641,9 +4650,12 @@ function ResultSheets({ students, termMarks, bands: defaultBands, specialBands, 
         </div>
       </div>
       <div ref={sheetCardRef} style={{background:"white",borderRadius:12,border:"1px solid #e5e7eb",overflow:"hidden",marginBottom:24}}>
-        <div style={{background:"#1e3a6e",color:"white",padding:"12px 16px",textAlign:"center"}}>
-          <div style={{fontWeight:800,fontSize:16}}>{school.name}</div>
-          <div style={{fontSize:12,opacity:0.9,marginTop:2}}>{school.poBox} | END OF {term.toUpperCase()} {year} - {cls} RESULT SHEET</div>
+        <div style={{background:"#1e3a6e",color:"white",padding:"12px 16px",textAlign:"center",display:"flex",alignItems:"center",justifyContent:"center",gap:10}}>
+          {school.logo && <img src={school.logo} alt="logo" style={{width:36,height:36,objectFit:"contain",flexShrink:0}}/>}
+          <div>
+            <div style={{fontWeight:800,fontSize:16}}>{school.name}</div>
+            <div style={{fontSize:12,opacity:0.9,marginTop:2}}>{school.poBox} | END OF {term.toUpperCase()} {year} - {cls} RESULT SHEET</div>
+          </div>
         </div>
         <div style={{overflowX:"auto"}}>
           <table style={{width:"100%",fontSize:12,minWidth:800}}>
@@ -4852,6 +4864,7 @@ function ReportCard({ school, r, term, year, cls, position, totalInClass, isLowe
     <div className="report-card-sheet" style={{width:"210mm",minHeight:"297mm",maxWidth:"210mm",boxSizing:"border-box",padding:"10mm",background:"white"}}>
       <div style={{background:"white",border:"3px solid #1e3a6e",borderRadius:12,overflow:"hidden",boxShadow:"0 4px 20px rgba(0,0,0,0.1)"}}>
         <div style={{background:"linear-gradient(135deg,#1e3a6e 0%,#1e40af 100%)",color:"white",padding:"16px 20px",textAlign:"center"}}>
+          {school.logo && <img src={school.logo} alt="logo" style={{width:44,height:44,objectFit:"contain",display:"block",margin:"0 auto 6px"}}/>}
           <div style={{fontWeight:800,fontSize:20,letterSpacing:1}}>{school.name}</div>
           <div style={{fontSize:11,opacity:0.9,marginTop:2}}>{school.poBox} - {school.email}</div>
           <div style={{marginTop:8,display:"inline-block",background:"rgba(255,255,255,0.15)",borderRadius:20,padding:"3px 16px",fontSize:12,fontWeight:600}}>
