@@ -1438,10 +1438,15 @@ export default function App() {
         await saveShared("mkis_accounts", finalAccounts);
       }
       setBands(b); setSpecialBands(sb || {}); setDivisions(d);
-      // Always spread DEFAULT_SCHOOL first so any new fields added since
-      // the last save (e.g. nextOpens, nextEnds, requirements) are never
-      // missing if an older save predates them being added.
-      setSchool({ ...DEFAULT_SCHOOL, ...sc }); setAccounts(finalAccounts); setChangeRequests(reqs || []); setInitials(ini);
+      // Spread DEFAULT_SCHOOL first so any new fields added since the last
+      // save (e.g. nextOpens, nextEnds, requirements, logo) are never missing
+      // if an older save predates them. For `logo` specifically: an existing
+      // school record saved before the logo feature existed has logo:"" on
+      // disk, which would otherwise silently overwrite the new built-in
+      // default logo. Only defer to the saved logo if it's actually set (the
+      // school uploaded their own), so the built-in crest still shows up for
+      // schools that never touched the logo field.
+      setSchool({ ...DEFAULT_SCHOOL, ...sc, logo: sc?.logo || DEFAULT_SCHOOL.logo }); setAccounts(finalAccounts); setChangeRequests(reqs || []); setInitials(ini);
       setLockedTerm(lt || {}); setLockedMonthly(lm || {}); setGroupWork(gw || {});
       lastSeenRef.current = { mkis_students: JSON.stringify(s), mkis_termmarks: JSON.stringify(tm),
         mkis_monthlymarks: JSON.stringify(mm), mkis_bands: JSON.stringify(b), mkis_special_bands: JSON.stringify(sb || {}), mkis_divisions: JSON.stringify(d),
