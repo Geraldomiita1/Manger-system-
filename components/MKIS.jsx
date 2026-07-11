@@ -879,6 +879,37 @@ function exportGroupWorkWord({ school, cls, term, year, testNo, isLower, subject
 // school's total, the weighted "cumulative division" score, and the
 // resulting average division (lower = better, to 4 decimal places since
 // that's the precision the municipality's own sheet is prepared to).
+// ─── RESULT ANALYSER ─────────────────────────────────────────────────────────
+// Scans OCR'd text of a printed/photographed Result Sheet and tallies how
+// many pupils fall in each division. This app's own Result Sheets (and most
+// Ugandan primary schools' sheets generally) print the division as a Roman
+// numeral (I/II/III/IV) or "U", trailing near the end of each pupil's row
+// (…TOT MK, TOT AGG, DIV, POS) -- so rather than trying to trust every
+// stray letter in noisy OCR text, this only looks at lines that start with
+// a small row number (the S/N column), treating that as the signal "this is
+// a real pupil row", then reads the division off the last few tokens of
+// that row. Always shown back to the person as an editable tally before
+// anything is used, since Roman numerals are an easy thing for OCR to
+// misread (e.g. "II" as "11").
+function analyzeResultSheetText(text) {
+  const lines = text.split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
+  const counts = { I:0, II:0, III:0, IV:0, U:0 };
+  let matchedRows = 0, skippedRows = 0;
+  lines.forEach(line => {
+    const tokens = line.split(/\s+/).filter(Boolean);
+    if (tokens.length < 3) return; // too short to be a pupil row
+    if (!/^\d{1,2}\.?$/.test(tokens[0])) return; // must start with an S/N-like row number
+    const tail = tokens.slice(-4);
+    let found = null;
+    for (let i = tail.length - 1; i >= 0; i--) {
+      const clean = tail[i].toUpperCase().replace(/[^A-Z]/g, "");
+      if (["I","II","III","IV","U"].includes(clean)) { found = clean; break; }
+    }
+    if (found) { counts[found]++; matchedRows++; }
+    else skippedRows++;
+  });
+  return { counts, matchedRows, skippedRows };
+}
 function computeMunicipalRow(s) {
   const n = (v) => { const x = Number(v); return isNaN(x) ? 0 : x; };
   const d1=n(s.div1), d2=n(s.div2), d3=n(s.div3), d4=n(s.div4), dU=n(s.divU), absent=n(s.absent);
@@ -4501,6 +4532,25 @@ function PleInfo({ students, setStudents, school, markEditing, municipalPerf, se
       return a.avgDiv - b.avgDiv;
     });
   }, [mpFilteredSchools]);
+  const [analyserCounts, setAnalyserCounts] = useState(null); // {I,II,III,IV,U}
+  const [analyserMeta, setAnalyserMeta] = useState(null); // {matchedRows, skippedRows}
+  const [analyserSchoolName, setAnalyserSchoolName] = useState("");
+  const applyAnalyserToMunicipal = () => {
+    if (!analyserCounts) return;
+    markEditing();
+    updateMpRecord(cur => ({
+      ...cur,
+      schools: [...(cur.schools||[]), {
+        id:`sch${Date.now()}${Math.random().toString(36).slice(2,6)}`,
+        name: analyserSchoolName || "",
+        funding:"Private",
+        div1: analyserCounts.I, div2: analyserCounts.II, div3: analyserCounts.III, div4: analyserCounts.IV, divU: analyserCounts.U,
+        absent: 0, bestAgg:"",
+      }],
+    }));
+    setAnalyserCounts(null); setAnalyserMeta(null); setAnalyserSchoolName("");
+    setTab("municipal");
+  };
   const certRef = useRef(null);
   const allCertsRef = useRef(null);
   const p7Students = students.filter(s=>s.className==="P7"||s.className==="Completed");
@@ -4632,7 +4682,7 @@ function PleInfo({ students, setStudents, school, markEditing, municipalPerf, se
   return (
     <div>
       <div style={{display:"flex",gap:4,marginBottom:0,flexWrap:"wrap"}}>
-        {[["records","📋 PLE Results"],["certificates","🏅 Certificates"],["analysis","📊 Analysis"],["municipal","🏛️ Municipal Performance"]].map(([t,label])=>(
+        {[["records","📋 PLE Results"],["certificates","🏅 Certificates"],["analysis","📊 Analysis"],["municipal","🏛️ Municipal Performance"],["analyser","🔍 Result Analyser"]].map(([t,label])=>(
           <button key={t} onClick={()=>setTab(t)} style={tabStyle(t)}>{label}</button>
         ))}
       </div>
@@ -5008,6 +5058,54 @@ function PleInfo({ students, setStudents, school, markEditing, municipalPerf, se
                   <label style={lbl}>Prepared By (Inspector's Name)</label>
                   <input value={mpRecord.inspector||""} onChange={e=>mpSetInspector(e.target.value)} placeholder="Type the inspector's full name and title"
                     style={{...inp,maxWidth:360}}/>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── RESULT ANALYSER TAB ── */}
+        {tab==="analyser" && (
+          <div>
+            <div style={{fontSize:14,fontWeight:700,color:"#1e3a6e",marginBottom:4}}>🔍 Result Analyser</div>
+            <div style={{fontSize:12,color:"#6b7280",marginBottom:16}}>
+              Photograph a printed Result Sheet and this will count up how many pupils fall in each division (I, II, III, IV, U) — handy for quickly summarizing a class's or another school's result sheet without counting by hand.
+            </div>
+            <div style={{background:"#faf5ff",border:"1px solid #e9d5ff",borderRadius:10,padding:16,marginBottom:16}}>
+              <OcrScanButton label="📷 Scan Result Sheet"
+                instructions="Recognized text below is just the raw OCR output — the division tally appears underneath once you click Use This Text."
+                onUseText={(text)=>{ const { counts, matchedRows, skippedRows } = analyzeResultSheetText(text); setAnalyserCounts(counts); setAnalyserMeta({matchedRows,skippedRows}); }}/>
+            </div>
+
+            {analyserCounts && (
+              <div style={{background:"white",border:"1.5px solid #d8b4fe",borderRadius:10,padding:18}}>
+                <div style={{fontSize:12,color:"#6b21a8",marginBottom:14}}>
+                  Recognized <b>{analyserMeta.matchedRows}</b> pupil row{analyserMeta.matchedRows===1?"":"s"} with a readable division
+                  {analyserMeta.skippedRows>0 && <> ({analyserMeta.skippedRows} row{analyserMeta.skippedRows===1?"":"s"} couldn't be read — check the counts below and adjust if needed)</>}.
+                  Roman numerals are an easy thing for OCR to misread, so please double-check these counts before using them.
+                </div>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(90px,1fr))",gap:12,marginBottom:16}}>
+                  {[["I","Division I","#15803d","#dcfce7"],["II","Division II","#1e40af","#dbeafe"],["III","Division III","#d97706","#fef9c3"],["IV","Division IV","#ea580c","#ffedd5"],["U","Division U","#dc2626","#fee2e2"]].map(([key,label,color,bg])=>{
+                    const total = Object.values(analyserCounts).reduce((a,b)=>a+b,0);
+                    const pct = total>0 ? Math.round(analyserCounts[key]/total*100) : 0;
+                    return (
+                      <div key={key} style={{background:bg,borderRadius:10,padding:"12px 10px",textAlign:"center",border:`2px solid ${color}22`}}>
+                        <input type="number" min={0} value={analyserCounts[key]}
+                          onChange={e=>setAnalyserCounts(prev=>({...prev,[key]:e.target.value===""?0:Number(e.target.value)}))}
+                          style={{width:"100%",textAlign:"center",fontSize:24,fontWeight:900,color,border:"none",background:"transparent"}}/>
+                        <div style={{fontSize:11,fontWeight:700,color:"#374151"}}>{label}</div>
+                        <div style={{fontSize:10,color:"#6b7280"}}>{pct}%</div>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div style={{display:"flex",gap:10,alignItems:"flex-end",flexWrap:"wrap"}}>
+                  <div>
+                    <label style={lbl}>School Name (optional — for Municipal Performance)</label>
+                    <input value={analyserSchoolName} onChange={e=>setAnalyserSchoolName(e.target.value)} placeholder="e.g. ST. KIZITO'S P/S" style={{...inp,minWidth:220}}/>
+                  </div>
+                  <button onClick={applyAnalyserToMunicipal} style={btnPrimary}>➕ Add as a School in Municipal Performance</button>
+                  <button onClick={()=>{setAnalyserCounts(null);setAnalyserMeta(null);setAnalyserSchoolName("");}} style={btnGhost}>Discard</button>
                 </div>
               </div>
             )}
