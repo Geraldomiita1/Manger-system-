@@ -27,6 +27,14 @@ const GROUP_TEST_OPTIONS = ["Group Test 1","Group Test 2","Group Test 3","Group 
 // doesn't usually change test to test within the same term), while marks are
 // recorded per individual Test No. (Group Test 1-5) within that period.
 const DEFAULT_GROUP_WORK = {};
+const MUNICIPAL_EXAM_TYPES = ["Mock Exam","PLE"];
+// Municipal Performance: a district-wide, manually-entered ranking table
+// (independent of the school's own pupil records) modeled on the
+// municipality's own "Analysis and Overall Ranking of Schools Based on
+// Average Division" sheet. Keyed by exam type then year, since a fresh
+// table gets prepared each year for each exam type.
+// { [examType]: { [year]: { schools:[{id,name,funding,div1,div2,div3,div4,divU,absent,bestAgg}], inspector:"" } } }
+const DEFAULT_MUNICIPAL_PERF = {};
 const TERM_MONTHS = {
   "Term I": ["FEB","MAR","APR"],
   "Term II": ["MAY","JUN","JUL"],
@@ -77,7 +85,7 @@ const DEFAULT_SCHOOL = {
 const STORAGE_KEYS = [
   "mkis_students","mkis_termmarks","mkis_monthlymarks","mkis_initials",
   "mkis_bands","mkis_special_bands","mkis_divisions","mkis_school","mkis_accounts","mkis_changerequests",
-  "mkis_locked_term","mkis_locked_monthly","mkis_groupwork",
+  "mkis_locked_term","mkis_locked_monthly","mkis_groupwork","mkis_municipalperf",
 ];
 // One-time migration: if a browser still has old localStorage data and the
 // shared store is empty, lift it into shared storage so nothing is lost.
@@ -134,7 +142,7 @@ const KEY_LABEL = {
   mkis_students:"Students", mkis_termmarks:"Term Marks", mkis_monthlymarks:"Monthly Marks",
   mkis_bands:"Grade Bands", mkis_special_bands:"Special Grading Scale", mkis_divisions:"Divisions", mkis_school:"School Settings",
   mkis_accounts:"Accounts", mkis_changerequests:"Change Requests", mkis_initials:"Initials",
-  mkis_locked_term:"Term Lock", mkis_locked_monthly:"Monthly Lock", mkis_groupwork:"Group Work",
+  mkis_locked_term:"Term Lock", mkis_locked_monthly:"Monthly Lock", mkis_groupwork:"Group Work", mkis_municipalperf:"Municipal Performance",
 };
 // ─── NO-DATA-LOSS WRITE LAYER ───────────────────────────────────────────────
 // Problem this solves: two devices can each hold a slightly different local
@@ -194,6 +202,7 @@ const MERGE_STRATEGIES = {
   mkis_changerequests: (remote, local, ctx) => mergeArrayById(remote, local, ctx?.deletedRequestIds),
   mkis_initials: (remote, local) => local,
   mkis_groupwork: (remote, local) => deepMergeObjects(remote, local),
+  mkis_municipalperf: (remote, local) => deepMergeObjects(remote, local),
   // Locked-entry maps are { "CLASS__TERM__YEAR" (or "...__MONTH" for monthly): true|false }.
   // Deep-merged key-by-key so a Save/Unlock on one device never clobbers a
   // different class/term/month another device locked or unlocked.
@@ -662,7 +671,42 @@ function downloadWordHtml(title, bodyHtml, filename, opts = {}) {
 ${bodyHtml}
 </body>
 </html>`;
-  const blob = new Blob(["\ufeff", html], { type: "application/msword" });
+  // Word's HTML/RTF importer is unreliable with <img src="data:..."> --
+  // the logo renders fine in a browser preview, but once the file is
+  // actually opened in Word it's frequently shown as a broken "linked
+  // image" placeholder ("the file may have been moved, renamed, or
+  // deleted"), because Word's filter treats a base64 data URI as an
+  // external link rather than embedded image data.
+  //
+  // The reliable fix is to save as MHTML (multipart/related) instead of a
+  // bare HTML file whenever there's a data-URI image to embed: pull each
+  // one out into its own MIME part with a Content-ID, and point the <img>
+  // at cid:that-id instead of the inline data URI. Word's MHTML importer
+  // resolves cid: references to embedded parts correctly, unlike inline
+  // data URIs -- this is the same mechanism "Web Page, Single File (.mht)"
+  // has always used. Word opens this correctly regardless of the .doc file
+  // extension, since it sniffs the MIME-Version header rather than trusting
+  // the extension.
+  const embeddedImages = [];
+  const htmlWithCids = html.replace(/src="(data:([^;]+);base64,[^"]+)"/g, (match, dataUri, mime) => {
+    const cid = `mkisimg${embeddedImages.length + 1}`;
+    embeddedImages.push({ cid, mime, base64: dataUri.slice(dataUri.indexOf(",") + 1) });
+    return `src="cid:${cid}"`;
+  });
+  if (embeddedImages.length === 0) {
+    // Nothing embedded (no logo set) -- keep the simple plain-HTML file.
+    const blob = new Blob(["\ufeff", html], { type: "application/msword" });
+    triggerBlobDownload(blob, filename);
+    return;
+  }
+  const boundary = "----MKISDocBoundary" + Date.now();
+  let mhtml = `MIME-Version: 1.0\r\nContent-Type: multipart/related; boundary="${boundary}"; type="text/html"\r\n\r\n`;
+  mhtml += `--${boundary}\r\nContent-Type: text/html; charset="utf-8"\r\nContent-Transfer-Encoding: 8bit\r\nContent-Location: file:///document.html\r\n\r\n${htmlWithCids}\r\n\r\n`;
+  embeddedImages.forEach(img => {
+    mhtml += `--${boundary}\r\nContent-Type: ${img.mime}\r\nContent-Transfer-Encoding: base64\r\nContent-ID: <${img.cid}>\r\nContent-Location: file:///${img.cid}\r\n\r\n${img.base64}\r\n\r\n`;
+  });
+  mhtml += `--${boundary}--\r\n`;
+  const blob = new Blob([mhtml], { type: "application/msword" });
   triggerBlobDownload(blob, filename);
 }
 function htmlTable(headerRow, dataRows) {
@@ -828,6 +872,57 @@ function exportGroupWorkWord({ school, cls, term, year, testNo, isLower, subject
   let body = titleBlockHtml(school, `GROUP TEST RESULTS ${term.toUpperCase()}, ${year} - ${cls} - ${toUpper(testNo)}`);
   body += groupWorkHtmlTable({ subjects, isLower, sortedRows });
   downloadWordHtml(`${cls} ${term} ${year} ${testNo}`, body, `${safeFileName(cls)}_${safeFileName(term)}_${year}_${safeFileName(testNo)}.doc`);
+}
+// ─── MUNICIPAL PERFORMANCE (district-wide school ranking) ───────────────────
+// Turns one school's raw division counts into every derived figure the
+// municipality's own ranking sheet shows: each division's share of that
+// school's total, the weighted "cumulative division" score, and the
+// resulting average division (lower = better, to 4 decimal places since
+// that's the precision the municipality's own sheet is prepared to).
+function computeMunicipalRow(s) {
+  const n = (v) => { const x = Number(v); return isNaN(x) ? 0 : x; };
+  const d1=n(s.div1), d2=n(s.div2), d3=n(s.div3), d4=n(s.div4), dU=n(s.divU), absent=n(s.absent);
+  const total = d1+d2+d3+d4+dU+absent;
+  const cumDiv = d1*1 + d2*2 + d3*3 + d4*4 + dU*5;
+  const avgDiv = total > 0 ? cumDiv/total : null;
+  const pct = (v) => total > 0 ? Math.round(v/total*100) : 0;
+  return { s, total, cumDiv, avgDiv, pct1:pct(d1), pct2:pct(d2), pct3:pct(d3), pct4:pct(d4), pctU:pct(dU) };
+}
+function municipalPerfHtmlTable(rows) {
+  const th = "border:1px solid #999;padding:5px;font-size:8.5pt;background:#1e40af;color:white;";
+  const td = "border:1px solid #999;padding:4px;text-align:center;font-size:9pt;";
+  let head = `<tr>${["S/N","CENTRE NAME","FUNDING","DIV 1","DIV 1 %","DIV 2","DIV 2 %","DIV 3","DIV 3 %","DIV 4","DIV 4 %","DIV U","DIV U %","ABSENT","TOTAL","CUM. DIV.","BEST AGG.","AVERAGE DIVISION"].map(h=>`<th style="${th}">${h}</th>`).join("")}</tr>`;
+  let body = "";
+  rows.forEach((r,i) => {
+    const rowBg = i % 2 === 0 ? "#ffffff" : "#eff6ff";
+    body += `<tr style="background:${rowBg};">`;
+    body += `<td style="${td}">${i+1}</td>`;
+    body += `<td style="${td}text-align:left;font-weight:600;">${escapeHtml(r.s.name||"-")}</td>`;
+    body += `<td style="${td}">${escapeHtml(r.s.funding||"-")}</td>`;
+    body += `<td style="${td}">${r.s.div1||0}</td><td style="${td}">${r.pct1}%</td>`;
+    body += `<td style="${td}">${r.s.div2||0}</td><td style="${td}">${r.pct2}%</td>`;
+    body += `<td style="${td}">${r.s.div3||0}</td><td style="${td}">${r.pct3}%</td>`;
+    body += `<td style="${td}">${r.s.div4||0}</td><td style="${td}">${r.pct4}%</td>`;
+    body += `<td style="${td}">${r.s.divU||0}</td><td style="${td}">${r.pctU}%</td>`;
+    body += `<td style="${td}">${r.s.absent||0}</td>`;
+    body += `<td style="${td}font-weight:700;">${r.total}</td>`;
+    body += `<td style="${td}">${r.cumDiv}</td>`;
+    body += `<td style="${td}">${r.s.bestAgg||"-"}</td>`;
+    body += `<td style="${td}font-weight:700;">${r.avgDiv!==null?r.avgDiv.toFixed(4):"-"}</td>`;
+    body += `</tr>`;
+  });
+  return `<table style="border-collapse:collapse;width:100%;">${head}${body}</table>`;
+}
+function exportMunicipalPerfWord({ school, examType, year, fundingLabel, rows, inspector }) {
+  let body = `<div style="text-align:center;">`;
+  body += `<div class="title">TORORO MUNICIPAL COUNCIL</div>`;
+  body += `<div class="subtitle" style="margin-top:2px;">EDUCATION DEPARTMENT</div>`;
+  body += `<div class="subtitle">${escapeHtml(String(year))} ${escapeHtml(examType.toUpperCase())} ANALYSIS AND OVERALL RANKING OF ${escapeHtml(fundingLabel.toUpperCase())} SCHOOLS BASED ON AVERAGE DIVISION</div>`;
+  body += `</div>`;
+  body += municipalPerfHtmlTable(rows);
+  body += `<div style="margin-top:30px;font-size:11pt;">PREPARED BY</div>`;
+  body += `<div style="margin-top:26px;font-size:11pt;font-weight:700;">${escapeHtml(inspector||"")}</div>`;
+  downloadWordHtml(`${examType} ${year} Municipal Performance`, body, `${safeFileName(examType)}_${year}_Municipal_Performance_${safeFileName(fundingLabel)}.doc`, { pageSize:"297mm 210mm" });
 }
 function titleBlockHtml(school, subtitle) {
   let html = `<div style="text-align:center;">`;
@@ -1434,6 +1529,7 @@ export default function App() {
   const [termMarks, setTermMarks] = useState({});
   const [monthlyMarks, setMonthlyMarks] = useState({});
   const [groupWork, setGroupWork] = useState(DEFAULT_GROUP_WORK);
+  const [municipalPerf, setMunicipalPerf] = useState(DEFAULT_MUNICIPAL_PERF);
   const [bands, setBands] = useState(DEFAULT_BANDS);
   const [specialBands, setSpecialBands] = useState(DEFAULT_SPECIAL_BANDS);
   const [divisions, setDivisions] = useState(DEFAULT_DIVISIONS);
@@ -1462,11 +1558,11 @@ export default function App() {
   // effects and the poll loop so neither has to be re-created on every render
   const setters = { mkis_students: setStudents, mkis_termmarks: setTermMarks, mkis_monthlymarks: setMonthlyMarks,
     mkis_bands: setBands, mkis_special_bands: setSpecialBands, mkis_divisions: setDivisions, mkis_school: setSchool, mkis_accounts: setAccounts, mkis_changerequests: setChangeRequests, mkis_initials: setInitials,
-    mkis_locked_term: setLockedTerm, mkis_locked_monthly: setLockedMonthly, mkis_groupwork: setGroupWork };
+    mkis_locked_term: setLockedTerm, mkis_locked_monthly: setLockedMonthly, mkis_groupwork: setGroupWork, mkis_municipalperf: setMunicipalPerf };
   const stateRef = useRef({});
   stateRef.current = { mkis_students: students, mkis_termmarks: termMarks, mkis_monthlymarks: monthlyMarks,
     mkis_bands: bands, mkis_special_bands: specialBands, mkis_divisions: divisions, mkis_school: school, mkis_accounts: accounts, mkis_changerequests: changeRequests, mkis_initials: initials,
-    mkis_locked_term: lockedTerm, mkis_locked_monthly: lockedMonthly, mkis_groupwork: groupWork };
+    mkis_locked_term: lockedTerm, mkis_locked_monthly: lockedMonthly, mkis_groupwork: groupWork, mkis_municipalperf: municipalPerf };
   // last value WE wrote (or loaded) per key, serialized -- used to tell "a
   // remote device changed this" apart from "this is just our own save echoing back"
   const lastSeenRef = useRef({});
@@ -1493,7 +1589,7 @@ export default function App() {
     let mounted = true;
     (async () => {
       await migrateLocalStorageOnce();
-      const [s, tm, mm, b, sb, d, sc, acc, reqs, ini, lt, lm, gw] = await Promise.all([
+      const [s, tm, mm, b, sb, d, sc, acc, reqs, ini, lt, lm, gw, mp] = await Promise.all([
         loadShared("mkis_students", []),
         loadShared("mkis_termmarks", {}),
         loadShared("mkis_monthlymarks", {}),
@@ -1507,6 +1603,7 @@ export default function App() {
         loadShared("mkis_locked_term", {}),
         loadShared("mkis_locked_monthly", {}),
         loadShared("mkis_groupwork", DEFAULT_GROUP_WORK),
+        loadShared("mkis_municipalperf", DEFAULT_MUNICIPAL_PERF),
       ]);
       if (!mounted) return;
       setStudents(s); setTermMarks(tm); setMonthlyMarks(mm);
@@ -1527,11 +1624,11 @@ export default function App() {
       // school uploaded their own), so the built-in crest still shows up for
       // schools that never touched the logo field.
       setSchool({ ...DEFAULT_SCHOOL, ...sc, logo: sc?.logo || DEFAULT_SCHOOL.logo }); setAccounts(finalAccounts); setChangeRequests(reqs || []); setInitials(ini);
-      setLockedTerm(lt || {}); setLockedMonthly(lm || {}); setGroupWork(gw || {});
+      setLockedTerm(lt || {}); setLockedMonthly(lm || {}); setGroupWork(gw || {}); setMunicipalPerf(mp || {});
       lastSeenRef.current = { mkis_students: JSON.stringify(s), mkis_termmarks: JSON.stringify(tm),
         mkis_monthlymarks: JSON.stringify(mm), mkis_bands: JSON.stringify(b), mkis_special_bands: JSON.stringify(sb || {}), mkis_divisions: JSON.stringify(d),
         mkis_school: JSON.stringify(sc), mkis_accounts: JSON.stringify(finalAccounts), mkis_changerequests: JSON.stringify(reqs || []), mkis_initials: JSON.stringify(ini),
-        mkis_locked_term: JSON.stringify(lt || {}), mkis_locked_monthly: JSON.stringify(lm || {}), mkis_groupwork: JSON.stringify(gw || {}) };
+        mkis_locked_term: JSON.stringify(lt || {}), mkis_locked_monthly: JSON.stringify(lm || {}), mkis_groupwork: JSON.stringify(gw || {}), mkis_municipalperf: JSON.stringify(mp || {}) };
       setDataReady(true);
       setLastSyncedAt(new Date());
     })();
@@ -1622,6 +1719,15 @@ export default function App() {
     lastSeenRef.current.mkis_groupwork = JSON.stringify(merged);
     if (JSON.stringify(merged) !== JSON.stringify(groupWork)) setGroupWork(merged);
   })(); } }, [groupWork, dataReady]);
+  useEffect(() => { if (dataReady) { (async () => {
+    const merged = await updateShared("mkis_municipalperf", municipalPerf);
+    if (JSON.stringify(merged) !== JSON.stringify(municipalPerf)) {
+      await writeAuditEntry("mkis_municipalperf", "UPDATE", lastAuditDetail.current["mkis_municipalperf"] || "Municipal Performance updated");
+      lastAuditDetail.current["mkis_municipalperf"] = "";
+    }
+    lastSeenRef.current.mkis_municipalperf = JSON.stringify(merged);
+    if (JSON.stringify(merged) !== JSON.stringify(municipalPerf)) setMunicipalPerf(merged);
+  })(); } }, [municipalPerf, dataReady]);
   useEffect(() => { if (dataReady) { lastSeenRef.current.mkis_divisions = JSON.stringify(divisions); saveShared("mkis_divisions", divisions); writeAuditEntry("mkis_divisions","UPDATE","Division pass-mark thresholds updated"); } }, [divisions, dataReady]);
   useEffect(() => { if (dataReady) { lastSeenRef.current.mkis_school = JSON.stringify(school); saveShared("mkis_school", school); writeAuditEntry("mkis_school","UPDATE",`School settings updated — ${school.name||""}`); } }, [school, dataReady]);
   useEffect(() => { if (dataReady) { (async () => {
@@ -1845,6 +1951,7 @@ export default function App() {
     if (d.termMarks)    { forceWriteRef.current.add("mkis_termmarks"); setTermMarks(d.termMarks); }
     if (d.monthlyMarks) { forceWriteRef.current.add("mkis_monthlymarks"); setMonthlyMarks(d.monthlyMarks); }
     if (d.groupWork)    { forceWriteRef.current.add("mkis_groupwork"); setGroupWork(d.groupWork); }
+    if (d.municipalPerf){ forceWriteRef.current.add("mkis_municipalperf"); setMunicipalPerf(d.municipalPerf); }
     if (d.bands)         setBands(d.bands);
     if (d.specialBands)  setSpecialBands(d.specialBands);
     if (d.divisions)     setDivisions(d.divisions);
@@ -1915,7 +2022,7 @@ export default function App() {
       </div>
     );
   }
-  const props = { students, setStudents, termMarks, setTermMarks, monthlyMarks, setMonthlyMarks, groupWork, setGroupWork, bands, setBands, specialBands, setSpecialBands, divisions, setDivisions, school, setSchool, accounts, setAccounts, initials, setInitials, updateTermMark, updateMonthlyMark, requestOrApplyTermMark, requestOrApplyMonthlyMark, addStudent, deleteStudent, forceRestoreData, promoteStudents, role, currentUser, changeRequests, submitChangeRequest, approveChangeRequest, rejectChangeRequest, lockedTerm, lockTermEntry, unlockTermEntry, lockedMonthly, lockMonthlyEntry, unlockMonthlyEntry, requestUnlockTerm, requestUnlockMonthly, markEditing, stampAudit };
+  const props = { students, setStudents, termMarks, setTermMarks, monthlyMarks, setMonthlyMarks, groupWork, setGroupWork, municipalPerf, setMunicipalPerf, bands, setBands, specialBands, setSpecialBands, divisions, setDivisions, school, setSchool, accounts, setAccounts, initials, setInitials, updateTermMark, updateMonthlyMark, requestOrApplyTermMark, requestOrApplyMonthlyMark, addStudent, deleteStudent, forceRestoreData, promoteStudents, role, currentUser, changeRequests, submitChangeRequest, approveChangeRequest, rejectChangeRequest, lockedTerm, lockTermEntry, unlockTermEntry, lockedMonthly, lockMonthlyEntry, unlockMonthlyEntry, requestUnlockTerm, requestUnlockMonthly, markEditing, stampAudit };
   return (
     <div className="app-shell" style={{display:"flex",minHeight:"100vh",fontFamily:"'Segoe UI',system-ui,sans-serif",background:"#f1f5f9"}}>
       {/* SIDEBAR */}
@@ -1965,7 +2072,7 @@ export default function App() {
           {page==="RESULT SHEETS" && <ResultSheets {...props} />}
           {page==="REPORT CARDS" && <ReportCards {...props} />}
           {page==="LEARNERS" && <Students {...props} />}
-          {page==="PLE INFO" && <PleInfo students={students} setStudents={setStudents} school={school} markEditing={markEditing} />}
+          {page==="PLE INFO" && <PleInfo students={students} setStudents={setStudents} school={school} markEditing={markEditing} municipalPerf={municipalPerf} setMunicipalPerf={setMunicipalPerf} />}
           {page==="MANAGE REQUESTS" && role==="admin" && <ManageRequests {...props} />}
           {page==="SETTINGS" && role==="admin" && <Settings {...props} />}
           {page==="AUDIT LOG" && role==="admin" && <AuditLog />}
@@ -4345,7 +4452,7 @@ const CERT_DESIGNS = [
   { id:3, label:"Design 3 — Maroon & Gold", Component: PleCertificateDesign3 },
   { id:4, label:"Design 4 — Classic Red Zigzag (with logo)", Component: PleCertificateDesign4 },
 ];
-function PleInfo({ students, setStudents, school, markEditing }) {
+function PleInfo({ students, setStudents, school, markEditing, municipalPerf, setMunicipalPerf }) {
   const [tab, setTab] = useState("records");
   const [pleData, setPleData] = useState({});
   // imported rows that didn't match any student (flagged red)
@@ -4359,6 +4466,41 @@ function PleInfo({ students, setStudents, school, markEditing }) {
   const [toDelete, setToDelete] = useState([]); // ids to delete from unmatched after confirm
   const [ocrStudentId, setOcrStudentId] = useState("");
   const [ocrParsed, setOcrParsed] = useState(null); // {indexNo, results, lin, cocurricular, leadership, conduct, totalAgg}
+  const [mpExamType, setMpExamType] = useState("PLE");
+  const [mpYear, setMpYear] = useState(school.year||String(new Date().getFullYear()));
+  const [mpFilter, setMpFilter] = useState("general"); // general | private | government
+  const [mpPdfBusy, setMpPdfBusy] = useState(false);
+  const mpCardRef = useRef(null);
+  const mpRecord = municipalPerf?.[mpExamType]?.[mpYear] || { schools: [], inspector: "" };
+  const mpAllSchools = mpRecord.schools || [];
+  const updateMpRecord = useCallback((updater) => {
+    markEditing();
+    setMunicipalPerf(prev => {
+      const examData = prev[mpExamType] || {};
+      const cur = examData[mpYear] || { schools: [], inspector: "" };
+      return { ...prev, [mpExamType]: { ...examData, [mpYear]: updater(cur) } };
+    });
+  }, [mpExamType, mpYear, markEditing, setMunicipalPerf]);
+  const mpAddSchool = () => updateMpRecord(cur => ({
+    ...cur,
+    schools: [...(cur.schools||[]), { id:`sch${Date.now()}${Math.random().toString(36).slice(2,6)}`, name:"", funding:"Private", div1:0, div2:0, div3:0, div4:0, divU:0, absent:0, bestAgg:"" }],
+  }));
+  const mpRemoveSchool = (id) => updateMpRecord(cur => ({ ...cur, schools: (cur.schools||[]).filter(s=>s.id!==id) }));
+  const mpUpdateSchool = (id, field, val) => updateMpRecord(cur => ({ ...cur, schools: (cur.schools||[]).map(s=>s.id===id?{...s,[field]:val}:s) }));
+  const mpSetInspector = (val) => updateMpRecord(cur => ({ ...cur, inspector: val }));
+  const mpFilterLabel = mpFilter==="private" ? "Private" : mpFilter==="government" ? "Government" : "General";
+  const mpFilteredSchools = mpAllSchools.filter(s => mpFilter==="general" || (s.funding||"Private").toLowerCase()===mpFilter);
+  const mpRows = useMemo(() => {
+    const computed = mpFilteredSchools.map(computeMunicipalRow);
+    // Rank by average division ascending (lower = better); schools with no
+    // data entered yet (avgDiv null) sort to the bottom instead of the top.
+    return [...computed].sort((a,b) => {
+      if (a.avgDiv===null && b.avgDiv===null) return 0;
+      if (a.avgDiv===null) return 1;
+      if (b.avgDiv===null) return -1;
+      return a.avgDiv - b.avgDiv;
+    });
+  }, [mpFilteredSchools]);
   const certRef = useRef(null);
   const allCertsRef = useRef(null);
   const p7Students = students.filter(s=>s.className==="P7"||s.className==="Completed");
@@ -4490,7 +4632,7 @@ function PleInfo({ students, setStudents, school, markEditing }) {
   return (
     <div>
       <div style={{display:"flex",gap:4,marginBottom:0,flexWrap:"wrap"}}>
-        {[["records","📋 PLE Results"],["certificates","🏅 Certificates"],["analysis","📊 Analysis"]].map(([t,label])=>(
+        {[["records","📋 PLE Results"],["certificates","🏅 Certificates"],["analysis","📊 Analysis"],["municipal","🏛️ Municipal Performance"]].map(([t,label])=>(
           <button key={t} onClick={()=>setTab(t)} style={tabStyle(t)}>{label}</button>
         ))}
       </div>
@@ -4785,6 +4927,90 @@ function PleInfo({ students, setStudents, school, markEditing }) {
                 </div>
               );
             })()}
+          </div>
+        )}
+
+        {/* ── MUNICIPAL PERFORMANCE TAB ── */}
+        {tab==="municipal" && (
+          <div>
+            <div style={{fontSize:14,fontWeight:700,color:"#1e3a6e",marginBottom:4}}>🏛️ Municipal Performance</div>
+            <div style={{fontSize:12,color:"#6b7280",marginBottom:16}}>
+              A district-wide ranking of schools by average division — prepared and entered manually (like the Municipal Council's own analysis sheet), independent of this school's own pupil records.
+            </div>
+            <div style={{display:"flex",gap:12,alignItems:"flex-end",flexWrap:"wrap",marginBottom:16}}>
+              <Sel label="Exam" value={mpExamType} onChange={setMpExamType} opts={MUNICIPAL_EXAM_TYPES}/>
+              <div><label style={lbl}>Year</label><input type="number" value={mpYear} onChange={e=>setMpYear(e.target.value)} style={{...inp,width:100}}/></div>
+              <Sel label="Schools Shown" value={mpFilter==="general"?"General":mpFilter==="private"?"Private Only":"Government Only"}
+                onChange={(v)=>setMpFilter(v==="General"?"general":v==="Private Only"?"private":"government")}
+                opts={["General","Private Only","Government Only"]}/>
+              <button onClick={mpAddSchool} style={btnPrimary}>+ Add School</button>
+              <button onClick={()=>exportMunicipalPerfWord({ school, examType:mpExamType, year:mpYear, fundingLabel:mpFilterLabel, rows:mpRows, inspector:mpRecord.inspector })} style={btnWord}>📄 Download Word</button>
+              <button disabled={mpPdfBusy} onClick={async()=>{
+                setMpPdfBusy(true);
+                try { await downloadNodesAsPdf([mpCardRef.current], `${safeFileName(mpExamType)}_${mpYear}_Municipal_Performance_${safeFileName(mpFilterLabel)}.pdf`, "landscape"); }
+                finally { setMpPdfBusy(false); }
+              }} style={mpPdfBusy?btnPdfBusy:btnPdf}>{mpPdfBusy?"⏳ Generating...":"📕 Download PDF"}</button>
+            </div>
+
+            {mpAllSchools.length===0 ? (
+              <div style={{background:"white",borderRadius:12,border:"1.5px dashed #d1d5db",padding:"40px 20px",textAlign:"center",color:"#9ca3af"}}>
+                No schools added yet for {mpExamType} {mpYear}.<br/>
+                <button onClick={mpAddSchool} style={{...btnPrimary,marginTop:12}}>+ Add School</button>
+              </div>
+            ) : (
+              <div ref={mpCardRef} style={{background:"white",borderRadius:12,border:"1px solid #e5e7eb",overflow:"hidden",marginBottom:16}}>
+                <div style={{background:"#1e3a6e",color:"white",padding:"14px 16px",textAlign:"center"}}>
+                  <div style={{fontWeight:800,fontSize:15}}>TORORO MUNICIPAL COUNCIL</div>
+                  <div style={{fontSize:12,opacity:0.9,marginTop:2}}>EDUCATION DEPARTMENT</div>
+                  <div style={{fontSize:12,opacity:0.9,marginTop:4,fontWeight:600}}>{mpYear} {toUpper(mpExamType)} ANALYSIS AND OVERALL RANKING OF {mpFilterLabel.toUpperCase()} SCHOOLS BASED ON AVERAGE DIVISION</div>
+                </div>
+                <div style={{overflowX:"auto"}}>
+                  <table style={{width:"100%",fontSize:12,minWidth:1100}}>
+                    <thead>
+                      <tr style={{background:"#1e40af",color:"white"}}>
+                        {["S/N","CENTRE NAME","FUNDING","DIV 1","DIV 1 %","DIV 2","DIV 2 %","DIV 3","DIV 3 %","DIV 4","DIV 4 %","DIV U","DIV U %","ABSENT","TOTAL","CUM. DIV.","BEST AGG.","AVERAGE DIVISION",""].map(h=>
+                          <th key={h} style={th}>{h}</th>
+                        )}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {mpRows.map((r,i)=>(
+                        <tr key={r.s.id} style={{background:i%2===0?"white":"#eff6ff"}}>
+                          <td style={td}>{i+1}</td>
+                          <td style={{...td,textAlign:"left"}}>
+                            <input value={r.s.name} onChange={e=>mpUpdateSchool(r.s.id,"name",e.target.value)} placeholder="School name"
+                              style={{...inp,width:170,padding:"4px 6px",fontSize:12}}/>
+                          </td>
+                          <td style={td}>
+                            <select value={r.s.funding||"Private"} onChange={e=>mpUpdateSchool(r.s.id,"funding",e.target.value)} style={{...inp,padding:"4px 6px",fontSize:12}}>
+                              <option>Private</option>
+                              <option>Government</option>
+                            </select>
+                          </td>
+                          {["div1","div2","div3","div4","divU"].map((f,fi)=>(
+                            <React.Fragment key={f}>
+                              <td style={td}><input type="number" value={r.s[f]??0} onChange={e=>mpUpdateSchool(r.s.id,f,e.target.value===""?0:Number(e.target.value))} style={{...inp,width:52,padding:"4px 6px",fontSize:12,textAlign:"center"}}/></td>
+                              <td style={{...td,color:"#6b7280"}}>{[r.pct1,r.pct2,r.pct3,r.pct4,r.pctU][fi]}%</td>
+                            </React.Fragment>
+                          ))}
+                          <td style={td}><input type="number" value={r.s.absent??0} onChange={e=>mpUpdateSchool(r.s.id,"absent",e.target.value===""?0:Number(e.target.value))} style={{...inp,width:52,padding:"4px 6px",fontSize:12,textAlign:"center"}}/></td>
+                          <td style={{...td,fontWeight:700}}>{r.total}</td>
+                          <td style={td}>{r.cumDiv}</td>
+                          <td style={td}><input value={r.s.bestAgg||""} onChange={e=>mpUpdateSchool(r.s.id,"bestAgg",e.target.value)} style={{...inp,width:44,padding:"4px 6px",fontSize:12,textAlign:"center"}}/></td>
+                          <td style={{...td,fontWeight:700,color:"#1e40af"}}>{r.avgDiv!==null?r.avgDiv.toFixed(4):"-"}</td>
+                          <td className="no-print" style={td}><button onClick={()=>mpRemoveSchool(r.s.id)} style={{...btnDanger,padding:"3px 8px",fontSize:11}}>✕</button></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div style={{padding:"16px 20px",borderTop:"1px solid #e5e7eb"}}>
+                  <label style={lbl}>Prepared By (Inspector's Name)</label>
+                  <input value={mpRecord.inspector||""} onChange={e=>mpSetInspector(e.target.value)} placeholder="Type the inspector's full name and title"
+                    style={{...inp,maxWidth:360}}/>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -5741,7 +5967,7 @@ function Settings({ school, setSchool, bands, setBands, specialBands, setSpecial
   );
 }
 // ─── DOWNLOAD CENTRE ─────────────────────────────────────────────────────────
-function DownloadCentre({ students, termMarks, monthlyMarks, groupWork, bands, specialBands, divisions, school, accounts, role, currentUser, forceRestoreData }) {
+function DownloadCentre({ students, termMarks, monthlyMarks, groupWork, municipalPerf, bands, specialBands, divisions, school, accounts, role, currentUser, forceRestoreData }) {
   const [importStatus, setImportStatus] = useState("");
   const [importError, setImportError] = useState("");
   const [restoreConfirm, setRestoreConfirm] = useState(false);
@@ -5764,7 +5990,7 @@ function DownloadCentre({ students, termMarks, monthlyMarks, groupWork, bands, s
     const data = {
       _meta: { version: 2, exportedAt: new Date().toISOString(), school: school.name },
       school, bands, specialBands, divisions, accounts,
-      students, termMarks, monthlyMarks, groupWork,
+      students, termMarks, monthlyMarks, groupWork, municipalPerf,
     };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
     triggerBlobDownload(blob, `MKIS_full_backup_${ts()}.json`);
@@ -6229,7 +6455,7 @@ function AuditLog() {
     mkis_students:"Students", mkis_termmarks:"Term Marks", mkis_monthlymarks:"Monthly Marks",
     mkis_bands:"Grade Bands", mkis_special_bands:"Special Grading Scale", mkis_divisions:"Divisions", mkis_school:"School Settings",
     mkis_accounts:"Accounts", mkis_changerequests:"Change Requests", mkis_initials:"Initials",
-    mkis_locked_term:"Term Lock", mkis_locked_monthly:"Monthly Lock", mkis_groupwork:"Group Work",
+    mkis_locked_term:"Term Lock", mkis_locked_monthly:"Monthly Lock", mkis_groupwork:"Group Work", mkis_municipalperf:"Municipal Performance",
   }[key] || key);
 
   const filtered = rows
