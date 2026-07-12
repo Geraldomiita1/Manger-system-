@@ -884,31 +884,50 @@ function exportGroupWorkWord({ school, cls, term, year, testNo, isLower, subject
 // many pupils fall in each division. This app's own Result Sheets (and most
 // Ugandan primary schools' sheets generally) print the division as a Roman
 // numeral (I/II/III/IV) or "U", trailing near the end of each pupil's row
-// (…TOT MK, TOT AGG, DIV, POS) -- so rather than trying to trust every
-// stray letter in noisy OCR text, this only looks at lines that start with
-// a small row number (the S/N column), treating that as the signal "this is
-// a real pupil row", then reads the division off the last few tokens of
-// that row. Always shown back to the person as an editable tally before
-// anything is used, since Roman numerals are an easy thing for OCR to
-// misread (e.g. "II" as "11").
+// (…TOT MK, TOT AGG, DIV, POS).
+//
+// Real-world scans are messy: columns drift, OCR sometimes runs adjacent
+// cells together with no space ("12I" instead of "12  I"), and the POS
+// column doesn't always come through legibly. Rather than betting on one
+// exact pattern, this tries three, from most to least strict, and keeps
+// whichever one actually recognized the most pupil rows on this particular
+// scan:
+//   Tier 1: TOT AGG number, then the division, then a POS-style ordinal
+//           (the full, most distinctive column sequence).
+//   Tier 2: just a number immediately followed by the division -- looser,
+//           for scans where the POS column didn't come through cleanly.
+//   Tier 3: a line that starts with a small row number (S/N), reading the
+//           division off whatever's near the end of that line.
+// Always shown back to the person as an editable tally before anything is
+// used, since Roman numerals are an easy thing for OCR to misread.
 function analyzeResultSheetText(text) {
-  const lines = text.split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
-  const counts = { I:0, II:0, III:0, IV:0, U:0 };
-  let matchedRows = 0, skippedRows = 0;
+  const norm = text.replace(/\r/g, "");
+  const toCounts = (matches) => {
+    const counts = { I:0, II:0, III:0, IV:0, U:0 };
+    matches.forEach(d => { const key = d.toUpperCase(); if (counts[key] !== undefined) counts[key]++; });
+    return counts;
+  };
+  // (?![A-Za-z]) after the division token stops it from matching inside a
+  // longer run of letters (a false positive), but -- unlike a plain \b or
+  // (?!\w) -- still allows a digit to follow immediately, since OCR very
+  // often squeezes DIV and POS together with no space at all ("I1ST").
+  const tier1 = [...norm.matchAll(/\b(\d{1,3})[.,]?\s*(IV|III|II|I|U)(?![A-Za-z])[.,:]?\s*\d{1,2}\s*(?:ST|ND|RD|TH)\b/gi)].map(m=>m[2]);
+  const tier2 = [...norm.matchAll(/\b(\d{1,3})[.,]?\s*(IV|III|II|I|U)(?![A-Za-z])/gi)].map(m=>m[2]);
+  const lines = norm.split(/\n/).map(l=>l.trim()).filter(Boolean);
+  const tier3 = [];
   lines.forEach(line => {
     const tokens = line.split(/\s+/).filter(Boolean);
-    if (tokens.length < 3) return; // too short to be a pupil row
-    if (!/^\d{1,2}\.?$/.test(tokens[0])) return; // must start with an S/N-like row number
+    if (tokens.length < 3) return;
+    if (!/^\d{1,2}\.?$/.test(tokens[0])) return;
     const tail = tokens.slice(-4);
-    let found = null;
     for (let i = tail.length - 1; i >= 0; i--) {
       const clean = tail[i].toUpperCase().replace(/[^A-Z]/g, "");
-      if (["I","II","III","IV","U"].includes(clean)) { found = clean; break; }
+      if (["I","II","III","IV","U"].includes(clean)) { tier3.push(clean); break; }
     }
-    if (found) { counts[found]++; matchedRows++; }
-    else skippedRows++;
   });
-  return { counts, matchedRows, skippedRows };
+  const best = [tier1, tier2, tier3].reduce((a,b) => b.length > a.length ? b : a, []);
+  const dataLineCount = lines.filter(l => /^\d{1,2}\b/.test(l.trim())).length || lines.length;
+  return { counts: toCounts(best), matchedRows: best.length, skippedRows: Math.max(0, dataLineCount - best.length) };
 }
 function computeMunicipalRow(s) {
   const n = (v) => { const x = Number(v); return isNaN(x) ? 0 : x; };
@@ -1476,34 +1495,46 @@ async function runOcr(file, onProgress) {
 // in an editable box (OCR always has some misreads, especially on handwriting
 // or phone-camera photos of a marksheet, so the person gets a chance to fix
 // mistakes before anything is applied) with Use / Cancel actions.
-function OcrScanButton({ label = "📷 Scan (OCR)", instructions, onUseText, accentColor = "#7c3aed" }) {
+function OcrScanButton({ label = "📷 Scan (OCR)", instructions, onUseText, accentColor = "#7c3aed", allowMultiple = false }) {
   const fileRef = useRef();
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [pageInfo, setPageInfo] = useState(""); // e.g. "Page 2 of 3"
   const [error, setError] = useState("");
   const [recognized, setRecognized] = useState(null); // string | null
   const handleFile = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setError(""); setBusy(true); setProgress(0); setRecognized(null);
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+    setError(""); setBusy(true); setProgress(0); setPageInfo(""); setRecognized(null);
     try {
-      const text = await runOcr(file, setProgress);
-      if (!text.trim()) setError("No text could be recognized in that photo. Try a clearer, well-lit, straight-on shot.");
-      else setRecognized(text);
+      // Multi-page mode (e.g. a class Result Sheet photographed as several
+      // pages): run OCR on each photo in turn and stitch the recognized
+      // text together with a clear page marker, rather than only accepting
+      // one photo at a time.
+      const pageTexts = [];
+      for (let i = 0; i < files.length; i++) {
+        if (files.length > 1) setPageInfo(`Page ${i + 1} of ${files.length}`);
+        const text = await runOcr(files[i], (p) => setProgress(p));
+        pageTexts.push(files.length > 1 ? `\n----- Page ${i + 1} -----\n${text}` : text);
+      }
+      const combined = pageTexts.join("\n").trim();
+      if (!combined) setError("No text could be recognized in that photo. Try a clearer, well-lit, straight-on shot.");
+      else setRecognized(combined);
     } catch (err) {
       setError(err.message || "OCR failed. Please try again.");
     } finally {
-      setBusy(false);
+      setBusy(false); setPageInfo("");
       if (fileRef.current) fileRef.current.value = "";
     }
   };
   return (
     <div style={{display:"inline-block"}}>
-      <input ref={fileRef} type="file" accept="image/*" capture="environment" style={{display:"none"}} onChange={handleFile}/>
+      <input ref={fileRef} type="file" accept="image/*" capture={allowMultiple ? undefined : "environment"} multiple={allowMultiple} style={{display:"none"}} onChange={handleFile}/>
       <button type="button" disabled={busy} onClick={()=>fileRef.current?.click()}
         style={{padding:"8px 16px",background:busy?"#c4b5fd":accentColor,color:"white",border:"none",borderRadius:8,fontWeight:700,fontSize:13,cursor:busy?"not-allowed":"pointer"}}>
-        {busy ? `⏳ Reading photo... ${progress}%` : label}
+        {busy ? `⏳ Reading photo${pageInfo?` (${pageInfo})`:""}... ${progress}%` : label}
       </button>
+      {allowMultiple && !busy && <div style={{fontSize:11,color:"#6b7280",marginTop:4}}>You can select several photos at once (e.g. one per page) — they'll be scanned in order and combined.</div>}
       {error && <div style={{marginTop:8,fontSize:12,color:"#dc2626",maxWidth:420}}>⚠️ {error}</div>}
       {recognized !== null && (
         <div style={{marginTop:10,padding:14,background:"#faf5ff",border:`1.5px solid ${accentColor}`,borderRadius:10,maxWidth:520}}>
@@ -5072,7 +5103,7 @@ function PleInfo({ students, setStudents, school, markEditing, municipalPerf, se
               Photograph a printed Result Sheet and this will count up how many pupils fall in each division (I, II, III, IV, U) — handy for quickly summarizing a class's or another school's result sheet without counting by hand.
             </div>
             <div style={{background:"#faf5ff",border:"1px solid #e9d5ff",borderRadius:10,padding:16,marginBottom:16}}>
-              <OcrScanButton label="📷 Scan Result Sheet"
+              <OcrScanButton label="📷 Scan Result Sheet (one or more pages)" allowMultiple
                 instructions="Recognized text below is just the raw OCR output — the division tally appears underneath once you click Use This Text."
                 onUseText={(text)=>{ const { counts, matchedRows, skippedRows } = analyzeResultSheetText(text); setAnalyserCounts(counts); setAnalyserMeta({matchedRows,skippedRows}); }}/>
             </div>
