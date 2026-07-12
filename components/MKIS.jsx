@@ -2182,7 +2182,7 @@ export default function App() {
             break-inside: avoid;
           }
           /* Monthly Slips: each "page" of up to 9 slips (3x3) prints as one
-             landscape A4 sheet -- a fixed 8cm x 6cm slip needs a wider page
+             landscape A4 sheet -- a fixed 9cm x 6.3cm slip needs a wider page
              than portrait A4 to fit 3 across, so this page only switches
              orientation for these specific sheets, not the whole document. */
           .monthly-slip-page {
@@ -2200,8 +2200,8 @@ export default function App() {
         @page monthly-slips-landscape { size: A4 landscape; margin: 5mm; }
         .monthly-slip-page {
           display: grid;
-          grid-template-columns: repeat(3, 8cm);
-          grid-auto-rows: 6cm;
+          grid-template-columns: repeat(3, 9cm);
+          grid-auto-rows: 6.3cm;
           gap: 3mm;
           justify-content: center;
           margin: 0 auto 10mm;
@@ -3918,7 +3918,7 @@ function TermlyMonthlyCard({ school, student, monthData, term, year, cls, isLowe
 // ─── MONTHLY SLIPS ───────────────────────────────────────────────────────────
 // A pocket-sized version of the Monthly Card -- same school header, pupil
 // info, and full months/subjects table, just without the two comment lines,
-// printed at an exact 8cm x 6cm so many can be cut out per pupil per page.
+// printed at an exact 9cm x 6.3cm so many can be cut out per pupil per page.
 function MonthlySlips({ students, monthlyMarks, bands: defaultBands, specialBands, divisions, school }) {
   const [cls, setCls] = useState("P4");
   const [term, setTerm] = useState("Term I");
@@ -4010,7 +4010,7 @@ function MonthlySlips({ students, monthlyMarks, bands: defaultBands, specialBand
         </div>
       </div>
       <div className="no-print" style={{fontSize:12,color:"#6b7280",marginBottom:14}}>
-        Each slip is exactly 8cm x 6cm -- the same months/subjects/marks as the Monthly Card, just without the comment lines. 9 slips (3x3) print per landscape A4 page, ready to cut out.
+        Each slip is exactly 9cm x 6.3cm -- the same months/subjects/marks as the Monthly Card, just without the comment lines. 9 slips (3x3) print per landscape A4 page, ready to cut out.
       </div>
       {classStudents.length===0 && (
         <div style={{background:"white",borderRadius:12,padding:40,textAlign:"center",color:"#9ca3af",border:"1px solid #e5e7eb"}}>No students in {cls}.</div>
@@ -4037,13 +4037,16 @@ const SLIP_SUBJECT_LABEL = { "LIT I":"L1", "LIT II":"L2", "READING":"RD", "WRITI
 const slipSubjectLabel = (sub) => SLIP_SUBJECT_LABEL[sub] || sub;
 function MonthlySlip({ school, student, monthData, term, year, cls, isLower, subjects }) {
   const s = student;
-  // The outer box is a fixed 8cm × 6cm flex column. The table inside it
-  // has flex:1 so it stretches to fill every remaining pixel after the two
-  // fixed-height header strips -- this eliminates the blank space at the
-  // bottom. Row heights are NOT hardcoded; the browser distributes the
-  // available tbody height evenly across the 3 data rows automatically.
+  // The outer box is a fixed 9cm × 6.3cm flex column (a modest size bump
+  // from the original 8cm × 6cm -- still comfortably fits 3x3 = 9 slips per
+  // landscape A4 page, see the .monthly-slip-page grid CSS). The table
+  // inside it has flex:1 so it stretches to fill every remaining pixel
+  // after the two fixed-height header strips -- this eliminates the blank
+  // space at the bottom. Row heights are NOT hardcoded; the browser
+  // distributes the available tbody height evenly across the 3 data rows
+  // automatically.
   return (
-    <div className="monthly-slip" style={{width:"8cm",height:"6cm",overflow:"hidden",background:"white",border:"1px solid #1e3a6e",borderRadius:4,display:"flex",flexDirection:"column"}}>
+    <div className="monthly-slip" style={{width:"9cm",height:"6.3cm",overflow:"hidden",background:"white",border:"1px solid #1e3a6e",borderRadius:4,display:"flex",flexDirection:"column"}}>
       {/* School name + term strip */}
       <div style={{flexShrink:0,background:"linear-gradient(135deg,#1e3a6e 0%,#1e40af 100%)",color:"white",padding:"2px 8px",textAlign:"center"}}>
         <div style={{fontWeight:800,fontSize:11,letterSpacing:0.3,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",lineHeight:1.2}}>{school.name}</div>
