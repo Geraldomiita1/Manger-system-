@@ -27,6 +27,10 @@ const GROUP_TEST_OPTIONS = ["Group Test 1","Group Test 2","Group Test 3","Group 
 // doesn't usually change test to test within the same term), while marks are
 // recorded per individual Test No. (Group Test 1-5) within that period.
 const DEFAULT_GROUP_WORK = {};
+// Default nicknames used when a new group is created (Group N (Nickname)).
+// Beyond 10 groups it just falls back to a plain "Group N" -- teachers can
+// always rename any group afterwards anyway.
+const GROUP_WORK_NICKNAMES = ["The Lions","The Antelopes","The Leopards","The Cheetahs","The Zebras","The Kobs","The Wolves","The Giraffes","The Foxes","The Tigers"];
 const MUNICIPAL_EXAM_TYPES = ["Mock Exam","PLE"];
 // Municipal Performance: a district-wide, manually-entered ranking table
 // (independent of the school's own pupil records) modeled on the
@@ -3633,7 +3637,7 @@ function GroupWork({ students, groupWork, setGroupWork, bands: defaultBands, spe
 
   const addGroup = () => updatePeriod(cur => ({
     ...cur,
-    groups: [...(cur.groups||[]), { id: `g${Date.now()}${Math.random().toString(36).slice(2,6)}`, name: `Group ${(cur.groups||[]).length+1}`, members: [] }],
+    groups: [...(cur.groups||[]), { id: `g${Date.now()}${Math.random().toString(36).slice(2,6)}`, name: (()=>{ const n=(cur.groups||[]).length+1; const nick=GROUP_WORK_NICKNAMES[n-1]; return nick?`Group ${n} (${nick})`:`Group ${n}`; })(), members: [] }],
   }));
   const removeGroup = (gid) => {
     if (!window.confirm("Remove this group and its marks for this term? This can't be undone.")) return;
