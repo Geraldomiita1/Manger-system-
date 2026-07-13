@@ -27,6 +27,10 @@ const GROUP_TEST_OPTIONS = ["Group Test 1","Group Test 2","Group Test 3","Group 
 // doesn't usually change test to test within the same term), while marks are
 // recorded per individual Test No. (Group Test 1-5) within that period.
 const DEFAULT_GROUP_WORK = {};
+// Default nicknames used when a new group is created (Group N (Nickname)).
+// Beyond 10 groups it just falls back to a plain "Group N" -- teachers can
+// always rename any group afterwards anyway.
+const GROUP_WORK_NICKNAMES = ["The Lions","The Antelopes","The Leopards","The Cheetahs","The Zebras","The Kobs","The Wolves","The Giraffes","The Foxes","The Tigers"];
 const MUNICIPAL_EXAM_TYPES = ["Mock Exam","PLE"];
 // Municipal Performance: a district-wide, manually-entered ranking table
 // (independent of the school's own pupil records) modeled on the
@@ -35,6 +39,16 @@ const MUNICIPAL_EXAM_TYPES = ["Mock Exam","PLE"];
 // table gets prepared each year for each exam type.
 // { [examType]: { [year]: { schools:[{id,name,funding,div1,div2,div3,div4,divU,absent,bestAgg}], inspector:"" } } }
 const DEFAULT_MUNICIPAL_PERF = {};
+const EXAM_TIMETABLE_TYPES = ["BEGINNING OF TERM","MIDTERM","GROUP WORK","SPECIAL EXAM","MOCK","END OF TERM"];
+const EXAM_TIMETABLE_VENUES = ["P.1 ROOM","P.2 ROOM","P.3 ROOM","P.4 ROOM","P.5 ROOM","P.6 ROOM","P.7 ROOM","HALL","P.1 B ROOM","P.5 B ROOM","P.7 B ROOM"];
+const EXAM_TIMETABLE_INVIGILATORS = ["MR OMIITA GERALD","MR EMURON JOHN","MR ODOI JOSEPH","MR JAKISA KALIST","MS NYAWERE IMMACULATE","MS AKOTH TABISA","MS KEKO MARY GORRET","MS IJANG GRACE","MS NYACHWO ESTHER","MS IGARI KOLOSTIKA","MS ANYANGO CHRISTINE"];
+// Exam Timetable: separate Upper (P4-P7) and Lower (P1-P3) sheets, each
+// further split by term (each term gets its own timetable), plus its own
+// manually-typed "Prepared by" line -- matching the school's own paper
+// timetables (one per section per term).
+// { upper: { [term]: { rows:[{id,date,time,exam,cls,subject,venue,invigilators:[]}], preparedBy:"" } },
+//   lower: { [term]: { rows:[...], preparedBy:"" } } }
+const DEFAULT_EXAM_TIMETABLE = {};
 const TERM_MONTHS = {
   "Term I": ["FEB","MAR","APR"],
   "Term II": ["MAY","JUN","JUL"],
@@ -85,7 +99,7 @@ const DEFAULT_SCHOOL = {
 const STORAGE_KEYS = [
   "mkis_students","mkis_termmarks","mkis_monthlymarks","mkis_initials",
   "mkis_bands","mkis_special_bands","mkis_divisions","mkis_school","mkis_accounts","mkis_changerequests",
-  "mkis_locked_term","mkis_locked_monthly","mkis_groupwork","mkis_municipalperf",
+  "mkis_locked_term","mkis_locked_monthly","mkis_groupwork","mkis_municipalperf","mkis_examtimetable",
 ];
 // One-time migration: if a browser still has old localStorage data and the
 // shared store is empty, lift it into shared storage so nothing is lost.
@@ -142,7 +156,7 @@ const KEY_LABEL = {
   mkis_students:"Students", mkis_termmarks:"Term Marks", mkis_monthlymarks:"Monthly Marks",
   mkis_bands:"Grade Bands", mkis_special_bands:"Special Grading Scale", mkis_divisions:"Divisions", mkis_school:"School Settings",
   mkis_accounts:"Accounts", mkis_changerequests:"Change Requests", mkis_initials:"Initials",
-  mkis_locked_term:"Term Lock", mkis_locked_monthly:"Monthly Lock", mkis_groupwork:"Group Work", mkis_municipalperf:"Municipal Performance",
+  mkis_locked_term:"Term Lock", mkis_locked_monthly:"Monthly Lock", mkis_groupwork:"Group Work", mkis_municipalperf:"Municipal Performance", mkis_examtimetable:"Exam Timetable",
 };
 // ─── NO-DATA-LOSS WRITE LAYER ───────────────────────────────────────────────
 // Problem this solves: two devices can each hold a slightly different local
@@ -203,6 +217,7 @@ const MERGE_STRATEGIES = {
   mkis_initials: (remote, local) => local,
   mkis_groupwork: (remote, local) => deepMergeObjects(remote, local),
   mkis_municipalperf: (remote, local) => deepMergeObjects(remote, local),
+  mkis_examtimetable: (remote, local) => deepMergeObjects(remote, local),
   // Locked-entry maps are { "CLASS__TERM__YEAR" (or "...__MONTH" for monthly): true|false }.
   // Deep-merged key-by-key so a Save/Unlock on one device never clobbers a
   // different class/term/month another device locked or unlocked.
@@ -873,6 +888,38 @@ function exportGroupWorkWord({ school, cls, term, year, testNo, isLower, subject
   body += groupWorkHtmlTable({ subjects, isLower, sortedRows });
   downloadWordHtml(`${cls} ${term} ${year} ${testNo}`, body, `${safeFileName(cls)}_${safeFileName(term)}_${year}_${safeFileName(testNo)}.doc`);
 }
+function groupWorkAnalysisHtmlTable({ isLower, sortedAnalysisRows }) {
+  const th = "border:1px solid #999;padding:5px;font-size:8.5pt;background:#1e40af;color:white;";
+  const td = "border:1px solid #999;padding:4px;text-align:center;font-size:9pt;";
+  let head = "<tr>";
+  head += `<th style="${th}">GROUP</th><th style="${th}text-align:left;">MEMBERS</th>`;
+  GROUP_TEST_OPTIONS.forEach(tn => { head += `<th style="${th}">${tn.replace("Group Test ","GT")}</th>`; });
+  head += `<th style="${th}">TESTS DONE</th><th style="${th}">AVG TOT MK</th>`;
+  if (!isLower) head += `<th style="${th}">AVG TOT AGG</th><th style="${th}">OVERALL DIV</th>`;
+  head += `<th style="${th}">OVERALL POS</th></tr>`;
+  let body = "";
+  sortedAnalysisRows.forEach((r,i) => {
+    const rowBg = i % 2 === 0 ? "#ffffff" : "#eff6ff";
+    body += `<tr style="background:${rowBg};">`;
+    body += `<td style="${td}font-weight:700;">${escapeHtml(r.g.name)}</td>`;
+    body += `<td style="${td}text-align:left;">${escapeHtml(r.memberNames.join(", ")||"-")}</td>`;
+    r.perTest.forEach(t => { body += `<td style="${td}">${t.hasData?t.totMk:"-"}</td>`; });
+    body += `<td style="${td}font-weight:700;">${r.testsCompleted}/${GROUP_TEST_OPTIONS.length}</td>`;
+    body += `<td style="${td}font-weight:700;background:#ede9fe;">${r.avgTotMk>0?r.avgTotMk.toFixed(1):"-"}</td>`;
+    if (!isLower) {
+      body += `<td style="${td}background:#ede9fe;">${r.avgTotAgg!==null?r.avgTotAgg.toFixed(1):"-"}</td>`;
+      body += `<td style="${td}font-weight:700;color:#1e40af;">${r.overallDiv||"-"}</td>`;
+    }
+    body += `<td style="${td}">${r.pos && r.pos!=="-" ? ordinal(r.pos) : "-"}</td>`;
+    body += `</tr>`;
+  });
+  return `<table style="border-collapse:collapse;width:100%;">${head}${body}</table>`;
+}
+function exportGroupWorkAnalysisWord({ school, cls, term, year, isLower, sortedAnalysisRows }) {
+  let body = titleBlockHtml(school, `GENERAL GROUP PERFORMANCE ANALYSIS - ${term.toUpperCase()}, ${year} - ${cls}`);
+  body += groupWorkAnalysisHtmlTable({ isLower, sortedAnalysisRows });
+  downloadWordHtml(`${cls} ${term} ${year} General Group Analysis`, body, `${safeFileName(cls)}_${safeFileName(term)}_${year}_General_Group_Analysis.doc`, { pageSize:"297mm 210mm" });
+}
 // ─── MUNICIPAL PERFORMANCE (district-wide school ranking) ───────────────────
 // Turns one school's raw division counts into every derived figure the
 // municipality's own ranking sheet shows: each division's share of that
@@ -973,6 +1020,42 @@ function exportMunicipalPerfWord({ school, examType, year, fundingLabel, rows, i
   body += `<div style="margin-top:30px;font-size:11pt;">PREPARED BY</div>`;
   body += `<div style="margin-top:26px;font-size:11pt;font-weight:700;">${escapeHtml(inspector||"")}</div>`;
   downloadWordHtml(`${examType} ${year} Municipal Performance`, body, `${safeFileName(examType)}_${year}_Municipal_Performance_${safeFileName(fundingLabel)}.doc`, { pageSize:"297mm 210mm" });
+}
+// ─── EXAM TIMETABLE ──────────────────────────────────────────────────────────
+function examTimetableHtmlTable(rows) {
+  const th = "border:1px solid #999;padding:6px;font-size:9pt;background:#1e40af;color:white;";
+  const td = "border:1px solid #999;padding:5px;text-align:center;font-size:9.5pt;";
+  let head = `<tr>${["DATE","TIME","EXAM","CLASS","SUBJECT","VENUE","INVIGILATOR(S)"].map(h=>`<th style="${th}">${h}</th>`).join("")}</tr>`;
+  let body = "";
+  rows.forEach((r,i) => {
+    const rowBg = i % 2 === 0 ? "#ffffff" : "#eff6ff";
+    body += `<tr style="background:${rowBg};">`;
+    body += `<td style="${td}">${escapeHtml(r.date||"-")}</td>`;
+    body += `<td style="${td}">${escapeHtml(r.time||"-")}</td>`;
+    body += `<td style="${td}font-weight:700;">${escapeHtml(r.exam||"-")}</td>`;
+    body += `<td style="${td}">${escapeHtml(r.cls||"-")}</td>`;
+    body += `<td style="${td}">${escapeHtml(r.subject||"-")}</td>`;
+    body += `<td style="${td}">${escapeHtml(r.venue||"-")}</td>`;
+    body += `<td style="${td}text-align:left;">${escapeHtml((r.invigilators||[]).join(", ")||"-")}</td>`;
+    body += `</tr>`;
+  });
+  return `<table style="border-collapse:collapse;width:100%;">${head}${body}</table>`;
+}
+function exportExamTimetableWord({ school, section, term, rows, preparedBy, notes }) {
+  let body = `<div style="text-align:center;">`;
+  if (school.logo) body += `<img src="${school.logo}" alt="logo" style="width:50px;height:50px;object-fit:contain;display:block;margin:0 auto 6px;"/>`;
+  body += `<div class="title">${escapeHtml(school.name||"")}</div>`;
+  body += `<div class="subtitle">${section==="upper"?"UPPER":"LOWER"} PRIMARY EXAM TIMETABLE — ${escapeHtml(toUpper(term))}</div>`;
+  body += `</div>`;
+  body += examTimetableHtmlTable(rows);
+  if (notes && notes.trim()) {
+    body += `<div style="margin-top:16px;font-size:10.5pt;">`;
+    body += notes.split(/\r?\n/).map(line => `<div>${escapeHtml(line)}</div>`).join("");
+    body += `</div>`;
+  }
+  body += `<div style="margin-top:30px;font-size:11pt;">PREPARED BY</div>`;
+  body += `<div style="margin-top:26px;font-size:11pt;font-weight:700;">${escapeHtml(preparedBy||"")}</div>`;
+  downloadWordHtml(`${section==="upper"?"Upper":"Lower"} Primary Exam Timetable - ${term}`, body, `${section==="upper"?"Upper":"Lower"}_Primary_Exam_Timetable_${safeFileName(term)}.doc`, { pageSize:"297mm 210mm" });
 }
 function titleBlockHtml(school, subtitle) {
   let html = `<div style="text-align:center;">`;
@@ -1581,7 +1664,7 @@ function SchoolCrest({ size = 64, ink = "#0f1115", paper = "#ffffff" }) {
     </svg>
   );
 }
-const PAGES = ["DASHBOARD","MARK ENTRY","MONTHLY EXAMS","GROUP WORK","MONTHLY CARDS","MONTHLY SLIPS","RESULT SHEETS","REPORT CARDS","LEARNERS","PLE INFO","MANAGE REQUESTS","SETTINGS","AUDIT LOG","DOWNLOAD CENTRE"];
+const PAGES = ["DASHBOARD","MARK ENTRY","MONTHLY EXAMS","GROUP WORK","EXAM TIMETABLE","MONTHLY CARDS","MONTHLY SLIPS","RESULT SHEETS","REPORT CARDS","LEARNERS","PLE INFO","MANAGE REQUESTS","SETTINGS","AUDIT LOG","DOWNLOAD CENTRE"];
 // Pages only the admin account can see/use. Teachers never see these in the sidebar.
 const ADMIN_ONLY_PAGES = ["MANAGE REQUESTS", "SETTINGS", "AUDIT LOG"];
 // ─── APP ─────────────────────────────────────────────────────────────────────
@@ -1592,6 +1675,7 @@ export default function App() {
   const [monthlyMarks, setMonthlyMarks] = useState({});
   const [groupWork, setGroupWork] = useState(DEFAULT_GROUP_WORK);
   const [municipalPerf, setMunicipalPerf] = useState(DEFAULT_MUNICIPAL_PERF);
+  const [examTimetable, setExamTimetable] = useState(DEFAULT_EXAM_TIMETABLE);
   const [bands, setBands] = useState(DEFAULT_BANDS);
   const [specialBands, setSpecialBands] = useState(DEFAULT_SPECIAL_BANDS);
   const [divisions, setDivisions] = useState(DEFAULT_DIVISIONS);
@@ -1620,11 +1704,11 @@ export default function App() {
   // effects and the poll loop so neither has to be re-created on every render
   const setters = { mkis_students: setStudents, mkis_termmarks: setTermMarks, mkis_monthlymarks: setMonthlyMarks,
     mkis_bands: setBands, mkis_special_bands: setSpecialBands, mkis_divisions: setDivisions, mkis_school: setSchool, mkis_accounts: setAccounts, mkis_changerequests: setChangeRequests, mkis_initials: setInitials,
-    mkis_locked_term: setLockedTerm, mkis_locked_monthly: setLockedMonthly, mkis_groupwork: setGroupWork, mkis_municipalperf: setMunicipalPerf };
+    mkis_locked_term: setLockedTerm, mkis_locked_monthly: setLockedMonthly, mkis_groupwork: setGroupWork, mkis_municipalperf: setMunicipalPerf, mkis_examtimetable: setExamTimetable };
   const stateRef = useRef({});
   stateRef.current = { mkis_students: students, mkis_termmarks: termMarks, mkis_monthlymarks: monthlyMarks,
     mkis_bands: bands, mkis_special_bands: specialBands, mkis_divisions: divisions, mkis_school: school, mkis_accounts: accounts, mkis_changerequests: changeRequests, mkis_initials: initials,
-    mkis_locked_term: lockedTerm, mkis_locked_monthly: lockedMonthly, mkis_groupwork: groupWork, mkis_municipalperf: municipalPerf };
+    mkis_locked_term: lockedTerm, mkis_locked_monthly: lockedMonthly, mkis_groupwork: groupWork, mkis_municipalperf: municipalPerf, mkis_examtimetable: examTimetable };
   // last value WE wrote (or loaded) per key, serialized -- used to tell "a
   // remote device changed this" apart from "this is just our own save echoing back"
   const lastSeenRef = useRef({});
@@ -1651,7 +1735,7 @@ export default function App() {
     let mounted = true;
     (async () => {
       await migrateLocalStorageOnce();
-      const [s, tm, mm, b, sb, d, sc, acc, reqs, ini, lt, lm, gw, mp] = await Promise.all([
+      const [s, tm, mm, b, sb, d, sc, acc, reqs, ini, lt, lm, gw, mp, et] = await Promise.all([
         loadShared("mkis_students", []),
         loadShared("mkis_termmarks", {}),
         loadShared("mkis_monthlymarks", {}),
@@ -1666,6 +1750,7 @@ export default function App() {
         loadShared("mkis_locked_monthly", {}),
         loadShared("mkis_groupwork", DEFAULT_GROUP_WORK),
         loadShared("mkis_municipalperf", DEFAULT_MUNICIPAL_PERF),
+        loadShared("mkis_examtimetable", DEFAULT_EXAM_TIMETABLE),
       ]);
       if (!mounted) return;
       setStudents(s); setTermMarks(tm); setMonthlyMarks(mm);
@@ -1686,11 +1771,11 @@ export default function App() {
       // school uploaded their own), so the built-in crest still shows up for
       // schools that never touched the logo field.
       setSchool({ ...DEFAULT_SCHOOL, ...sc, logo: sc?.logo || DEFAULT_SCHOOL.logo }); setAccounts(finalAccounts); setChangeRequests(reqs || []); setInitials(ini);
-      setLockedTerm(lt || {}); setLockedMonthly(lm || {}); setGroupWork(gw || {}); setMunicipalPerf(mp || {});
+      setLockedTerm(lt || {}); setLockedMonthly(lm || {}); setGroupWork(gw || {}); setMunicipalPerf(mp || {}); setExamTimetable(et || DEFAULT_EXAM_TIMETABLE);
       lastSeenRef.current = { mkis_students: JSON.stringify(s), mkis_termmarks: JSON.stringify(tm),
         mkis_monthlymarks: JSON.stringify(mm), mkis_bands: JSON.stringify(b), mkis_special_bands: JSON.stringify(sb || {}), mkis_divisions: JSON.stringify(d),
         mkis_school: JSON.stringify(sc), mkis_accounts: JSON.stringify(finalAccounts), mkis_changerequests: JSON.stringify(reqs || []), mkis_initials: JSON.stringify(ini),
-        mkis_locked_term: JSON.stringify(lt || {}), mkis_locked_monthly: JSON.stringify(lm || {}), mkis_groupwork: JSON.stringify(gw || {}), mkis_municipalperf: JSON.stringify(mp || {}) };
+        mkis_locked_term: JSON.stringify(lt || {}), mkis_locked_monthly: JSON.stringify(lm || {}), mkis_groupwork: JSON.stringify(gw || {}), mkis_municipalperf: JSON.stringify(mp || {}), mkis_examtimetable: JSON.stringify(et || DEFAULT_EXAM_TIMETABLE) };
       setDataReady(true);
       setLastSyncedAt(new Date());
     })();
@@ -1790,6 +1875,15 @@ export default function App() {
     lastSeenRef.current.mkis_municipalperf = JSON.stringify(merged);
     if (JSON.stringify(merged) !== JSON.stringify(municipalPerf)) setMunicipalPerf(merged);
   })(); } }, [municipalPerf, dataReady]);
+  useEffect(() => { if (dataReady) { (async () => {
+    const merged = await updateShared("mkis_examtimetable", examTimetable);
+    if (JSON.stringify(merged) !== JSON.stringify(examTimetable)) {
+      await writeAuditEntry("mkis_examtimetable", "UPDATE", lastAuditDetail.current["mkis_examtimetable"] || "Exam Timetable updated");
+      lastAuditDetail.current["mkis_examtimetable"] = "";
+    }
+    lastSeenRef.current.mkis_examtimetable = JSON.stringify(merged);
+    if (JSON.stringify(merged) !== JSON.stringify(examTimetable)) setExamTimetable(merged);
+  })(); } }, [examTimetable, dataReady]);
   useEffect(() => { if (dataReady) { lastSeenRef.current.mkis_divisions = JSON.stringify(divisions); saveShared("mkis_divisions", divisions); writeAuditEntry("mkis_divisions","UPDATE","Division pass-mark thresholds updated"); } }, [divisions, dataReady]);
   useEffect(() => { if (dataReady) { lastSeenRef.current.mkis_school = JSON.stringify(school); saveShared("mkis_school", school); writeAuditEntry("mkis_school","UPDATE",`School settings updated — ${school.name||""}`); } }, [school, dataReady]);
   useEffect(() => { if (dataReady) { (async () => {
@@ -2014,6 +2108,7 @@ export default function App() {
     if (d.monthlyMarks) { forceWriteRef.current.add("mkis_monthlymarks"); setMonthlyMarks(d.monthlyMarks); }
     if (d.groupWork)    { forceWriteRef.current.add("mkis_groupwork"); setGroupWork(d.groupWork); }
     if (d.municipalPerf){ forceWriteRef.current.add("mkis_municipalperf"); setMunicipalPerf(d.municipalPerf); }
+    if (d.examTimetable){ forceWriteRef.current.add("mkis_examtimetable"); setExamTimetable(d.examTimetable); }
     if (d.bands)         setBands(d.bands);
     if (d.specialBands)  setSpecialBands(d.specialBands);
     if (d.divisions)     setDivisions(d.divisions);
@@ -2084,7 +2179,7 @@ export default function App() {
       </div>
     );
   }
-  const props = { students, setStudents, termMarks, setTermMarks, monthlyMarks, setMonthlyMarks, groupWork, setGroupWork, municipalPerf, setMunicipalPerf, bands, setBands, specialBands, setSpecialBands, divisions, setDivisions, school, setSchool, accounts, setAccounts, initials, setInitials, updateTermMark, updateMonthlyMark, requestOrApplyTermMark, requestOrApplyMonthlyMark, addStudent, deleteStudent, forceRestoreData, promoteStudents, role, currentUser, changeRequests, submitChangeRequest, approveChangeRequest, rejectChangeRequest, lockedTerm, lockTermEntry, unlockTermEntry, lockedMonthly, lockMonthlyEntry, unlockMonthlyEntry, requestUnlockTerm, requestUnlockMonthly, markEditing, stampAudit };
+  const props = { students, setStudents, termMarks, setTermMarks, monthlyMarks, setMonthlyMarks, groupWork, setGroupWork, municipalPerf, setMunicipalPerf, examTimetable, setExamTimetable, bands, setBands, specialBands, setSpecialBands, divisions, setDivisions, school, setSchool, accounts, setAccounts, initials, setInitials, updateTermMark, updateMonthlyMark, requestOrApplyTermMark, requestOrApplyMonthlyMark, addStudent, deleteStudent, forceRestoreData, promoteStudents, role, currentUser, changeRequests, submitChangeRequest, approveChangeRequest, rejectChangeRequest, lockedTerm, lockTermEntry, unlockTermEntry, lockedMonthly, lockMonthlyEntry, unlockMonthlyEntry, requestUnlockTerm, requestUnlockMonthly, markEditing, stampAudit };
   return (
     <div className="app-shell" style={{display:"flex",minHeight:"100vh",fontFamily:"'Segoe UI',system-ui,sans-serif",background:"#f1f5f9"}}>
       {/* SIDEBAR */}
@@ -2097,7 +2192,7 @@ export default function App() {
         </div>
         <nav style={{flex:1,padding:"8px 0"}}>
           {PAGES.filter(p => !ADMIN_ONLY_PAGES.includes(p) || role==="admin").map(p => {
-            const icons = {"DASHBOARD":"📊","MARK ENTRY":"📝","MONTHLY EXAMS":"📅","GROUP WORK":"👨‍👩‍👧‍👦","MONTHLY CARDS":"🗂️","MONTHLY SLIPS":"🎫","RESULT SHEETS":"📋","REPORT CARDS":"🎓","LEARNERS":"👥","PLE INFO":"🏅","MANAGE REQUESTS":"🛂","SETTINGS":"⚙️","AUDIT LOG":"🕓","DOWNLOAD CENTRE":"📥"};
+            const icons = {"DASHBOARD":"📊","MARK ENTRY":"📝","MONTHLY EXAMS":"📅","GROUP WORK":"👨‍👩‍👧‍👦","EXAM TIMETABLE":"🗓️","MONTHLY CARDS":"🗂️","MONTHLY SLIPS":"🎫","RESULT SHEETS":"📋","REPORT CARDS":"🎓","LEARNERS":"👥","PLE INFO":"🏅","MANAGE REQUESTS":"🛂","SETTINGS":"⚙️","AUDIT LOG":"🕓","DOWNLOAD CENTRE":"📥"};
             const pendingCount = p==="MANAGE REQUESTS" ? changeRequests.filter(r=>r.status==="pending").length : 0;
             return (
               <button key={p} onClick={()=>setPage(p)}
@@ -2129,6 +2224,7 @@ export default function App() {
           {page==="MARK ENTRY" && <MarkEntry {...props} />}
           {page==="MONTHLY EXAMS" && <MonthlyExams {...props} />}
           {page==="GROUP WORK" && <GroupWork {...props} />}
+          {page==="EXAM TIMETABLE" && <ExamTimetable {...props} />}
           {page==="MONTHLY CARDS" && <MonthlyCards {...props} />}
           {page==="MONTHLY SLIPS" && <MonthlySlips {...props} />}
           {page==="RESULT SHEETS" && <ResultSheets {...props} />}
@@ -3543,8 +3639,11 @@ function GroupWork({ students, groupWork, setGroupWork, bands: defaultBands, spe
   const [term, setTerm] = useState("Term I");
   const [year, setYear] = useState(school.year||String(new Date().getFullYear()));
   const [testNo, setTestNo] = useState(GROUP_TEST_OPTIONS[0]);
+  const [viewMode, setViewMode] = useState("single"); // single | analysis
   const [pdfBusy, setPdfBusy] = useState(false);
+  const [analysisPdfBusy, setAnalysisPdfBusy] = useState(false);
   const cardRef = useRef(null);
+  const analysisCardRef = useRef(null);
   const isLower = LOWER_CLASSES.includes(cls);
   const subjects = isLower ? LOWER_SUBJECTS : UPPER_SUBJECTS;
   const tk = `${term}__${year}`;
@@ -3573,7 +3672,7 @@ function GroupWork({ students, groupWork, setGroupWork, bands: defaultBands, spe
 
   const addGroup = () => updatePeriod(cur => ({
     ...cur,
-    groups: [...(cur.groups||[]), { id: `g${Date.now()}${Math.random().toString(36).slice(2,6)}`, name: `Group ${(cur.groups||[]).length+1}`, members: [] }],
+    groups: [...(cur.groups||[]), { id: `g${Date.now()}${Math.random().toString(36).slice(2,6)}`, name: (()=>{ const n=(cur.groups||[]).length+1; const nick=GROUP_WORK_NICKNAMES[n-1]; return nick?`Group ${n} (${nick})`:`Group ${n}`; })(), members: [] }],
   }));
   const removeGroup = (gid) => {
     if (!window.confirm("Remove this group and its marks for this term? This can't be undone.")) return;
@@ -3620,23 +3719,77 @@ function GroupWork({ students, groupWork, setGroupWork, bands: defaultBands, spe
     return [...indexed].sort((a,b)=>{ if(a.pos==="-") return 1; if(b.pos==="-") return -1; return a.pos-b.pos; });
   }, [rows, positions]);
 
+  // General Group Performance Analysis: combines EVERY Group Test that has
+  // any marks entered for this class+term+year (not just the one currently
+  // selected above), so groups can be compared on their overall performance
+  // across the whole term rather than a single test at a time.
+  const analysisRows = useMemo(() => groups.map(g => {
+    const perTest = GROUP_TEST_OPTIONS.map(tn => {
+      const m = (period.marks?.[tn] || {})[g.id];
+      const hasData = !!m && subjects.some(sub => m[sub] !== undefined && m[sub] !== null);
+      if (!hasData) return { testNo: tn, hasData: false, totMk: null, totAgg: null };
+      const perSub = subjects.map(sub => {
+        const mk = m[sub];
+        const isX = (mk===undefined||mk===null);
+        const agg = (!isLower && !isX) ? aggOf(mk, bands) : undefined;
+        return { mk, agg, isX };
+      });
+      const hasX = !isLower && perSub.some(p=>p.isX);
+      const totMk = perSub.reduce((a,p)=>a+(p.mk??0),0);
+      const totAgg = (isLower || hasX) ? null : perSub.reduce((a,p)=>a+(p.agg??0),0);
+      return { testNo: tn, hasData: true, totMk, totAgg };
+    });
+    const completed = perTest.filter(t=>t.hasData);
+    const avgTotMk = completed.length ? completed.reduce((a,t)=>a+t.totMk,0)/completed.length : 0;
+    const aggTests = completed.filter(t=>typeof t.totAgg==="number");
+    const avgTotAgg = (!isLower && aggTests.length) ? aggTests.reduce((a,t)=>a+t.totAgg,0)/aggTests.length : null;
+    const overallDiv = (!isLower && avgTotAgg!==null) ? divisionOf(Math.round(avgTotAgg), subjects.length, divisions) : null;
+    const memberNames = g.members.map(mid => classStudents.find(s=>s.id===mid)?.name).filter(Boolean);
+    return { g, perTest, testsCompleted: completed.length, avgTotMk, avgTotAgg, overallDiv, memberNames };
+  }), [groups, period, subjects, isLower, bands, divisions, classStudents]);
+  const analysisPositions = useMemo(()=> rankWithTies(
+    analysisRows.map(r=>r.avgTotMk>0?r.avgTotMk:null),
+    analysisRows.map(r=>typeof r.avgTotAgg==="number"?r.avgTotAgg:null)
+  ), [analysisRows]);
+  const sortedAnalysisRows = useMemo(()=>{
+    const indexed = analysisRows.map((r,i)=>({...r,pos:analysisPositions[i]}));
+    return [...indexed].sort((a,b)=>{ if(a.pos==="-") return 1; if(b.pos==="-") return -1; return a.pos-b.pos; });
+  }, [analysisRows, analysisPositions]);
+
   return (
     <div>
+      <div className="no-print" style={{display:"flex",gap:8,marginBottom:12}}>
+        <button onClick={()=>setViewMode("single")} style={viewMode==="single"?btnPrimary:btnGhost}>📝 Single Test</button>
+        <button onClick={()=>setViewMode("analysis")} style={viewMode==="analysis"?btnPrimary:btnGhost}>📊 General Performance Analysis</button>
+      </div>
       <div className="no-print" style={{display:"flex",gap:10,marginBottom:16,flexWrap:"wrap",alignItems:"flex-end",justifyContent:"space-between"}}>
         <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"flex-end"}}>
           <Sel label="Class" value={cls} onChange={setCls} opts={ALL_CLASSES}/>
-          <Sel label="Test No." value={testNo} onChange={setTestNo} opts={GROUP_TEST_OPTIONS}/>
+          {viewMode==="single" && <Sel label="Test No." value={testNo} onChange={setTestNo} opts={GROUP_TEST_OPTIONS}/>}
           <Sel label="Term" value={term} onChange={setTerm} opts={TERMS}/>
           <div><label style={lbl}>Year</label><input type="number" value={year} onChange={e=>setYear(e.target.value)} style={{...inp,width:90}}/></div>
         </div>
         <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
           <button onClick={addGroup} style={btnPrimary}>+ Add Group</button>
-          <button onClick={()=>exportGroupWorkWord({ school, cls, term, year, testNo, isLower, subjects, sortedRows })} style={btnWord}>📄 Download Word</button>
-          <button disabled={pdfBusy} onClick={async()=>{
-            setPdfBusy(true);
-            try { await downloadNodesAsPdf([cardRef.current], `${safeFileName(cls)}_${safeFileName(term)}_${year}_${safeFileName(testNo)}.pdf`, "landscape"); }
-            finally { setPdfBusy(false); }
-          }} style={pdfBusy?btnPdfBusy:btnPdf}>{pdfBusy?"⏳ Generating...":"📕 Download PDF"}</button>
+          {viewMode==="single" ? (
+            <>
+              <button onClick={()=>exportGroupWorkWord({ school, cls, term, year, testNo, isLower, subjects, sortedRows })} style={btnWord}>📄 Download Word</button>
+              <button disabled={pdfBusy} onClick={async()=>{
+                setPdfBusy(true);
+                try { await downloadNodesAsPdf([cardRef.current], `${safeFileName(cls)}_${safeFileName(term)}_${year}_${safeFileName(testNo)}.pdf`, "landscape"); }
+                finally { setPdfBusy(false); }
+              }} style={pdfBusy?btnPdfBusy:btnPdf}>{pdfBusy?"⏳ Generating...":"📕 Download PDF"}</button>
+            </>
+          ) : (
+            <>
+              <button onClick={()=>exportGroupWorkAnalysisWord({ school, cls, term, year, isLower, subjects, sortedAnalysisRows })} style={btnWord}>📄 Download Word</button>
+              <button disabled={analysisPdfBusy} onClick={async()=>{
+                setAnalysisPdfBusy(true);
+                try { await downloadNodesAsPdf([analysisCardRef.current], `${safeFileName(cls)}_${safeFileName(term)}_${year}_General_Group_Analysis.pdf`, "landscape"); }
+                finally { setAnalysisPdfBusy(false); }
+              }} style={analysisPdfBusy?btnPdfBusy:btnPdf}>{analysisPdfBusy?"⏳ Generating...":"📕 Download PDF"}</button>
+            </>
+          )}
         </div>
       </div>
 
@@ -3645,7 +3798,7 @@ function GroupWork({ students, groupWork, setGroupWork, bands: defaultBands, spe
           No groups set up yet for {cls} — {term} {year}.<br/>
           <button onClick={addGroup} style={{...btnPrimary,marginTop:12}}>+ Add Group</button>
         </div>
-      ) : (
+      ) : viewMode==="single" ? (
         <div ref={cardRef} style={{background:"white",borderRadius:12,border:"1px solid #e5e7eb",overflow:"hidden",marginBottom:24}}>
           <div style={{background:"#1e3a6e",color:"white",padding:"12px 16px",textAlign:"center"}}>
             <div style={{fontWeight:800,fontSize:16}}>{school.name}</div>
@@ -3710,6 +3863,47 @@ function GroupWork({ students, groupWork, setGroupWork, bands: defaultBands, spe
             </table>
           </div>
         </div>
+      ) : (
+        <div ref={analysisCardRef} style={{background:"white",borderRadius:12,border:"1px solid #e5e7eb",overflow:"hidden",marginBottom:24}}>
+          <div style={{background:"#1e3a6e",color:"white",padding:"12px 16px",textAlign:"center"}}>
+            <div style={{fontWeight:800,fontSize:16}}>{school.name}</div>
+            <div style={{fontSize:12,opacity:0.9,marginTop:2}}>GENERAL GROUP PERFORMANCE ANALYSIS — {term.toUpperCase()}, {year} — {cls}</div>
+            <div style={{fontSize:11,opacity:0.8,marginTop:2}}>Combines every Group Test with marks entered this term</div>
+          </div>
+          <div style={{overflowX:"auto"}}>
+            <table style={{width:"100%",fontSize:12,minWidth:900}}>
+              <thead>
+                <tr style={{background:"#1e40af",color:"white"}}>
+                  <th style={th}>GROUP</th>
+                  <th style={{...th,textAlign:"left",minWidth:180}}>MEMBERS</th>
+                  {GROUP_TEST_OPTIONS.map(tn=><th key={tn} style={th}>{tn.replace("Group Test ","GT")}</th>)}
+                  <th style={th}>TESTS DONE</th>
+                  <th style={th}>AVG TOT MK</th>
+                  {!isLower && <><th style={th}>AVG TOT AGG</th><th style={th}>OVERALL DIV</th></>}
+                  <th style={th}>OVERALL POS</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sortedAnalysisRows.map((r,i)=>(
+                  <tr key={r.g.id} style={{background:i%2===0?"white":"#eff6ff"}}>
+                    <td style={{...td,fontWeight:700}}>{r.g.name}</td>
+                    <td style={{...td,textAlign:"left"}}>{r.memberNames.join(", ")||"-"}</td>
+                    {r.perTest.map(t=>(
+                      <td key={t.testNo} style={{...td,color:t.hasData?"#111827":"#9ca3af"}}>{t.hasData?t.totMk:"-"}</td>
+                    ))}
+                    <td style={{...td,fontWeight:700}}>{r.testsCompleted}/{GROUP_TEST_OPTIONS.length}</td>
+                    <td style={{...td,fontWeight:700,background:"#ede9fe"}}>{r.avgTotMk>0?r.avgTotMk.toFixed(1):"-"}</td>
+                    {!isLower && <>
+                      <td style={{...td,background:"#ede9fe"}}>{r.avgTotAgg!==null?r.avgTotAgg.toFixed(1):"-"}</td>
+                      <td style={{...td,fontWeight:700,color:"#1e40af"}}>{r.overallDiv||"-"}</td>
+                    </>}
+                    <td style={td}>{r.pos!=="-"?<PositionBadge pos={r.pos} size={13}/>:"-"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
       )}
     </div>
   );
@@ -3732,6 +3926,170 @@ function GroupMembersPicker({ group, classStudents, onToggle }) {
             <label key={s.id} style={{display:"flex",alignItems:"center",gap:8,fontSize:12,padding:"4px 6px",cursor:"pointer",borderRadius:6}}>
               <input type="checkbox" checked={group.members.includes(s.id)} onChange={()=>onToggle(s.id)} />
               {s.name}
+            </label>
+          ))}
+          <button onClick={()=>setOpen(false)} style={{...btnGhost,width:"100%",marginTop:6,padding:"5px 0",fontSize:12}}>Done</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── EXAM TIMETABLE ──────────────────────────────────────────────────────────
+function ExamTimetable({ examTimetable, setExamTimetable, school, markEditing }) {
+  const [section, setSection] = useState("upper"); // upper | lower
+  const [term, setTerm] = useState(TERMS[0]);
+  const [pdfBusy, setPdfBusy] = useState(false);
+  const cardRef = useRef(null);
+  const classesForSection = section === "upper" ? ["P4","P5","P6","P7"] : ["P1","P2","P3"];
+  const subjectsForSection = section === "upper" ? UPPER_SUBJECTS : LOWER_SUBJECTS;
+  const sectionData = examTimetable?.[section]?.[term] || { rows: [], preparedBy: "" };
+  const rows = sectionData.rows || [];
+
+  const updateSection = useCallback((updater) => {
+    markEditing();
+    setExamTimetable(prev => {
+      const sectionBucket = prev[section] || {};
+      const cur = sectionBucket[term] || { rows: [], preparedBy: "" };
+      return { ...prev, [section]: { ...sectionBucket, [term]: updater(cur) } };
+    });
+  }, [section, term, markEditing, setExamTimetable]);
+
+  const blankRow = (overrides={}) => ({
+    id: `et${Date.now()}${Math.random().toString(36).slice(2,6)}`,
+    date: "", time: "", exam: EXAM_TIMETABLE_TYPES[0],
+    cls: classesForSection[0], subject: subjectsForSection[0],
+    venue: EXAM_TIMETABLE_VENUES[0], invigilators: [],
+    ...overrides,
+  });
+  const addRow = () => updateSection(cur => ({ ...cur, rows: [...(cur.rows||[]), blankRow()] }));
+  // Convenience: since one exam session (same date/time/exam) usually covers
+  // several classes at once -- exactly like the school's own paper
+  // timetable -- this copies the date/time/exam off the last row so adding
+  // the next class doesn't mean re-typing them.
+  const addClassToSameSession = () => updateSection(cur => {
+    const last = (cur.rows||[])[cur.rows.length-1];
+    return { ...cur, rows: [...(cur.rows||[]), blankRow(last ? { date:last.date, time:last.time, exam:last.exam } : {})] };
+  });
+  const removeRow = (id) => updateSection(cur => ({ ...cur, rows: (cur.rows||[]).filter(r=>r.id!==id) }));
+  const updateRow = (id, field, val) => updateSection(cur => ({ ...cur, rows: (cur.rows||[]).map(r=>r.id===id?{...r,[field]:val}:r) }));
+  const toggleInvigilator = (id, name) => updateSection(cur => ({
+    ...cur,
+    rows: (cur.rows||[]).map(r=>{
+      if (r.id!==id) return r;
+      const has = (r.invigilators||[]).includes(name);
+      return { ...r, invigilators: has ? r.invigilators.filter(n=>n!==name) : [...(r.invigilators||[]), name] };
+    }),
+  }));
+  const setPreparedBy = (val) => updateSection(cur => ({ ...cur, preparedBy: val }));
+  const setNotes = (val) => updateSection(cur => ({ ...cur, notes: val }));
+
+  return (
+    <div>
+      <div className="no-print" style={{display:"flex",gap:10,marginBottom:16,flexWrap:"wrap",alignItems:"flex-end",justifyContent:"space-between"}}>
+        <div style={{display:"flex",gap:8,alignItems:"flex-end",flexWrap:"wrap"}}>
+          <button onClick={()=>setSection("upper")} style={section==="upper"?btnPrimary:btnGhost}>Upper Primary (P4–P7)</button>
+          <button onClick={()=>setSection("lower")} style={section==="lower"?btnPrimary:btnGhost}>Lower Primary (P1–P3)</button>
+          <Sel label="Term" value={term} onChange={setTerm} opts={TERMS}/>
+        </div>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+          <button onClick={addRow} style={btnPrimary}>+ Add Session</button>
+          <button onClick={addClassToSameSession} disabled={rows.length===0} style={{...btnGhost,opacity:rows.length===0?0.5:1}}>+ Add Class (Same Session)</button>
+          <button onClick={()=>exportExamTimetableWord({ school, section, term, rows, preparedBy: sectionData.preparedBy, notes: sectionData.notes })} style={btnWord}>📄 Download Word</button>
+          <button disabled={pdfBusy} onClick={async()=>{
+            setPdfBusy(true);
+            try { await downloadNodesAsPdf([cardRef.current], `${section==="upper"?"Upper":"Lower"}_Primary_Exam_Timetable_${safeFileName(term)}.pdf`, "landscape"); }
+            finally { setPdfBusy(false); }
+          }} style={pdfBusy?btnPdfBusy:btnPdf}>{pdfBusy?"⏳ Generating...":"📕 Download PDF"}</button>
+        </div>
+      </div>
+
+      {rows.length===0 ? (
+        <div style={{background:"white",borderRadius:12,border:"1.5px dashed #d1d5db",padding:"40px 20px",textAlign:"center",color:"#9ca3af"}}>
+          No exam sessions added yet for {section==="upper"?"Upper":"Lower"} Primary — {term}.<br/>
+          <button onClick={addRow} style={{...btnPrimary,marginTop:12}}>+ Add Session</button>
+        </div>
+      ) : (
+        <div ref={cardRef} style={{background:"white",borderRadius:12,border:"1px solid #e5e7eb",overflow:"hidden",marginBottom:16}}>
+          <div style={{background:"#1e3a6e",color:"white",padding:"14px 16px",textAlign:"center"}}>
+            {school.logo && <img src={school.logo} alt="logo" style={{width:40,height:40,objectFit:"contain",margin:"0 auto 6px",display:"block"}}/>}
+            <div style={{fontWeight:800,fontSize:16}}>{school.name}</div>
+            <div style={{fontSize:13,opacity:0.9,marginTop:2,fontWeight:700}}>{section==="upper"?"UPPER":"LOWER"} PRIMARY EXAM TIMETABLE — {term.toUpperCase()}</div>
+          </div>
+          <div style={{overflowX:"auto"}}>
+            <table style={{width:"100%",fontSize:12,minWidth:900}}>
+              <thead>
+                <tr style={{background:"#1e40af",color:"white"}}>
+                  {["DATE","TIME","EXAM","CLASS","SUBJECT","VENUE","INVIGILATOR(S)",""].map(h=><th key={h} style={th}>{h}</th>)}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r,i)=>(
+                  <tr key={r.id} style={{background:i%2===0?"white":"#eff6ff"}}>
+                    <td style={td}><input value={r.date} onChange={e=>updateRow(r.id,"date",e.target.value)} placeholder="e.g. Mon 27/08/2026" style={{...inp,width:120,padding:"4px 6px",fontSize:12}}/></td>
+                    <td style={td}><input value={r.time} onChange={e=>updateRow(r.id,"time",e.target.value)} placeholder="e.g. 8:00-10:30am" style={{...inp,width:110,padding:"4px 6px",fontSize:12}}/></td>
+                    <td style={td}>
+                      <select value={r.exam} onChange={e=>updateRow(r.id,"exam",e.target.value)} style={{...inp,padding:"4px 6px",fontSize:12}}>
+                        {EXAM_TIMETABLE_TYPES.map(x=><option key={x}>{x}</option>)}
+                      </select>
+                    </td>
+                    <td style={td}>
+                      <select value={r.cls} onChange={e=>updateRow(r.id,"cls",e.target.value)} style={{...inp,padding:"4px 6px",fontSize:12}}>
+                        {classesForSection.map(c=><option key={c}>{c}</option>)}
+                      </select>
+                    </td>
+                    <td style={td}>
+                      <select value={r.subject} onChange={e=>updateRow(r.id,"subject",e.target.value)} style={{...inp,padding:"4px 6px",fontSize:12}}>
+                        {subjectsForSection.map(s=><option key={s}>{s}</option>)}
+                      </select>
+                    </td>
+                    <td style={td}>
+                      <select value={r.venue} onChange={e=>updateRow(r.id,"venue",e.target.value)} style={{...inp,padding:"4px 6px",fontSize:12}}>
+                        {EXAM_TIMETABLE_VENUES.map(v=><option key={v}>{v}</option>)}
+                      </select>
+                    </td>
+                    <td style={{...td,textAlign:"left",minWidth:180}}>
+                      <InvigilatorsPicker row={r} onToggle={name=>toggleInvigilator(r.id,name)} />
+                    </td>
+                    <td className="no-print" style={td}><button onClick={()=>removeRow(r.id)} style={{...btnDanger,padding:"3px 8px",fontSize:11}}>✕</button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div style={{padding:"16px 20px",borderTop:"1px solid #e5e7eb"}}>
+            <label style={lbl}>Notes (e.g. reminders about dues, reporting time, requirements)</label>
+            <textarea value={sectionData.notes||""} onChange={e=>setNotes(e.target.value)} placeholder={"e.g. All school dues must be cleared before sitting exams.\nPupils should be seated 15 minutes before each exam begins."}
+              rows={3} style={{...inp,width:"100%",maxWidth:600,resize:"vertical",fontFamily:"inherit"}}/>
+          </div>
+          <div style={{padding:"0 20px 16px",borderTop:sectionData.notes?"none":"1px solid #e5e7eb",paddingTop:sectionData.notes?0:16}}>
+            <label style={lbl}>Prepared By</label>
+            <input value={sectionData.preparedBy||""} onChange={e=>setPreparedBy(e.target.value)} placeholder="Type the name/title of who prepared this timetable"
+              style={{...inp,maxWidth:360}}/>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+// Small multi-select popover for the fixed list of invigilators, matching
+// the same click-to-open checklist pattern as GroupMembersPicker above.
+function InvigilatorsPicker({ row, onToggle }) {
+  const [open, setOpen] = useState(false);
+  const invigilators = row.invigilators || [];
+  return (
+    <div style={{position:"relative"}}>
+      <div onClick={()=>setOpen(o=>!o)} style={{cursor:"pointer",fontSize:12,lineHeight:1.6,minHeight:20,border:"1px dashed #d1d5db",borderRadius:6,padding:"4px 8px"}}>
+        {invigilators.length
+          ? invigilators.join(", ")
+          : <span style={{color:"#9ca3af",fontStyle:"italic"}}>Click to select…</span>}
+      </div>
+      {open && (
+        <div className="no-print" style={{position:"absolute",zIndex:20,top:"100%",left:0,background:"white",border:"1.5px solid #d1d5db",borderRadius:8,boxShadow:"0 8px 20px rgba(0,0,0,0.12)",padding:8,minWidth:230,maxHeight:260,overflowY:"auto"}}>
+          {EXAM_TIMETABLE_INVIGILATORS.map(name=>(
+            <label key={name} style={{display:"flex",alignItems:"center",gap:8,fontSize:12,padding:"4px 6px",cursor:"pointer",borderRadius:6}}>
+              <input type="checkbox" checked={invigilators.includes(name)} onChange={()=>onToggle(name)} />
+              {name}
             </label>
           ))}
           <button onClick={()=>setOpen(false)} style={{...btnGhost,width:"100%",marginTop:6,padding:"5px 0",fontSize:12}}>Done</button>
@@ -4127,9 +4485,9 @@ function MonthlySlip({ school, student, monthData, term, year, cls, isLower, sub
                         <td style={{...td,background:mIdx%2===0?"#fff7ed":"#fef3c7",fontWeight:(p.isX||p.agg!==undefined)?800:400,color:p.isX?"#dc2626":(p.agg!==undefined?"#92400e":"#9ca3af"),fontSize:12,padding:"0 2px",verticalAlign:"middle"}}>{hasX&&p.isX?"X":(p.agg!==undefined?p.agg:"-")}</td>
                       </React.Fragment>
                 ))}
-                <td style={{...td,fontWeight:800,background:mIdx%2===0?"#ede9fe":"#ddd6fe",color:"#4c1d95",fontSize:12,padding:"0 2px",verticalAlign:"middle"}}>{totMk>0?totMk:"-"}</td>
+                <td style={{...td,fontWeight:800,background:mIdx%2===0?"#ede9fe":"#ddd6fe",color:"#111827",fontSize:10,padding:"0 2px",verticalAlign:"middle"}}>{totMk>0?totMk:"-"}</td>
                 {!isLower && <>
-                  <td style={{...td,background:mIdx%2===0?"#ede9fe":"#ddd6fe",fontWeight:800,color:hasX?"#dc2626":"#4c1d95",fontSize:12,padding:"0 2px",verticalAlign:"middle"}}>{hasX?"X":(totAgg>0?totAgg:"-")}</td>
+                  <td style={{...td,background:mIdx%2===0?"#fff7ed":"#fef3c7",fontWeight:800,color:hasX?"#dc2626":"#92400e",fontSize:10,padding:"0 2px",verticalAlign:"middle"}}>{hasX?"X":(totAgg>0?totAgg:"-")}</td>
                   <td style={{...td,fontWeight:800,color:hasX?"#dc2626":"#1e40af",fontSize:12,padding:"0 2px",verticalAlign:"middle"}}>{hasX?"X":(totMk>0?div:"-")}</td>
                 </>}
                 {/* POS: badge with suffix (e.g. "1st") at smaller size so it fits */}
@@ -6107,7 +6465,7 @@ function Settings({ school, setSchool, bands, setBands, specialBands, setSpecial
   );
 }
 // ─── DOWNLOAD CENTRE ─────────────────────────────────────────────────────────
-function DownloadCentre({ students, termMarks, monthlyMarks, groupWork, municipalPerf, bands, specialBands, divisions, school, accounts, role, currentUser, forceRestoreData }) {
+function DownloadCentre({ students, termMarks, monthlyMarks, groupWork, municipalPerf, examTimetable, bands, specialBands, divisions, school, accounts, role, currentUser, forceRestoreData }) {
   const [importStatus, setImportStatus] = useState("");
   const [importError, setImportError] = useState("");
   const [restoreConfirm, setRestoreConfirm] = useState(false);
@@ -6130,7 +6488,7 @@ function DownloadCentre({ students, termMarks, monthlyMarks, groupWork, municipa
     const data = {
       _meta: { version: 2, exportedAt: new Date().toISOString(), school: school.name },
       school, bands, specialBands, divisions, accounts,
-      students, termMarks, monthlyMarks, groupWork, municipalPerf,
+      students, termMarks, monthlyMarks, groupWork, municipalPerf, examTimetable,
     };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
     triggerBlobDownload(blob, `MKIS_full_backup_${ts()}.json`);
@@ -6595,7 +6953,7 @@ function AuditLog() {
     mkis_students:"Students", mkis_termmarks:"Term Marks", mkis_monthlymarks:"Monthly Marks",
     mkis_bands:"Grade Bands", mkis_special_bands:"Special Grading Scale", mkis_divisions:"Divisions", mkis_school:"School Settings",
     mkis_accounts:"Accounts", mkis_changerequests:"Change Requests", mkis_initials:"Initials",
-    mkis_locked_term:"Term Lock", mkis_locked_monthly:"Monthly Lock", mkis_groupwork:"Group Work", mkis_municipalperf:"Municipal Performance",
+    mkis_locked_term:"Term Lock", mkis_locked_monthly:"Monthly Lock", mkis_groupwork:"Group Work", mkis_municipalperf:"Municipal Performance", mkis_examtimetable:"Exam Timetable",
   }[key] || key);
 
   const filtered = rows
