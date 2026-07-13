@@ -37,13 +37,14 @@ const MUNICIPAL_EXAM_TYPES = ["Mock Exam","PLE"];
 const DEFAULT_MUNICIPAL_PERF = {};
 const EXAM_TIMETABLE_TYPES = ["BEGINNING OF TERM","MIDTERM","GROUP WORK","SPECIAL EXAM","MOCK","END OF TERM"];
 const EXAM_TIMETABLE_VENUES = ["P.1 ROOM","P.2 ROOM","P.3 ROOM","P.4 ROOM","P.5 ROOM","P.6 ROOM","P.7 ROOM","HALL","P.1 B ROOM","P.5 B ROOM","P.7 B ROOM"];
-const EXAM_TIMETABLE_INVIGILATORS = ["MR OMIITA GERALD","MR EMURON JOHN","MR ODOI JOSEPH","MR JAKISA KALIST","MS NYAWERE IMMACULATE","MS AKOTH TABISA","MS KEKO MARY GORRET","MS IJANG GRACE","MS NYACHWO ESTHER","MS IGARI KOLOSTIKA","MS ANYANGO CATHERINE"];
-// Exam Timetable: separate Upper (P4-P7) and Lower (P1-P3) sheets, each its
-// own list of session rows plus its own manually-typed "Prepared by" line --
-// matching the school's own two paper timetables (one per section).
-// { upper: { rows:[{id,date,time,exam,cls,subject,venue,invigilators:[]}], preparedBy:"" },
-//   lower: { rows:[...], preparedBy:"" } }
-const DEFAULT_EXAM_TIMETABLE = { upper: { rows: [], preparedBy: "" }, lower: { rows: [], preparedBy: "" } };
+const EXAM_TIMETABLE_INVIGILATORS = ["MR OMIITA GERALD","MR EMURON JOHN","MR ODOI JOSEPH","MR JAKISA KALIST","MS NYAWERE IMMACULATE","MS AKOTH TABISA","MS KEKO MARY GORRET","MS IJANG GRACE","MS NYACHWO ESTHER","MS IGARI KOLOSTIKA","MS ANYANGO CHRISTINE"];
+// Exam Timetable: separate Upper (P4-P7) and Lower (P1-P3) sheets, each
+// further split by term (each term gets its own timetable), plus its own
+// manually-typed "Prepared by" line -- matching the school's own paper
+// timetables (one per section per term).
+// { upper: { [term]: { rows:[{id,date,time,exam,cls,subject,venue,invigilators:[]}], preparedBy:"" } },
+//   lower: { [term]: { rows:[...], preparedBy:"" } } }
+const DEFAULT_EXAM_TIMETABLE = {};
 const TERM_MONTHS = {
   "Term I": ["FEB","MAR","APR"],
   "Term II": ["MAY","JUN","JUL"],
@@ -1004,16 +1005,21 @@ function examTimetableHtmlTable(rows) {
   });
   return `<table style="border-collapse:collapse;width:100%;">${head}${body}</table>`;
 }
-function exportExamTimetableWord({ school, section, rows, preparedBy }) {
+function exportExamTimetableWord({ school, section, term, rows, preparedBy, notes }) {
   let body = `<div style="text-align:center;">`;
   if (school.logo) body += `<img src="${school.logo}" alt="logo" style="width:50px;height:50px;object-fit:contain;display:block;margin:0 auto 6px;"/>`;
   body += `<div class="title">${escapeHtml(school.name||"")}</div>`;
-  body += `<div class="subtitle">${section==="upper"?"UPPER":"LOWER"} PRIMARY EXAM TIMETABLE</div>`;
+  body += `<div class="subtitle">${section==="upper"?"UPPER":"LOWER"} PRIMARY EXAM TIMETABLE — ${escapeHtml(toUpper(term))}</div>`;
   body += `</div>`;
   body += examTimetableHtmlTable(rows);
+  if (notes && notes.trim()) {
+    body += `<div style="margin-top:16px;font-size:10.5pt;">`;
+    body += notes.split(/\r?\n/).map(line => `<div>${escapeHtml(line)}</div>`).join("");
+    body += `</div>`;
+  }
   body += `<div style="margin-top:30px;font-size:11pt;">PREPARED BY</div>`;
   body += `<div style="margin-top:26px;font-size:11pt;font-weight:700;">${escapeHtml(preparedBy||"")}</div>`;
-  downloadWordHtml(`${section==="upper"?"Upper":"Lower"} Primary Exam Timetable`, body, `${section==="upper"?"Upper":"Lower"}_Primary_Exam_Timetable.doc`, { pageSize:"297mm 210mm" });
+  downloadWordHtml(`${section==="upper"?"Upper":"Lower"} Primary Exam Timetable - ${term}`, body, `${section==="upper"?"Upper":"Lower"}_Primary_Exam_Timetable_${safeFileName(term)}.doc`, { pageSize:"297mm 210mm" });
 }
 function titleBlockHtml(school, subtitle) {
   let html = `<div style="text-align:center;">`;
@@ -3798,17 +3804,22 @@ function GroupMembersPicker({ group, classStudents, onToggle }) {
 // ─── EXAM TIMETABLE ──────────────────────────────────────────────────────────
 function ExamTimetable({ examTimetable, setExamTimetable, school, markEditing }) {
   const [section, setSection] = useState("upper"); // upper | lower
+  const [term, setTerm] = useState(TERMS[0]);
   const [pdfBusy, setPdfBusy] = useState(false);
   const cardRef = useRef(null);
   const classesForSection = section === "upper" ? ["P4","P5","P6","P7"] : ["P1","P2","P3"];
   const subjectsForSection = section === "upper" ? UPPER_SUBJECTS : LOWER_SUBJECTS;
-  const sectionData = examTimetable?.[section] || { rows: [], preparedBy: "" };
+  const sectionData = examTimetable?.[section]?.[term] || { rows: [], preparedBy: "" };
   const rows = sectionData.rows || [];
 
   const updateSection = useCallback((updater) => {
     markEditing();
-    setExamTimetable(prev => ({ ...prev, [section]: updater(prev[section] || { rows: [], preparedBy: "" }) }));
-  }, [section, markEditing, setExamTimetable]);
+    setExamTimetable(prev => {
+      const sectionBucket = prev[section] || {};
+      const cur = sectionBucket[term] || { rows: [], preparedBy: "" };
+      return { ...prev, [section]: { ...sectionBucket, [term]: updater(cur) } };
+    });
+  }, [section, term, markEditing, setExamTimetable]);
 
   const blankRow = (overrides={}) => ({
     id: `et${Date.now()}${Math.random().toString(36).slice(2,6)}`,
@@ -3837,21 +3848,23 @@ function ExamTimetable({ examTimetable, setExamTimetable, school, markEditing })
     }),
   }));
   const setPreparedBy = (val) => updateSection(cur => ({ ...cur, preparedBy: val }));
+  const setNotes = (val) => updateSection(cur => ({ ...cur, notes: val }));
 
   return (
     <div>
       <div className="no-print" style={{display:"flex",gap:10,marginBottom:16,flexWrap:"wrap",alignItems:"flex-end",justifyContent:"space-between"}}>
-        <div style={{display:"flex",gap:8}}>
+        <div style={{display:"flex",gap:8,alignItems:"flex-end",flexWrap:"wrap"}}>
           <button onClick={()=>setSection("upper")} style={section==="upper"?btnPrimary:btnGhost}>Upper Primary (P4–P7)</button>
           <button onClick={()=>setSection("lower")} style={section==="lower"?btnPrimary:btnGhost}>Lower Primary (P1–P3)</button>
+          <Sel label="Term" value={term} onChange={setTerm} opts={TERMS}/>
         </div>
         <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
           <button onClick={addRow} style={btnPrimary}>+ Add Session</button>
           <button onClick={addClassToSameSession} disabled={rows.length===0} style={{...btnGhost,opacity:rows.length===0?0.5:1}}>+ Add Class (Same Session)</button>
-          <button onClick={()=>exportExamTimetableWord({ school, section, rows, preparedBy: sectionData.preparedBy })} style={btnWord}>📄 Download Word</button>
+          <button onClick={()=>exportExamTimetableWord({ school, section, term, rows, preparedBy: sectionData.preparedBy, notes: sectionData.notes })} style={btnWord}>📄 Download Word</button>
           <button disabled={pdfBusy} onClick={async()=>{
             setPdfBusy(true);
-            try { await downloadNodesAsPdf([cardRef.current], `${section==="upper"?"Upper":"Lower"}_Primary_Exam_Timetable.pdf`, "landscape"); }
+            try { await downloadNodesAsPdf([cardRef.current], `${section==="upper"?"Upper":"Lower"}_Primary_Exam_Timetable_${safeFileName(term)}.pdf`, "landscape"); }
             finally { setPdfBusy(false); }
           }} style={pdfBusy?btnPdfBusy:btnPdf}>{pdfBusy?"⏳ Generating...":"📕 Download PDF"}</button>
         </div>
@@ -3859,7 +3872,7 @@ function ExamTimetable({ examTimetable, setExamTimetable, school, markEditing })
 
       {rows.length===0 ? (
         <div style={{background:"white",borderRadius:12,border:"1.5px dashed #d1d5db",padding:"40px 20px",textAlign:"center",color:"#9ca3af"}}>
-          No exam sessions added yet for {section==="upper"?"Upper":"Lower"} Primary.<br/>
+          No exam sessions added yet for {section==="upper"?"Upper":"Lower"} Primary — {term}.<br/>
           <button onClick={addRow} style={{...btnPrimary,marginTop:12}}>+ Add Session</button>
         </div>
       ) : (
@@ -3867,7 +3880,7 @@ function ExamTimetable({ examTimetable, setExamTimetable, school, markEditing })
           <div style={{background:"#1e3a6e",color:"white",padding:"14px 16px",textAlign:"center"}}>
             {school.logo && <img src={school.logo} alt="logo" style={{width:40,height:40,objectFit:"contain",margin:"0 auto 6px",display:"block"}}/>}
             <div style={{fontWeight:800,fontSize:16}}>{school.name}</div>
-            <div style={{fontSize:13,opacity:0.9,marginTop:2,fontWeight:700}}>{section==="upper"?"UPPER":"LOWER"} PRIMARY EXAM TIMETABLE</div>
+            <div style={{fontSize:13,opacity:0.9,marginTop:2,fontWeight:700}}>{section==="upper"?"UPPER":"LOWER"} PRIMARY EXAM TIMETABLE — {term.toUpperCase()}</div>
           </div>
           <div style={{overflowX:"auto"}}>
             <table style={{width:"100%",fontSize:12,minWidth:900}}>
@@ -3911,6 +3924,11 @@ function ExamTimetable({ examTimetable, setExamTimetable, school, markEditing })
             </table>
           </div>
           <div style={{padding:"16px 20px",borderTop:"1px solid #e5e7eb"}}>
+            <label style={lbl}>Notes (e.g. reminders about dues, reporting time, requirements)</label>
+            <textarea value={sectionData.notes||""} onChange={e=>setNotes(e.target.value)} placeholder={"e.g. All school dues must be cleared before sitting exams.\nPupils should be seated 15 minutes before each exam begins."}
+              rows={3} style={{...inp,width:"100%",maxWidth:600,resize:"vertical",fontFamily:"inherit"}}/>
+          </div>
+          <div style={{padding:"0 20px 16px",borderTop:sectionData.notes?"none":"1px solid #e5e7eb",paddingTop:sectionData.notes?0:16}}>
             <label style={lbl}>Prepared By</label>
             <input value={sectionData.preparedBy||""} onChange={e=>setPreparedBy(e.target.value)} placeholder="Type the name/title of who prepared this timetable"
               style={{...inp,maxWidth:360}}/>
@@ -4333,9 +4351,9 @@ function MonthlySlip({ school, student, monthData, term, year, cls, isLower, sub
                         <td style={{...td,background:mIdx%2===0?"#fff7ed":"#fef3c7",fontWeight:(p.isX||p.agg!==undefined)?800:400,color:p.isX?"#dc2626":(p.agg!==undefined?"#92400e":"#9ca3af"),fontSize:12,padding:"0 2px",verticalAlign:"middle"}}>{hasX&&p.isX?"X":(p.agg!==undefined?p.agg:"-")}</td>
                       </React.Fragment>
                 ))}
-                <td style={{...td,fontWeight:800,background:mIdx%2===0?"#ede9fe":"#ddd6fe",color:"#4c1d95",fontSize:12,padding:"0 2px",verticalAlign:"middle"}}>{totMk>0?totMk:"-"}</td>
+                <td style={{...td,fontWeight:800,background:mIdx%2===0?"#ede9fe":"#ddd6fe",color:"#111827",fontSize:10,padding:"0 2px",verticalAlign:"middle"}}>{totMk>0?totMk:"-"}</td>
                 {!isLower && <>
-                  <td style={{...td,background:mIdx%2===0?"#ede9fe":"#ddd6fe",fontWeight:800,color:hasX?"#dc2626":"#4c1d95",fontSize:12,padding:"0 2px",verticalAlign:"middle"}}>{hasX?"X":(totAgg>0?totAgg:"-")}</td>
+                  <td style={{...td,background:mIdx%2===0?"#fff7ed":"#fef3c7",fontWeight:800,color:hasX?"#dc2626":"#92400e",fontSize:10,padding:"0 2px",verticalAlign:"middle"}}>{hasX?"X":(totAgg>0?totAgg:"-")}</td>
                   <td style={{...td,fontWeight:800,color:hasX?"#dc2626":"#1e40af",fontSize:12,padding:"0 2px",verticalAlign:"middle"}}>{hasX?"X":(totMk>0?div:"-")}</td>
                 </>}
                 {/* POS: badge with suffix (e.g. "1st") at smaller size so it fits */}
