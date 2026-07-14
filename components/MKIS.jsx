@@ -14,9 +14,17 @@ import { supabase } from "@/integrations/supabase/client";
 const ALL_CLASSES = ["P1","P2","P3","P4","P5","P6","P7"];
 const LOWER_CLASSES = ["P1","P2","P3"];
 const UPPER_CLASSES = ["P4","P5","P6","P7"];
-const LOWER_SUBJECTS = ["MATHS","LIT I","LIT II","ENG","RE","READING","WRITING"];
-const LOWER_MONTHLY_SUBJECTS = ["MATHS","LIT I","LIT II","ENG","RE","READING","WRITING"];
+const LOWER_SUBJECTS = ["MATHS","LIT I","LIT II","ENG","RE"];
+const LOWER_MONTHLY_SUBJECTS = ["MATHS","LIT I","LIT II","ENG","RE"];
 const LOWER_SUBJECT_MAX = { READING: 50, WRITING: 50 };
+// READING and WRITING are no longer recognized/graded subjects anywhere in
+// the system (Mark Entry, Monthly Exams, Result Sheets, Report Cards,
+// Monthly Cards/Slips, PLE, etc.) -- removed from LOWER_SUBJECTS above.
+// The Exam Timetable is the one deliberate exception: it still needs to be
+// able to schedule a Reading or Writing exam session even though those
+// subjects no longer carry marks/grades, so it uses this separate, fuller
+// list instead of LOWER_SUBJECTS.
+const EXAM_TIMETABLE_LOWER_SUBJECTS = ["MATHS","LIT I","LIT II","ENG","RE","READING","WRITING"];
 const lowerSubjectMax = (sub) => LOWER_SUBJECT_MAX[sub] || 100;
 const UPPER_SUBJECTS = ["ENG","MATH","SST","SCI"];
 const MONTHLY_SUBJECTS = ["ENG","MATH","SST","SCI"];
@@ -1670,6 +1678,16 @@ const ADMIN_ONLY_PAGES = ["MANAGE REQUESTS", "SETTINGS", "AUDIT LOG"];
 // ─── APP ─────────────────────────────────────────────────────────────────────
 export default function App() {
   const [page, setPage] = useState("DASHBOARD");
+  // Dashboard's "Performance Period" Term/Year selector lives here rather
+  // than as local state inside Dashboard itself. Every page in this app is
+  // conditionally rendered ({page==="X" && <X/>}), so navigating away from
+  // Dashboard to any other page and back actually unmounts and remounts it --
+  // local state inside Dashboard would reset to its default every time,
+  // which is exactly why the term kept reverting to Term I after being
+  // changed to Term II/III. Lifting it up here means it survives
+  // navigating away and back, since App itself never unmounts.
+  const [dashboardPerfTerm, setDashboardPerfTerm] = useState("Term I");
+  const [dashboardPerfYear, setDashboardPerfYear] = useState(String(new Date().getFullYear()));
   const [students, setStudents] = useState([]);
   const [termMarks, setTermMarks] = useState({});
   const [monthlyMarks, setMonthlyMarks] = useState({});
@@ -2179,7 +2197,7 @@ export default function App() {
       </div>
     );
   }
-  const props = { students, setStudents, termMarks, setTermMarks, monthlyMarks, setMonthlyMarks, groupWork, setGroupWork, municipalPerf, setMunicipalPerf, examTimetable, setExamTimetable, bands, setBands, specialBands, setSpecialBands, divisions, setDivisions, school, setSchool, accounts, setAccounts, initials, setInitials, updateTermMark, updateMonthlyMark, requestOrApplyTermMark, requestOrApplyMonthlyMark, addStudent, deleteStudent, forceRestoreData, promoteStudents, role, currentUser, changeRequests, submitChangeRequest, approveChangeRequest, rejectChangeRequest, lockedTerm, lockTermEntry, unlockTermEntry, lockedMonthly, lockMonthlyEntry, unlockMonthlyEntry, requestUnlockTerm, requestUnlockMonthly, markEditing, stampAudit };
+  const props = { students, setStudents, termMarks, setTermMarks, monthlyMarks, setMonthlyMarks, groupWork, setGroupWork, municipalPerf, setMunicipalPerf, examTimetable, setExamTimetable, bands, setBands, specialBands, setSpecialBands, divisions, setDivisions, school, setSchool, accounts, setAccounts, initials, setInitials, updateTermMark, updateMonthlyMark, requestOrApplyTermMark, requestOrApplyMonthlyMark, addStudent, deleteStudent, forceRestoreData, promoteStudents, role, currentUser, changeRequests, submitChangeRequest, approveChangeRequest, rejectChangeRequest, lockedTerm, lockTermEntry, unlockTermEntry, lockedMonthly, lockMonthlyEntry, unlockMonthlyEntry, requestUnlockTerm, requestUnlockMonthly, markEditing, stampAudit, dashboardPerfTerm, setDashboardPerfTerm, dashboardPerfYear, setDashboardPerfYear };
   return (
     <div className="app-shell" style={{display:"flex",minHeight:"100vh",fontFamily:"'Segoe UI',system-ui,sans-serif",background:"#f1f5f9"}}>
       {/* SIDEBAR */}
@@ -2392,9 +2410,7 @@ function PieChart({ slices, size=160 }) {
     </svg>
   );
 }
-function Dashboard({ students, school, termMarks, bands }) {
-  const [perfTerm, setPerfTerm] = useState("Term I");
-  const [perfYear, setPerfYear] = useState(school.year||String(new Date().getFullYear()));
+function Dashboard({ students, school, termMarks, bands, dashboardPerfTerm: perfTerm, setDashboardPerfTerm: setPerfTerm, dashboardPerfYear: perfYear, setDashboardPerfYear: setPerfYear }) {
   const [subjectClass, setSubjectClass] = useState("P4");
   const perfTk = `${perfTerm}__${perfYear}`;
   const active = students.filter(s=>s.className!=="Completed");
@@ -3942,7 +3958,7 @@ function ExamTimetable({ examTimetable, setExamTimetable, school, markEditing })
   const [pdfBusy, setPdfBusy] = useState(false);
   const cardRef = useRef(null);
   const classesForSection = section === "upper" ? ["P4","P5","P6","P7"] : ["P1","P2","P3"];
-  const subjectsForSection = section === "upper" ? UPPER_SUBJECTS : LOWER_SUBJECTS;
+  const subjectsForSection = section === "upper" ? UPPER_SUBJECTS : EXAM_TIMETABLE_LOWER_SUBJECTS;
   const sectionData = examTimetable?.[section]?.[term] || { rows: [], preparedBy: "" };
   const rows = sectionData.rows || [];
 
@@ -5002,19 +5018,65 @@ function PleInfo({ students, setStudents, school, markEditing, municipalPerf, se
     const reader = new FileReader();
     reader.onload = (ev) => {
       try {
-        const lines = ev.target.result.split(/\r?\n/).filter(l=>l.trim());
+        // Strip a leading UTF-8 BOM -- common on files exported from Excel,
+        // and if left in place it silently corrupts the FIRST header cell
+        // (e.g. "Year" becomes "\ufeffYear"), making that column fail to be
+        // recognized even though it looks completely normal on screen.
+        const raw = ev.target.result.replace(/^\ufeff/, "");
+        const lines = raw.split(/\r?\n/).filter(l=>l.trim());
+        // A real CSV/quoted-field parser -- a naive line.split(",") breaks
+        // as soon as any cell contains a comma inside quotes (e.g. a name
+        // exported as "Doe, John", or Excel quoting a field that merely
+        // looks unusual), which silently shifts every column after it one
+        // slot to the left/right. That column-shift is exactly what makes
+        // some subject columns come out blank or wrong on real exported
+        // files, so every row (header and data) is split with this instead
+        // of a bare .split(",").
+        const parseCsvLine = (line) => {
+          const cells = []; let cur = ""; let inQuotes = false;
+          for (let i = 0; i < line.length; i++) {
+            const ch = line[i];
+            if (inQuotes) {
+              if (ch === '"' && line[i+1] === '"') { cur += '"'; i++; }
+              else if (ch === '"') { inQuotes = false; }
+              else cur += ch;
+            } else {
+              if (ch === '"') inQuotes = true;
+              else if (ch === ",") { cells.push(cur); cur = ""; }
+              else cur += ch;
+            }
+          }
+          cells.push(cur);
+          return cells.map(c=>c.trim());
+        };
+        // Normalizes a header cell (or an alias we're matching against) down
+        // to just its letters/digits, so "ENG", "Eng.", "Eng Score", and
+        // "eng_score" all collapse to a comparable form instead of requiring
+        // a byte-for-byte match against a fixed list of spellings.
+        const normalize = (s) => (s||"").toLowerCase().replace(/[^a-z0-9]/g,"");
         // Find the header row — look for the row that contains "NAME" and "ENG"
         let headerIdx = -1;
         let header = [];
         for (let i=0; i<lines.length; i++) {
-          const cols = lines[i].split(",").map(c=>c.trim().replace(/^"|"$/g,"").toLowerCase());
-          if (cols.includes("name") && (cols.includes("eng")||cols.includes("english"))) {
-            headerIdx = i; header = cols; break;
+          const cols = parseCsvLine(lines[i]).map(c=>c.replace(/^"|"$/g,""));
+          const normCols = cols.map(normalize);
+          if (normCols.includes("name") && (normCols.includes("eng")||normCols.includes("english"))) {
+            headerIdx = i; header = normCols; break;
           }
         }
         if (headerIdx===-1) { setCsvMsg("⚠️ Could not find header row. Make sure file has columns: Year, Index_No, NAME, SEX, ENG, SCI, SST, MTC, AGG, DIV"); return; }
 
-        const ci = (names) => { for (const n of names) { const i=header.indexOf(n.toLowerCase()); if(i>=0)return i; } return -1; };
+        // Column lookup: try an exact normalized match first (safest), and
+        // only fall back to "header cell contains this alias" if nothing
+        // matched exactly -- this recognizes headers like "Eng Score" or
+        // "Sci." without the alias list needing to spell out every possible
+        // real-world variant in advance.
+        const ci = (names) => {
+          const normNames = names.map(normalize);
+          for (const n of normNames) { const i=header.indexOf(n); if(i>=0)return i; }
+          for (const n of normNames) { const i=header.findIndex(h=>h && (h.includes(n)||n.includes(h))); if(i>=0)return i; }
+          return -1;
+        };
         const yearCol  = ci(["year"]);
         const idxCol   = ci(["index_no","indexno","index no","index number"]);
         const nameCol  = ci(["name","student name","pupil name"]);
@@ -5029,7 +5091,7 @@ function PleInfo({ students, setStudents, school, markEditing, municipalPerf, se
 
         const matched = [], unmatchedRows = [];
         lines.slice(headerIdx+1).forEach(line=>{
-          const cols = line.split(",").map(c=>c.trim().replace(/^"|"$/g,""));
+          const cols = parseCsvLine(line);
           const rawName = nameCol>=0 ? cols[nameCol]?.toUpperCase().trim() : "";
           if (!rawName) return;
           const indexNo   = idxCol>=0   ? cols[idxCol]?.trim()  : "";
@@ -5059,7 +5121,7 @@ function PleInfo({ students, setStudents, school, markEditing, municipalPerf, se
         });
         setUnmatched(unmatchedRows);
         setYear(prev=>{
-          const fyear = lines[headerIdx+1]?.split(",")?.[yearCol>=0?yearCol:0]?.trim().replace(/^"|"$/g,"");
+          const fyear = parseCsvLine(lines[headerIdx+1]||"")?.[yearCol>=0?yearCol:0]?.trim().replace(/^"|"$/g,"");
           return fyear && /^\d{4}$/.test(fyear) ? fyear : prev;
         });
         setCsvMsg(`✅ Matched ${matched.length} learner(s). ${unmatchedRows.length>0?`⚠️ ${unmatchedRows.length} name(s) not found in the system — see red rows below.`:""}`);
