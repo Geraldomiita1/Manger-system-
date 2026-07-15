@@ -1734,6 +1734,26 @@ export default function App() {
   // person is actively typing into right this second
   const editingUntilRef = useRef(0);
   const markEditing = useCallback(() => { editingUntilRef.current = Date.now() + 2500; }, []);
+  // Keys currently mid-flight through the read-merge-write cycle in
+  // updateShared() (see the per-key save effects below). While a key is in
+  // this set, the auto-refresh poll leaves it completely alone.
+  //
+  // Why this is needed: updateShared() first re-reads the CURRENT remote
+  // value, then merges the local change into it, then writes the merged
+  // result back -- and only AFTER that write finishes does it update
+  // lastSeenRef for that key. On a slow connection that whole round trip
+  // can take several seconds. If the poll's own (separate) read of that key
+  // happens to resolve during that window, it can come back with the
+  // OLD/stale remote value -- and since lastSeenRef hasn't been advanced
+  // yet, the poll wrongly concludes "another device changed this" and
+  // overwrites local state with that stale value, silently discarding the
+  // save that's still in progress (a mark that was just entered, or an
+  // admin's just-approved change, appears to vanish or "not take"). The
+  // 2.5s "I'm actively typing" guard below (editingUntilRef) does not fully
+  // cover this, because it expires on a timer, not on save completion --
+  // and a slow save can easily outlast it. Guarding by save-in-progress
+  // instead of by a fixed timeout closes that gap for good.
+  const inFlightRef = useRef(new Set());
   // Student ids this device has explicitly deleted. Needed because the merge
   // logic otherwise treats "missing from my local array" as "I haven't seen
   // it yet" and would resurrect it from the remote copy -- this set tells the
@@ -1815,131 +1835,164 @@ export default function App() {
   const lastAuditDetail = useRef({});
   const stampAudit = (key, detail) => { lastAuditDetail.current[key] = detail; };
   useEffect(() => { if (dataReady) { (async () => {
-    if (forceWriteRef.current.has("mkis_students")) {
-      forceWriteRef.current.delete("mkis_students");
-      await saveShared("mkis_students", students);
-      await writeAuditEntry("mkis_students", "UPDATE", lastAuditDetail.current["mkis_students"] || `Students list updated (${students.length} total)`);
-      lastAuditDetail.current["mkis_students"] = "";
-      lastSeenRef.current.mkis_students = JSON.stringify(students);
-      return;
-    }
-    const merged = await updateShared("mkis_students", students, { deletedStudentIds: deletedStudentIdsRef.current });
-    if (JSON.stringify(merged) !== JSON.stringify(students)) {
-      await writeAuditEntry("mkis_students", "UPDATE", lastAuditDetail.current["mkis_students"] || `Students list updated (${students.length} total)`);
-      lastAuditDetail.current["mkis_students"] = "";
-    }
-    lastSeenRef.current.mkis_students = JSON.stringify(merged);
-    if (JSON.stringify(merged) !== JSON.stringify(students)) setStudents(merged);
+    inFlightRef.current.add("mkis_students");
+    try {
+      if (forceWriteRef.current.has("mkis_students")) {
+        forceWriteRef.current.delete("mkis_students");
+        await saveShared("mkis_students", students);
+        await writeAuditEntry("mkis_students", "UPDATE", lastAuditDetail.current["mkis_students"] || `Students list updated (${students.length} total)`);
+        lastAuditDetail.current["mkis_students"] = "";
+        lastSeenRef.current.mkis_students = JSON.stringify(students);
+        return;
+      }
+      const merged = await updateShared("mkis_students", students, { deletedStudentIds: deletedStudentIdsRef.current });
+      if (JSON.stringify(merged) !== JSON.stringify(students)) {
+        await writeAuditEntry("mkis_students", "UPDATE", lastAuditDetail.current["mkis_students"] || `Students list updated (${students.length} total)`);
+        lastAuditDetail.current["mkis_students"] = "";
+      }
+      lastSeenRef.current.mkis_students = JSON.stringify(merged);
+      if (JSON.stringify(merged) !== JSON.stringify(students)) setStudents(merged);
+    } finally { inFlightRef.current.delete("mkis_students"); }
   })(); } }, [students, dataReady]);
   useEffect(() => { if (dataReady) { (async () => {
-    if (forceWriteRef.current.has("mkis_termmarks")) {
-      forceWriteRef.current.delete("mkis_termmarks");
-      await saveShared("mkis_termmarks", termMarks);
-      await writeAuditEntry("mkis_termmarks", "UPDATE", lastAuditDetail.current["mkis_termmarks"] || "Term marks updated");
-      lastAuditDetail.current["mkis_termmarks"] = "";
-      lastSeenRef.current.mkis_termmarks = JSON.stringify(termMarks);
-      return;
-    }
-    const merged = await updateShared("mkis_termmarks", termMarks);
-    if (JSON.stringify(merged) !== JSON.stringify(termMarks)) {
-      await writeAuditEntry("mkis_termmarks", "UPDATE", lastAuditDetail.current["mkis_termmarks"] || "Term marks updated");
-      lastAuditDetail.current["mkis_termmarks"] = "";
-    }
-    lastSeenRef.current.mkis_termmarks = JSON.stringify(merged);
-    if (JSON.stringify(merged) !== JSON.stringify(termMarks)) setTermMarks(merged);
+    inFlightRef.current.add("mkis_termmarks");
+    try {
+      if (forceWriteRef.current.has("mkis_termmarks")) {
+        forceWriteRef.current.delete("mkis_termmarks");
+        await saveShared("mkis_termmarks", termMarks);
+        await writeAuditEntry("mkis_termmarks", "UPDATE", lastAuditDetail.current["mkis_termmarks"] || "Term marks updated");
+        lastAuditDetail.current["mkis_termmarks"] = "";
+        lastSeenRef.current.mkis_termmarks = JSON.stringify(termMarks);
+        return;
+      }
+      const merged = await updateShared("mkis_termmarks", termMarks);
+      if (JSON.stringify(merged) !== JSON.stringify(termMarks)) {
+        await writeAuditEntry("mkis_termmarks", "UPDATE", lastAuditDetail.current["mkis_termmarks"] || "Term marks updated");
+        lastAuditDetail.current["mkis_termmarks"] = "";
+      }
+      lastSeenRef.current.mkis_termmarks = JSON.stringify(merged);
+      if (JSON.stringify(merged) !== JSON.stringify(termMarks)) setTermMarks(merged);
+    } finally { inFlightRef.current.delete("mkis_termmarks"); }
   })(); } }, [termMarks, dataReady]);
   useEffect(() => { if (dataReady) { (async () => {
-    if (forceWriteRef.current.has("mkis_monthlymarks")) {
-      forceWriteRef.current.delete("mkis_monthlymarks");
-      await saveShared("mkis_monthlymarks", monthlyMarks);
-      await writeAuditEntry("mkis_monthlymarks", "UPDATE", lastAuditDetail.current["mkis_monthlymarks"] || "Monthly marks updated");
-      lastAuditDetail.current["mkis_monthlymarks"] = "";
-      lastSeenRef.current.mkis_monthlymarks = JSON.stringify(monthlyMarks);
-      return;
-    }
-    const merged = await updateShared("mkis_monthlymarks", monthlyMarks);
-    if (JSON.stringify(merged) !== JSON.stringify(monthlyMarks)) {
-      await writeAuditEntry("mkis_monthlymarks", "UPDATE", lastAuditDetail.current["mkis_monthlymarks"] || "Monthly marks updated");
-      lastAuditDetail.current["mkis_monthlymarks"] = "";
-    }
-    lastSeenRef.current.mkis_monthlymarks = JSON.stringify(merged);
-    if (JSON.stringify(merged) !== JSON.stringify(monthlyMarks)) setMonthlyMarks(merged);
+    inFlightRef.current.add("mkis_monthlymarks");
+    try {
+      if (forceWriteRef.current.has("mkis_monthlymarks")) {
+        forceWriteRef.current.delete("mkis_monthlymarks");
+        await saveShared("mkis_monthlymarks", monthlyMarks);
+        await writeAuditEntry("mkis_monthlymarks", "UPDATE", lastAuditDetail.current["mkis_monthlymarks"] || "Monthly marks updated");
+        lastAuditDetail.current["mkis_monthlymarks"] = "";
+        lastSeenRef.current.mkis_monthlymarks = JSON.stringify(monthlyMarks);
+        return;
+      }
+      const merged = await updateShared("mkis_monthlymarks", monthlyMarks);
+      if (JSON.stringify(merged) !== JSON.stringify(monthlyMarks)) {
+        await writeAuditEntry("mkis_monthlymarks", "UPDATE", lastAuditDetail.current["mkis_monthlymarks"] || "Monthly marks updated");
+        lastAuditDetail.current["mkis_monthlymarks"] = "";
+      }
+      lastSeenRef.current.mkis_monthlymarks = JSON.stringify(merged);
+      if (JSON.stringify(merged) !== JSON.stringify(monthlyMarks)) setMonthlyMarks(merged);
+    } finally { inFlightRef.current.delete("mkis_monthlymarks"); }
   })(); } }, [monthlyMarks, dataReady]);
   useEffect(() => { if (dataReady) { lastSeenRef.current.mkis_bands = JSON.stringify(bands); saveShared("mkis_bands", bands); writeAuditEntry("mkis_bands","UPDATE","Grade bands / thresholds updated"); } }, [bands, dataReady]);
   useEffect(() => { if (dataReady) { (async () => {
-    const merged = await updateShared("mkis_special_bands", specialBands);
-    if (JSON.stringify(merged) !== JSON.stringify(specialBands)) {
-      await writeAuditEntry("mkis_special_bands", "UPDATE", lastAuditDetail.current["mkis_special_bands"] || "Special grading scale updated");
-      lastAuditDetail.current["mkis_special_bands"] = "";
-    }
-    lastSeenRef.current.mkis_special_bands = JSON.stringify(merged);
-    if (JSON.stringify(merged) !== JSON.stringify(specialBands)) setSpecialBands(merged);
+    inFlightRef.current.add("mkis_special_bands");
+    try {
+      const merged = await updateShared("mkis_special_bands", specialBands);
+      if (JSON.stringify(merged) !== JSON.stringify(specialBands)) {
+        await writeAuditEntry("mkis_special_bands", "UPDATE", lastAuditDetail.current["mkis_special_bands"] || "Special grading scale updated");
+        lastAuditDetail.current["mkis_special_bands"] = "";
+      }
+      lastSeenRef.current.mkis_special_bands = JSON.stringify(merged);
+      if (JSON.stringify(merged) !== JSON.stringify(specialBands)) setSpecialBands(merged);
+    } finally { inFlightRef.current.delete("mkis_special_bands"); }
   })(); } }, [specialBands, dataReady]);
   useEffect(() => { if (dataReady) { (async () => {
-    const merged = await updateShared("mkis_groupwork", groupWork);
-    if (JSON.stringify(merged) !== JSON.stringify(groupWork)) {
-      await writeAuditEntry("mkis_groupwork", "UPDATE", lastAuditDetail.current["mkis_groupwork"] || "Group Work updated");
-      lastAuditDetail.current["mkis_groupwork"] = "";
-    }
-    lastSeenRef.current.mkis_groupwork = JSON.stringify(merged);
-    if (JSON.stringify(merged) !== JSON.stringify(groupWork)) setGroupWork(merged);
+    inFlightRef.current.add("mkis_groupwork");
+    try {
+      const merged = await updateShared("mkis_groupwork", groupWork);
+      if (JSON.stringify(merged) !== JSON.stringify(groupWork)) {
+        await writeAuditEntry("mkis_groupwork", "UPDATE", lastAuditDetail.current["mkis_groupwork"] || "Group Work updated");
+        lastAuditDetail.current["mkis_groupwork"] = "";
+      }
+      lastSeenRef.current.mkis_groupwork = JSON.stringify(merged);
+      if (JSON.stringify(merged) !== JSON.stringify(groupWork)) setGroupWork(merged);
+    } finally { inFlightRef.current.delete("mkis_groupwork"); }
   })(); } }, [groupWork, dataReady]);
   useEffect(() => { if (dataReady) { (async () => {
-    const merged = await updateShared("mkis_municipalperf", municipalPerf);
-    if (JSON.stringify(merged) !== JSON.stringify(municipalPerf)) {
-      await writeAuditEntry("mkis_municipalperf", "UPDATE", lastAuditDetail.current["mkis_municipalperf"] || "Municipal Performance updated");
-      lastAuditDetail.current["mkis_municipalperf"] = "";
-    }
-    lastSeenRef.current.mkis_municipalperf = JSON.stringify(merged);
-    if (JSON.stringify(merged) !== JSON.stringify(municipalPerf)) setMunicipalPerf(merged);
+    inFlightRef.current.add("mkis_municipalperf");
+    try {
+      const merged = await updateShared("mkis_municipalperf", municipalPerf);
+      if (JSON.stringify(merged) !== JSON.stringify(municipalPerf)) {
+        await writeAuditEntry("mkis_municipalperf", "UPDATE", lastAuditDetail.current["mkis_municipalperf"] || "Municipal Performance updated");
+        lastAuditDetail.current["mkis_municipalperf"] = "";
+      }
+      lastSeenRef.current.mkis_municipalperf = JSON.stringify(merged);
+      if (JSON.stringify(merged) !== JSON.stringify(municipalPerf)) setMunicipalPerf(merged);
+    } finally { inFlightRef.current.delete("mkis_municipalperf"); }
   })(); } }, [municipalPerf, dataReady]);
   useEffect(() => { if (dataReady) { (async () => {
-    const merged = await updateShared("mkis_examtimetable", examTimetable);
-    if (JSON.stringify(merged) !== JSON.stringify(examTimetable)) {
-      await writeAuditEntry("mkis_examtimetable", "UPDATE", lastAuditDetail.current["mkis_examtimetable"] || "Exam Timetable updated");
-      lastAuditDetail.current["mkis_examtimetable"] = "";
-    }
-    lastSeenRef.current.mkis_examtimetable = JSON.stringify(merged);
-    if (JSON.stringify(merged) !== JSON.stringify(examTimetable)) setExamTimetable(merged);
+    inFlightRef.current.add("mkis_examtimetable");
+    try {
+      const merged = await updateShared("mkis_examtimetable", examTimetable);
+      if (JSON.stringify(merged) !== JSON.stringify(examTimetable)) {
+        await writeAuditEntry("mkis_examtimetable", "UPDATE", lastAuditDetail.current["mkis_examtimetable"] || "Exam Timetable updated");
+        lastAuditDetail.current["mkis_examtimetable"] = "";
+      }
+      lastSeenRef.current.mkis_examtimetable = JSON.stringify(merged);
+      if (JSON.stringify(merged) !== JSON.stringify(examTimetable)) setExamTimetable(merged);
+    } finally { inFlightRef.current.delete("mkis_examtimetable"); }
   })(); } }, [examTimetable, dataReady]);
   useEffect(() => { if (dataReady) { lastSeenRef.current.mkis_divisions = JSON.stringify(divisions); saveShared("mkis_divisions", divisions); writeAuditEntry("mkis_divisions","UPDATE","Division pass-mark thresholds updated"); } }, [divisions, dataReady]);
   useEffect(() => { if (dataReady) { lastSeenRef.current.mkis_school = JSON.stringify(school); saveShared("mkis_school", school); writeAuditEntry("mkis_school","UPDATE",`School settings updated — ${school.name||""}`); } }, [school, dataReady]);
   useEffect(() => { if (dataReady) { (async () => {
-    const merged = await updateShared("mkis_accounts", accounts);
-    if (JSON.stringify(merged) !== JSON.stringify(accounts)) {
-      await writeAuditEntry("mkis_accounts", "UPDATE", lastAuditDetail.current["mkis_accounts"] || "Accounts updated");
-      lastAuditDetail.current["mkis_accounts"] = "";
-    }
-    lastSeenRef.current.mkis_accounts = JSON.stringify(merged);
-    if (JSON.stringify(merged) !== JSON.stringify(accounts)) setAccounts(merged);
+    inFlightRef.current.add("mkis_accounts");
+    try {
+      const merged = await updateShared("mkis_accounts", accounts);
+      if (JSON.stringify(merged) !== JSON.stringify(accounts)) {
+        await writeAuditEntry("mkis_accounts", "UPDATE", lastAuditDetail.current["mkis_accounts"] || "Accounts updated");
+        lastAuditDetail.current["mkis_accounts"] = "";
+      }
+      lastSeenRef.current.mkis_accounts = JSON.stringify(merged);
+      if (JSON.stringify(merged) !== JSON.stringify(accounts)) setAccounts(merged);
+    } finally { inFlightRef.current.delete("mkis_accounts"); }
   })(); } }, [accounts, dataReady]);
   useEffect(() => { if (dataReady) { (async () => {
-    const merged = await updateShared("mkis_changerequests", changeRequests, { deletedRequestIds: deletedRequestIdsRef.current });
-    if (JSON.stringify(merged) !== JSON.stringify(changeRequests)) {
-      await writeAuditEntry("mkis_changerequests", "UPDATE", lastAuditDetail.current["mkis_changerequests"] || "Change request updated");
-      lastAuditDetail.current["mkis_changerequests"] = "";
-    }
-    lastSeenRef.current.mkis_changerequests = JSON.stringify(merged);
-    if (JSON.stringify(merged) !== JSON.stringify(changeRequests)) setChangeRequests(merged);
+    inFlightRef.current.add("mkis_changerequests");
+    try {
+      const merged = await updateShared("mkis_changerequests", changeRequests, { deletedRequestIds: deletedRequestIdsRef.current });
+      if (JSON.stringify(merged) !== JSON.stringify(changeRequests)) {
+        await writeAuditEntry("mkis_changerequests", "UPDATE", lastAuditDetail.current["mkis_changerequests"] || "Change request updated");
+        lastAuditDetail.current["mkis_changerequests"] = "";
+      }
+      lastSeenRef.current.mkis_changerequests = JSON.stringify(merged);
+      if (JSON.stringify(merged) !== JSON.stringify(changeRequests)) setChangeRequests(merged);
+    } finally { inFlightRef.current.delete("mkis_changerequests"); }
   })(); } }, [changeRequests, dataReady]);
   useEffect(() => { if (dataReady) { lastSeenRef.current.mkis_initials = JSON.stringify(initials); saveShared("mkis_initials", initials); writeAuditEntry("mkis_initials","UPDATE","Teacher initials updated"); } }, [initials, dataReady]);
   useEffect(() => { if (dataReady) { (async () => {
-    const merged = await updateShared("mkis_locked_term", lockedTerm);
-    if (JSON.stringify(merged) !== JSON.stringify(lockedTerm)) {
-      await writeAuditEntry("mkis_locked_term", "UPDATE", lastAuditDetail.current["mkis_locked_term"] || "Term mark lock updated");
-      lastAuditDetail.current["mkis_locked_term"] = "";
-    }
-    lastSeenRef.current.mkis_locked_term = JSON.stringify(merged);
-    if (JSON.stringify(merged) !== JSON.stringify(lockedTerm)) setLockedTerm(merged);
+    inFlightRef.current.add("mkis_locked_term");
+    try {
+      const merged = await updateShared("mkis_locked_term", lockedTerm);
+      if (JSON.stringify(merged) !== JSON.stringify(lockedTerm)) {
+        await writeAuditEntry("mkis_locked_term", "UPDATE", lastAuditDetail.current["mkis_locked_term"] || "Term mark lock updated");
+        lastAuditDetail.current["mkis_locked_term"] = "";
+      }
+      lastSeenRef.current.mkis_locked_term = JSON.stringify(merged);
+      if (JSON.stringify(merged) !== JSON.stringify(lockedTerm)) setLockedTerm(merged);
+    } finally { inFlightRef.current.delete("mkis_locked_term"); }
   })(); } }, [lockedTerm, dataReady]);
   useEffect(() => { if (dataReady) { (async () => {
-    const merged = await updateShared("mkis_locked_monthly", lockedMonthly);
-    if (JSON.stringify(merged) !== JSON.stringify(lockedMonthly)) {
-      await writeAuditEntry("mkis_locked_monthly", "UPDATE", lastAuditDetail.current["mkis_locked_monthly"] || "Monthly mark lock updated");
-      lastAuditDetail.current["mkis_locked_monthly"] = "";
-    }
-    lastSeenRef.current.mkis_locked_monthly = JSON.stringify(merged);
-    if (JSON.stringify(merged) !== JSON.stringify(lockedMonthly)) setLockedMonthly(merged);
+    inFlightRef.current.add("mkis_locked_monthly");
+    try {
+      const merged = await updateShared("mkis_locked_monthly", lockedMonthly);
+      if (JSON.stringify(merged) !== JSON.stringify(lockedMonthly)) {
+        await writeAuditEntry("mkis_locked_monthly", "UPDATE", lastAuditDetail.current["mkis_locked_monthly"] || "Monthly mark lock updated");
+        lastAuditDetail.current["mkis_locked_monthly"] = "";
+      }
+      lastSeenRef.current.mkis_locked_monthly = JSON.stringify(merged);
+      if (JSON.stringify(merged) !== JSON.stringify(lockedMonthly)) setLockedMonthly(merged);
+    } finally { inFlightRef.current.delete("mkis_locked_monthly"); }
   })(); } }, [lockedMonthly, dataReady]);
   // ── Real-time auto-refresh: poll shared storage so that when another
   // device saves new data, this device picks it up automatically -- no
@@ -1959,6 +2012,13 @@ export default function App() {
         const results = await Promise.all(STORAGE_KEYS.map(key => loadShared(key, undefined)));
         if (!stopped && !isEditing) {
           STORAGE_KEYS.forEach((key, i) => {
+            // Skip any key whose save effect is still mid read-merge-write
+            // (see inFlightRef above). This read may have been captured
+            // before that save's own write landed, so applying it now
+            // would revert the in-progress save to a stale value. The next
+            // poll tick, once the save has finished and lastSeenRef is
+            // accurate again, will pick up any genuinely new remote data.
+            if (inFlightRef.current.has(key)) return;
             const remoteVal = results[i];
             if (remoteVal === undefined) return;
             const remoteStr = JSON.stringify(remoteVal);
@@ -2050,31 +2110,39 @@ export default function App() {
   const requestUnlockMonthly = useCallback((cls, tk, month) => {
     submitChangeRequest({ kind: "unlock_monthly", cls, tk, month });
   }, [submitChangeRequest]);
+  // NOTE: the actual mark-update / unlock side effects here are deliberately
+  // performed OUTSIDE the setChangeRequests updater (matching how
+  // rejectChangeRequest already does it below), not inside a
+  // setChangeRequests(prev => { ...side effects...; return prev.filter(...) })
+  // callback. A state updater function is expected to be pure -- React can
+  // and does invoke it more than once for the same update in some
+  // situations -- so firing setTermMarks/setMonthlyMarks/unlock calls from
+  // inside one is unreliable and was the reason an admin's approval could
+  // silently fail to actually change the mark even though the request
+  // disappeared from the pending list.
   const approveChangeRequest = useCallback((id) => {
-    setChangeRequests(prev => {
-      const req = prev.find(r => r.id === id);
-      if (!req) return prev;
-      const detail = req.kind === "term"
-        ? `Change request APPROVED — ${req.studentName||req.studentId} — ${req.sub} ${req.field}: ${req.oldVal} → ${req.newVal}`
-        : req.kind === "monthly"
-        ? `Monthly change request APPROVED — ${req.studentName||req.studentId} — ${req.month} ${req.sub}: ${req.oldVal} → ${req.newVal}`
-        : req.kind === "unlock_term"
-        ? `Unlock APPROVED — Term marks for ${req.cls}`
-        : `Unlock APPROVED — Monthly marks for ${req.cls}`;
-      stampAudit("mkis_changerequests", detail);
-      if (req.kind === "term") {
-        updateTermMark(req.studentId, req.tk, req.sub, req.field, req.newVal);
-      } else if (req.kind === "monthly") {
-        updateMonthlyMark(req.studentId, req.tk, req.month, req.sub, req.field, req.newVal);
-      } else if (req.kind === "unlock_term") {
-        unlockTermEntry(req.cls, req.tk);
-      } else if (req.kind === "unlock_monthly") {
-        unlockMonthlyEntry(req.cls, req.tk, req.month);
-      }
-      deletedRequestIdsRef.current.add(id);
-      return prev.filter(r => r.id !== id);
-    });
-  }, [updateTermMark, updateMonthlyMark, unlockTermEntry, unlockMonthlyEntry]);
+    const req = changeRequests.find(r => r.id === id);
+    if (!req) return;
+    const detail = req.kind === "term"
+      ? `Change request APPROVED — ${req.studentName||req.studentId} — ${req.sub} ${req.field}: ${req.oldVal} → ${req.newVal}`
+      : req.kind === "monthly"
+      ? `Monthly change request APPROVED — ${req.studentName||req.studentId} — ${req.month} ${req.sub}: ${req.oldVal} → ${req.newVal}`
+      : req.kind === "unlock_term"
+      ? `Unlock APPROVED — Term marks for ${req.cls}`
+      : `Unlock APPROVED — Monthly marks for ${req.cls}`;
+    stampAudit("mkis_changerequests", detail);
+    if (req.kind === "term") {
+      updateTermMark(req.studentId, req.tk, req.sub, req.field, req.newVal);
+    } else if (req.kind === "monthly") {
+      updateMonthlyMark(req.studentId, req.tk, req.month, req.sub, req.field, req.newVal);
+    } else if (req.kind === "unlock_term") {
+      unlockTermEntry(req.cls, req.tk);
+    } else if (req.kind === "unlock_monthly") {
+      unlockMonthlyEntry(req.cls, req.tk, req.month);
+    }
+    deletedRequestIdsRef.current.add(id);
+    setChangeRequests(prev => prev.filter(r => r.id !== id));
+  }, [changeRequests, updateTermMark, updateMonthlyMark, unlockTermEntry, unlockMonthlyEntry]);
   const rejectChangeRequest = useCallback((id) => {
     const req = changeRequests.find(r => r.id === id);
     if (req) stampAudit("mkis_changerequests", `Change request REJECTED — ${req.studentName||req.studentId||""} ${req.sub||""}`);
@@ -2090,17 +2158,23 @@ export default function App() {
     if (role === "admin" || isFirstEntry) {
       updateTermMark(sid, tk, sub, field, val);
     } else {
-      submitChangeRequest({ kind: "term", studentId: sid, studentName, tk, sub, field, oldVal: existingVal, newVal: val });
+      // Stamp the student's class onto the request itself (rather than
+      // looking it up later from the live students list) so Manage
+      // Requests can show which class the request is for even if the
+      // student is later moved to a different class before it's actioned.
+      const cls = students.find(x => x.id === sid)?.className || "";
+      submitChangeRequest({ kind: "term", studentId: sid, studentName, cls, tk, sub, field, oldVal: existingVal, newVal: val });
     }
-  }, [role, updateTermMark, submitChangeRequest]);
+  }, [role, students, updateTermMark, submitChangeRequest]);
   const requestOrApplyMonthlyMark = useCallback((sid, studentName, tk, month, sub, field, val, existingVal) => {
     const isFirstEntry = existingVal === undefined || existingVal === null || existingVal === "";
     if (role === "admin" || isFirstEntry) {
       updateMonthlyMark(sid, tk, month, sub, field, val);
     } else {
-      submitChangeRequest({ kind: "monthly", studentId: sid, studentName, tk, month, sub, field, oldVal: existingVal, newVal: val });
+      const cls = students.find(x => x.id === sid)?.className || "";
+      submitChangeRequest({ kind: "monthly", studentId: sid, studentName, cls, tk, month, sub, field, oldVal: existingVal, newVal: val });
     }
-  }, [role, updateMonthlyMark, submitChangeRequest]);
+  }, [role, students, updateMonthlyMark, submitChangeRequest]);
   const addStudent = useCallback((name, className, gender, lin) => {
     markEditing();
     const newS = { id: Date.now().toString(), name: toUpper(name.trim()), className, gender, lin: (lin||"").toUpperCase() };
@@ -6084,7 +6158,8 @@ function ManageRequests({ changeRequests, approveChangeRequest, rejectChangeRequ
           <table style={{width:"100%",fontSize:13}}>
             <thead>
               <tr style={{background:"#1e3a6e",color:"white"}}>
-                <th style={th}>Student / Class</th>
+                <th style={th}>Student</th>
+                <th style={th}>Class</th>
                 <th style={th}>Where</th>
                 <th style={th}>Old Value</th>
                 <th style={th}>New Value</th>
@@ -6097,8 +6172,9 @@ function ManageRequests({ changeRequests, approveChangeRequest, rejectChangeRequ
               {pending.map(req => (
                 <tr key={req.id}>
                   <td style={{...td,fontWeight:600,textAlign:"left"}}>
-                    {isUnlockReq(req) ? `🔓 ${req.cls} (unlock request)` : req.studentName}
+                    {isUnlockReq(req) ? "🔓 (unlock request)" : req.studentName}
                   </td>
+                  <td style={{...td,fontWeight:700,color:"#1e3a6e"}}>{req.cls || "—"}</td>
                   <td style={td}>{describeField(req)}</td>
                   {isUnlockReq(req) ? (
                     <>
