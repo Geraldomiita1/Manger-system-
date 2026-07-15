@@ -744,17 +744,25 @@ function htmlTable(headerRow, dataRows) {
 // (1st, 2nd, 3rd...) since the plain number alone was silently dropping it.
 function resultSheetHtmlTable({ subjects, isLower, sortedRows }) {
   const thTop = "border:1px solid #999;padding:5px;font-size:9pt;";
+  // rowspan="2" is only valid when a second header <tr> actually exists to
+  // absorb it (upper classes: the CA/EX/AV/AG sub-row below). Lower classes
+  // have just ONE header row, so a rowspan="2" there has no second row to
+  // fill -- the header cell eats into the column slots of the very next
+  // <tr>, which is the FIRST DATA ROW, shoving that pupil's cells sideways
+  // into a phantom extra column (exactly the "first student detached"
+  // symptom). rs is empty (rowspan of 1, the default) for lower classes.
+  const rs = isLower ? "" : ' rowspan="2"';
   let head = `<tr style="background:#1e40af;color:white;">`;
-  head += `<th style="${thTop}" rowspan="2">S/N</th>`;
-  head += `<th style="${thTop}text-align:left;min-width:150px;" rowspan="2">NAME OF PUPIL</th>`;
+  head += `<th style="${thTop}"${rs}>S/N</th>`;
+  head += `<th style="${thTop}text-align:left;min-width:150px;"${rs}>NAME OF PUPIL</th>`;
   subjects.forEach(sub => {
     head += isLower
-      ? `<th style="${thTop}" rowspan="2">${escapeHtml(sub)}${lowerSubjectMax(sub)!==100?` /${lowerSubjectMax(sub)}`:""}</th>`
+      ? `<th style="${thTop}"${rs}>${escapeHtml(sub)}${lowerSubjectMax(sub)!==100?` /${lowerSubjectMax(sub)}`:""}</th>`
       : `<th style="${thTop}" colspan="4">${escapeHtml(sub)}</th>`;
   });
-  head += `<th style="${thTop}" rowspan="2">TOT MK</th>`;
-  if (!isLower) head += `<th style="${thTop}" rowspan="2">TOT AGG</th><th style="${thTop}" rowspan="2">DIV</th>`;
-  head += `<th style="${thTop}" rowspan="2">POS</th></tr>`;
+  head += `<th style="${thTop}"${rs}>TOT MK</th>`;
+  if (!isLower) head += `<th style="${thTop}"${rs}>TOT AGG</th><th style="${thTop}"${rs}>DIV</th>`;
+  head += `<th style="${thTop}"${rs}>POS</th></tr>`;
   if (!isLower) {
     head += `<tr style="background:#2563eb;color:white;font-size:8pt;">`;
     subjects.forEach(() => {
@@ -798,17 +806,21 @@ function resultSheetHtmlTable({ subjects, isLower, sortedRows }) {
 // row banding, and ordinal-suffixed positions.
 function monthlySheetHtmlTable({ subjects, isLower, sortedRows }) {
   const thTop = "border:1px solid #999;padding:5px;font-size:9pt;";
+  // See resultSheetHtmlTable above for why rowspan is conditional here --
+  // lower classes have no MK/AGG sub-header row, so rowspan="2" would have
+  // no second row to absorb it and instead displaces the first data row.
+  const rs = isLower ? "" : ' rowspan="2"';
   let head = `<tr style="background:#1e40af;color:white;">`;
-  head += `<th style="${thTop}" rowspan="2">S/N</th>`;
-  head += `<th style="${thTop}text-align:left;min-width:150px;" rowspan="2">NAME OF PUPIL</th>`;
+  head += `<th style="${thTop}"${rs}>S/N</th>`;
+  head += `<th style="${thTop}text-align:left;min-width:150px;"${rs}>NAME OF PUPIL</th>`;
   subjects.forEach(sub => {
     head += isLower
-      ? `<th style="${thTop}" rowspan="2">${escapeHtml(sub)}${lowerSubjectMax(sub)!==100?` /${lowerSubjectMax(sub)}`:""}</th>`
+      ? `<th style="${thTop}"${rs}>${escapeHtml(sub)}${lowerSubjectMax(sub)!==100?` /${lowerSubjectMax(sub)}`:""}</th>`
       : `<th style="${thTop}" colspan="2">${escapeHtml(sub)}</th>`;
   });
-  head += `<th style="${thTop}" rowspan="2">TOT MK</th>`;
-  if (!isLower) head += `<th style="${thTop}" rowspan="2">TOT AGG</th><th style="${thTop}" rowspan="2">DIV</th>`;
-  head += `<th style="${thTop}" rowspan="2">POS</th></tr>`;
+  head += `<th style="${thTop}"${rs}>TOT MK</th>`;
+  if (!isLower) head += `<th style="${thTop}"${rs}>TOT AGG</th><th style="${thTop}"${rs}>DIV</th>`;
+  head += `<th style="${thTop}"${rs}>POS</th></tr>`;
   if (!isLower) {
     head += `<tr style="background:#2563eb;color:white;font-size:8pt;">`;
     subjects.forEach(() => {
@@ -847,17 +859,19 @@ function monthlySheetHtmlTable({ subjects, isLower, sortedRows }) {
 // matching the school's existing paper "Group Test Results" layout.
 function groupWorkHtmlTable({ subjects, isLower, sortedRows }) {
   const thTop = "border:1px solid #999;padding:5px;font-size:9pt;";
+  // See resultSheetHtmlTable above for why rowspan is conditional here.
+  const rs = isLower ? "" : ' rowspan="2"';
   let head = `<tr style="background:#1e40af;color:white;">`;
-  head += `<th style="${thTop}" rowspan="2">GROUP</th>`;
-  head += `<th style="${thTop}text-align:left;min-width:170px;" rowspan="2">MEMBERS</th>`;
+  head += `<th style="${thTop}"${rs}>GROUP</th>`;
+  head += `<th style="${thTop}text-align:left;min-width:170px;"${rs}>MEMBERS</th>`;
   subjects.forEach(sub => {
     head += isLower
-      ? `<th style="${thTop}" rowspan="2">${escapeHtml(sub)}${lowerSubjectMax(sub)!==100?` /${lowerSubjectMax(sub)}`:""}</th>`
+      ? `<th style="${thTop}"${rs}>${escapeHtml(sub)}${lowerSubjectMax(sub)!==100?` /${lowerSubjectMax(sub)}`:""}</th>`
       : `<th style="${thTop}" colspan="2">${escapeHtml(sub)}</th>`;
   });
-  head += `<th style="${thTop}" rowspan="2">TOT MARK</th>`;
-  if (!isLower) head += `<th style="${thTop}" rowspan="2">TOT AGG</th><th style="${thTop}" rowspan="2">DIV</th>`;
-  head += `<th style="${thTop}" rowspan="2">POS</th></tr>`;
+  head += `<th style="${thTop}"${rs}>TOT MARK</th>`;
+  if (!isLower) head += `<th style="${thTop}"${rs}>TOT AGG</th><th style="${thTop}"${rs}>DIV</th>`;
+  head += `<th style="${thTop}"${rs}>POS</th></tr>`;
   if (!isLower) {
     head += `<tr style="background:#2563eb;color:white;font-size:8pt;">`;
     subjects.forEach(() => {
@@ -1266,7 +1280,7 @@ function exportMonthlyCardsWord({ school, cls, term, year, isLower, subjects, ca
     body += `<table style="width:100%;border-collapse:collapse;font-size:10pt;margin-bottom:6px;">
       <thead>
         <tr>
-          <th rowspan="2" style="border:1px solid #999;padding:4px;background:#1e3a6e;color:white;font-size:9pt;text-align:left;min-width:70px;">MONTH</th>
+          <th${isLower ? "" : ' rowspan="2"'} style="border:1px solid #999;padding:4px;background:#1e3a6e;color:white;font-size:9pt;text-align:left;min-width:70px;">MONTH</th>
           ${subHeaders}
           ${totHeaders}
         </tr>
