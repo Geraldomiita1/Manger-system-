@@ -1921,7 +1921,24 @@ export default function App() {
       if (JSON.stringify(merged) !== JSON.stringify(monthlyMarks)) setMonthlyMarks(merged);
     } finally { inFlightRef.current.delete("mkis_monthlymarks"); }
   })(); } }, [monthlyMarks, dataReady]);
-  useEffect(() => { if (dataReady) { lastSeenRef.current.mkis_bands = JSON.stringify(bands); saveShared("mkis_bands", bands); writeAuditEntry("mkis_bands","UPDATE","Grade bands / thresholds updated"); } }, [bands, dataReady]);
+  useEffect(() => { if (dataReady) { (async () => {
+    // Previously this set lastSeenRef synchronously and fired saveShared()
+    // without awaiting it. That left a window, between the (instant)
+    // lastSeenRef update and the (not-instant) write actually landing,
+    // where the poll could read back the OLD remote value, see it didn't
+    // match the already-advanced lastSeenRef, and revert local state to
+    // that stale value -- which is exactly why grading-band edits could
+    // seem to vanish or need re-entering. Routing through updateShared()
+    // (used by the keys below that never had this problem) plus the
+    // inFlightRef guard fixes it the same way.
+    inFlightRef.current.add("mkis_bands");
+    try {
+      const merged = await updateShared("mkis_bands", bands);
+      await writeAuditEntry("mkis_bands", "UPDATE", "Grade bands / thresholds updated");
+      lastSeenRef.current.mkis_bands = JSON.stringify(merged);
+      if (JSON.stringify(merged) !== JSON.stringify(bands)) setBands(merged);
+    } finally { inFlightRef.current.delete("mkis_bands"); }
+  })(); } }, [bands, dataReady]);
   useEffect(() => { if (dataReady) { (async () => {
     inFlightRef.current.add("mkis_special_bands");
     try {
@@ -1970,8 +1987,30 @@ export default function App() {
       if (JSON.stringify(merged) !== JSON.stringify(examTimetable)) setExamTimetable(merged);
     } finally { inFlightRef.current.delete("mkis_examtimetable"); }
   })(); } }, [examTimetable, dataReady]);
-  useEffect(() => { if (dataReady) { lastSeenRef.current.mkis_divisions = JSON.stringify(divisions); saveShared("mkis_divisions", divisions); writeAuditEntry("mkis_divisions","UPDATE","Division pass-mark thresholds updated"); } }, [divisions, dataReady]);
-  useEffect(() => { if (dataReady) { lastSeenRef.current.mkis_school = JSON.stringify(school); saveShared("mkis_school", school); writeAuditEntry("mkis_school","UPDATE",`School settings updated — ${school.name||""}`); } }, [school, dataReady]);
+  useEffect(() => { if (dataReady) { (async () => {
+    // See the mkis_bands effect above for why this needs to go through
+    // updateShared()+inFlightRef rather than a synchronous lastSeenRef
+    // update paired with an un-awaited saveShared().
+    inFlightRef.current.add("mkis_divisions");
+    try {
+      const merged = await updateShared("mkis_divisions", divisions);
+      await writeAuditEntry("mkis_divisions", "UPDATE", "Division pass-mark thresholds updated");
+      lastSeenRef.current.mkis_divisions = JSON.stringify(merged);
+      if (JSON.stringify(merged) !== JSON.stringify(divisions)) setDivisions(merged);
+    } finally { inFlightRef.current.delete("mkis_divisions"); }
+  })(); } }, [divisions, dataReady]);
+  useEffect(() => { if (dataReady) { (async () => {
+    // This is the one that made School Settings (name, motto, logo, term
+    // dates, requirements, etc.) feel like it kept "disappearing" or
+    // needing to be re-entered -- same root cause as mkis_bands above.
+    inFlightRef.current.add("mkis_school");
+    try {
+      const merged = await updateShared("mkis_school", school);
+      await writeAuditEntry("mkis_school", "UPDATE", `School settings updated — ${school.name||""}`);
+      lastSeenRef.current.mkis_school = JSON.stringify(merged);
+      if (JSON.stringify(merged) !== JSON.stringify(school)) setSchool(merged);
+    } finally { inFlightRef.current.delete("mkis_school"); }
+  })(); } }, [school, dataReady]);
   useEffect(() => { if (dataReady) { (async () => {
     inFlightRef.current.add("mkis_accounts");
     try {
@@ -1996,7 +2035,16 @@ export default function App() {
       if (JSON.stringify(merged) !== JSON.stringify(changeRequests)) setChangeRequests(merged);
     } finally { inFlightRef.current.delete("mkis_changerequests"); }
   })(); } }, [changeRequests, dataReady]);
-  useEffect(() => { if (dataReady) { lastSeenRef.current.mkis_initials = JSON.stringify(initials); saveShared("mkis_initials", initials); writeAuditEntry("mkis_initials","UPDATE","Teacher initials updated"); } }, [initials, dataReady]);
+  useEffect(() => { if (dataReady) { (async () => {
+    // See the mkis_bands effect above for the reasoning.
+    inFlightRef.current.add("mkis_initials");
+    try {
+      const merged = await updateShared("mkis_initials", initials);
+      await writeAuditEntry("mkis_initials", "UPDATE", "Teacher initials updated");
+      lastSeenRef.current.mkis_initials = JSON.stringify(merged);
+      if (JSON.stringify(merged) !== JSON.stringify(initials)) setInitials(merged);
+    } finally { inFlightRef.current.delete("mkis_initials"); }
+  })(); } }, [initials, dataReady]);
   useEffect(() => { if (dataReady) { (async () => {
     inFlightRef.current.add("mkis_locked_term");
     try {
