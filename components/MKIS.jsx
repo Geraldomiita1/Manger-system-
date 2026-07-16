@@ -4748,7 +4748,7 @@ function PleCertificateDesign1({ rec, school, year, pdfRef }) {
         {/* Title */}
         <div style={{textAlign:"center",margin:"12px 0 20px"}}>
           <div style={{display:"inline-block",borderBottom:"3px solid #b8860b",borderTop:"3px solid #b8860b",padding:"8px 0"}}>
-            <div style={{fontSize:25,fontWeight:900,color:"#dc2626",letterSpacing:3,textTransform:"uppercase"}}>PLE Recommendation</div>
+            <div style={{fontSize:28,fontWeight:900,color:"#dc2626",letterSpacing:3,textTransform:"uppercase"}}>PLE Recommendation</div>
           </div>
         </div>
         {/* Certify text */}
@@ -4756,12 +4756,18 @@ function PleCertificateDesign1({ rec, school, year, pdfRef }) {
         <div style={{textAlign:"center",marginBottom:10}}>
           <span style={{fontWeight:900,fontSize:24,borderBottom:"2.5px solid #1e3a6e",paddingBottom:3,textTransform:"uppercase",letterSpacing:1.5}}>{s.name}</span>
           {s.indexNo && <div style={{fontSize:16,marginTop:8,color:"#374151"}}>Index No. <b>{s.indexNo}</b></div>}
+          {s.photo && (
+            <div style={{marginTop:12}}>
+              <img src={s.photo} alt="Candidate" style={{width:90,height:105,objectFit:"cover",borderRadius:6,border:"2.5px solid #1e3a6e"}}/>
+            </div>
+          )}
         </div>
         <div style={{textAlign:"center",fontSize:16,color:"#374151",marginBottom:24,lineHeight:1.8}}>
           successfully completed {he} Primary Leaving Examination (PLE) in <b>{year}</b> at <b>{school.name}.</b>
         </div>
-        {/* Results grid — flex:1 spreads remaining space */}
-        <div style={{flex:1,display:"flex",flexDirection:"column",justifyContent:"space-between"}}>
+        {/* Results grid — natural flow (no stretch) so the signature sits
+            close after the content instead of being pushed to the bottom */}
+        <div style={{display:"flex",flexDirection:"column"}}>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:24,marginBottom:20}}>
             {/* Results box */}
             <div style={{border:"2px solid #b8860b",borderRadius:10,padding:"16px 18px",background:"#fffbeb"}}>
@@ -4839,6 +4845,11 @@ function PleCertificateDesign2({ rec, school, year, pdfRef }) {
           <div style={{fontSize:14,color:"#15803d",fontWeight:700,marginBottom:6,textTransform:"uppercase",letterSpacing:1.5}}>This is to certify that</div>
           <div style={{fontWeight:900,fontSize:25,color:"#1e3a6e",textTransform:"uppercase",letterSpacing:1.5,marginBottom:6}}>{s.name}</div>
           {s.indexNo && <div style={{fontSize:15,color:"#374151",marginBottom:6}}>Index No: <b>{s.indexNo}</b></div>}
+          {s.photo && (
+            <div style={{marginBottom:8}}>
+              <img src={s.photo} alt="Candidate" style={{width:88,height:100,objectFit:"cover",borderRadius:6,border:"2px solid #22c55e"}}/>
+            </div>
+          )}
           <div style={{fontSize:15,color:"#374151",lineHeight:1.8}}>
             successfully completed {he} Primary Leaving Examination (PLE) in <b>{year}</b> at <b>{school.name}.</b>
           </div>
@@ -4916,6 +4927,11 @@ function PleCertificateDesign3({ rec, school, year, pdfRef }) {
         <div style={{textAlign:"center",marginBottom:14}}>
           <div style={{display:"inline-block",background:"#7b1c1c",color:"white",padding:"9px 36px",borderRadius:5,fontWeight:900,fontSize:23,textTransform:"uppercase",letterSpacing:2}}>{s.name}</div>
           {s.indexNo && <div style={{fontSize:16,color:"#374151",marginTop:10}}>Index No. <b>{s.indexNo}</b></div>}
+          {s.photo && (
+            <div style={{marginTop:10}}>
+              <img src={s.photo} alt="Candidate" style={{width:88,height:100,objectFit:"cover",borderRadius:6,border:"2px solid #7b1c1c"}}/>
+            </div>
+          )}
         </div>
         <div style={{textAlign:"center",fontSize:16,color:"#374151",marginBottom:22,lineHeight:1.9}}>
           successfully completed {he} Primary Leaving Examination (PLE)<br/>in <b>{year}</b> at <b style={{color:"#7b1c1c"}}>{school.name}</b>
@@ -5004,6 +5020,11 @@ function PleCertificateDesign4({ rec, school, year, pdfRef }) {
         <div style={{textAlign:"center",marginBottom:10}}>
           <span style={{fontWeight:900,fontSize:23,textTransform:"uppercase",letterSpacing:1.5,textDecoration:"underline",textUnderlineOffset:5}}>{s.name}</span>
           {s.indexNo && <span style={{fontSize:16,color:"#374151",marginLeft:14}}>Index No. <b>{s.indexNo}</b></span>}
+          {s.photo && (
+            <div style={{marginTop:10}}>
+              <img src={s.photo} alt="Candidate" style={{width:88,height:100,objectFit:"cover",borderRadius:6,border:"2px solid #dc2626"}}/>
+            </div>
+          )}
         </div>
         <div style={{textAlign:"center",fontSize:16,color:"#111827",marginBottom:24,lineHeight:1.6}}>
           successfully completed {he} Primary Leaving Examination<br/>(PLE) in <b>{year}</b> at <b>{school.name}.</b>
@@ -5507,6 +5528,27 @@ function PleInfo({ students, setStudents, school, markEditing, municipalPerf, se
                   {sortedP7.map(s=><option key={s.id} value={s.id}>{s.name} {pleData[s.id]?.division?`(Div ${pleData[s.id].division})`:""}</option>)}
                 </select>
               </div>
+              {selectedStudent && (
+                <div>
+                  <label style={lbl}>Candidate Photo</label>
+                  <div style={{display:"flex",alignItems:"center",gap:8,marginTop:4}}>
+                    {pleData[selectedStudent]?.photo && (
+                      <img src={pleData[selectedStudent].photo} alt="" style={{width:40,height:46,objectFit:"cover",borderRadius:4,border:"1px solid #d1d5db"}}/>
+                    )}
+                    <input type="file" accept="image/*" onChange={e=>{
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      const reader = new FileReader();
+                      reader.onload = () => { markEditing(); updatePle(selectedStudent,"photo",reader.result); };
+                      reader.readAsDataURL(file);
+                      e.target.value = "";
+                    }} style={{fontSize:11,maxWidth:150}}/>
+                    {pleData[selectedStudent]?.photo && (
+                      <button onClick={()=>{ markEditing(); updatePle(selectedStudent,"photo",""); }} style={{fontSize:11,color:"#dc2626",background:"none",border:"none",cursor:"pointer",padding:0}}>Remove</button>
+                    )}
+                  </div>
+                </div>
+              )}
               {selectedStudent && (
                 <button disabled={pdfBusy} onClick={async()=>{ setPdfBusy(true); try { await downloadNodesAsPdf([certRef.current],`PLE_Recommendation_${safeFileName(p7Students.find(s=>s.id===selectedStudent)?.name||"cert")}_${year}.pdf`); } finally { setPdfBusy(false); } }} style={pdfBusy?btnPdfBusy:btnPdf}>{pdfBusy?"⏳ Generating...":"📕 Download PDF"}</button>
               )}
