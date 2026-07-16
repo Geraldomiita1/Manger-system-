@@ -1311,40 +1311,48 @@ function exportMonthlyCardsWord({ school, cls, term, year, isLower, subjects, ca
 // ── Termly Report Card Word export ──
 function exportReportCardsWord({ school, cls, term, year, isLower, rows, allPositions, totalInClass, bands, initials }) {
   let body = "";
+  // Word-native "double" border style stands in for the template's nested
+  // gold/navy frame -- gradients and border-radius aren't reliably rendered
+  // by Word's HTML import, but double/solid borders are, so this keeps the
+  // exported .doc visually consistent with the on-screen ReportCard.
   rows.forEach((r, idx) => {
     const { s, perSub, totMk, totAgg, div, hasX } = r;
     const position = allPositions[s.id];
     const comments = autoComments({ isLower, totMk, div, hasX, seed: `${s.id}-${term}-${year}` });
-    // Each pupil's page carries its own school-details header (matching the
-    // on-screen preview) plus their pupil info, marks table, and comments,
-    // all inside one report-card-block so nothing is split apart. Only
-    // pages after the first force a break, so there's no leading blank page.
-    body += `<div class="report-card-block" style="page-break-inside:avoid;${idx > 0 ? "page-break-before:always;" : ""}margin-top:20px;">`;
-    body += titleBlockHtml(school, `PUPIL'S ACADEMIC REPORT CARD - END OF ${term.toUpperCase()} ${year} - ${cls}`);
-    body += `<table style="width:100%;border-collapse:collapse;margin-bottom:6px;">
+    body += `<div class="report-card-block" style="page-break-inside:avoid;${idx > 0 ? "page-break-before:always;" : ""}margin-top:20px;border:6px double #d97706;padding:5px;">`;
+    body += `<div style="border:3px double #1e3a6e;padding:10px;">`;
+    body += `<div style="text-align:center;background:#1e3a6e;color:white;padding:14px 10px 10px;border-bottom:4px solid #d97706;">`;
+    if (school.logo) body += `<img src="${school.logo}" alt="logo" style="width:50px;height:50px;object-fit:contain;display:block;margin:0 auto 6px;border-radius:50%;border:2px solid #fbbf24;"/>`;
+    body += `<div style="font-weight:bold;font-size:16pt;letter-spacing:1px;">${escapeHtml(school.name || "")}</div>`;
+    const addr = [school.poBox, school.email].filter(Boolean).map(escapeHtml).join(" &bull; ");
+    if (addr) body += `<div style="font-size:9pt;opacity:0.9;margin-top:2px;">${addr}</div>`;
+    body += `<div style="margin-top:8px;display:inline-block;background:#d97706;border-radius:14px;padding:4px 18px;font-size:11pt;font-weight:bold;color:white;">PUPIL'S ACADEMIC REPORT CARD</div>`;
+    body += `<div style="margin-top:3px;font-size:9.5pt;font-weight:600;">END OF ${escapeHtml(term.toUpperCase())} ${escapeHtml(String(year))}</div>`;
+    body += `</div>`;
+    body += `<table style="width:100%;border-collapse:collapse;margin:8px 0;background:#f0fdfa;">
       <tr>
-        <td style="padding:4px 8px;font-size:12pt;"><b>NAME:</b> <b><i>${escapeHtml(s.name)}</i></b></td>
-        <td style="padding:4px 8px;font-size:12pt;"><b>CLASS:</b> ${escapeHtml(cls)}</td>
-        <td style="padding:4px 8px;font-size:12pt;"><b>TERM:</b> ${escapeHtml(term)}</td>
-        <td colspan="2" style="padding:4px 8px;font-size:12pt;"><b>POSITION:</b> ${position && position !== "-" ? ordinal(position) : "-"} out of ${totalInClass}</td>
+        <td style="padding:4px 8px;font-size:12pt;"><b style="color:#0f766e;">NAME:</b> <b><i>${escapeHtml(s.name)}</i></b></td>
+        <td style="padding:4px 8px;font-size:12pt;"><b style="color:#0f766e;">CLASS:</b> ${escapeHtml(cls)}</td>
+        <td style="padding:4px 8px;font-size:12pt;"><b style="color:#0f766e;">TERM:</b> ${escapeHtml(term)}</td>
+        <td colspan="2" style="padding:4px 8px;font-size:12pt;"><b style="color:#0f766e;">POSITION:</b> ${position && position !== "-" ? ordinal(position) : "-"} out of ${totalInClass}</td>
       </tr>
     </table>`;
     const subHead = isLower
-      ? `<th style="border:1px solid #999;padding:5px;background:#1e3a6e;color:white;">MARK</th>`
-      : `<th style="border:1px solid #999;padding:5px;background:#1e3a6e;color:white;">CA</th><th style="border:1px solid #999;padding:5px;background:#1e3a6e;color:white;">EXAM</th><th style="border:1px solid #999;padding:5px;background:#1e3a6e;color:white;">AVERAGE</th><th style="border:1px solid #999;padding:5px;background:#1e3a6e;color:white;">AGG</th>`;
+      ? `<th style="border:1px solid #999;padding:5px;background:#0f766e;color:white;">MARK</th>`
+      : `<th style="border:1px solid #999;padding:5px;background:#0f766e;color:white;">CA</th><th style="border:1px solid #999;padding:5px;background:#0f766e;color:white;">EXAM</th><th style="border:1px solid #999;padding:5px;background:#0f766e;color:white;">AVERAGE</th><th style="border:1px solid #999;padding:5px;background:#0f766e;color:white;">AGG</th>`;
     body += `<table style="width:100%;border-collapse:collapse;font-size:10pt;margin-bottom:6px;">
       <thead>
         <tr>
-          <th style="border:1px solid #999;padding:5px;background:#1e3a6e;color:white;text-align:left;">SUBJECT</th>
+          <th style="border:1px solid #999;padding:5px;background:#0f766e;color:white;text-align:left;">SUBJECT</th>
           ${subHead}
-          <th style="border:1px solid #999;padding:5px;background:#1e3a6e;color:white;">REMARKS</th>
-          <th style="border:1px solid #999;padding:5px;background:#1e3a6e;color:white;">INITIALS</th>
+          <th style="border:1px solid #999;padding:5px;background:#0f766e;color:white;">REMARKS</th>
+          <th style="border:1px solid #999;padding:5px;background:#0f766e;color:white;">INITIALS</th>
         </tr>
       </thead>
       <tbody>`;
     perSub.forEach((p, i) => {
       const isUnscored = isLower && lowerSubjectMax(p.sub) !== 100;
-      const bg = i % 2 === 0 ? "#ffffff" : "#f8fafc";
+      const bg = i % 2 === 0 ? "#ffffff" : "#f0fdfa";
       const subName = `${escapeHtml(p.sub)}${isUnscored ? ` (/${lowerSubjectMax(p.sub)})` : ""}`;
       const subCells = isLower
         ? `<td style="border:1px solid #999;padding:5px;text-align:center;font-weight:bold;font-size:12pt;background:${bg};">${p.isX ? "X" : p.av ?? "-"}</td>`
@@ -1353,18 +1361,24 @@ function exportReportCardsWord({ school, cls, term, year, isLower, rows, allPosi
       body += `<tr style="background:${bg};">
         <td style="border:1px solid #999;padding:5px;font-weight:600;text-align:left;">${subName}</td>
         ${subCells}
-        <td style="border:1px solid #999;padding:5px;text-align:center;font-weight:bold;color:#1e40af;">${remark}</td>
+        <td style="border:1px solid #999;padding:5px;text-align:center;font-weight:bold;color:#0f766e;">${remark}</td>
         <td style="border:1px solid #999;padding:5px;text-align:center;font-weight:bold;color:#7c3aed;">${((initials||{})[cls]||{})[p.sub]||""}</td>
       </tr>`;
     });
     const totColspan = isLower ? 1 : 3;
-    body += `<tr style="background:#dbeafe;font-weight:bold;">
+    body += `<tr style="background:#fef3c7;font-weight:bold;">
       <td style="border:1px solid #999;padding:5px;text-align:left;" colspan="${totColspan + 1}">TOTAL</td>
       <td style="border:1px solid #999;padding:5px;text-align:center;font-size:12pt;">${totMk || "-"}</td>
       ${!isLower ? `<td style="border:1px solid #999;padding:5px;text-align:center;">${hasX ? "X" : totAgg || "-"}</td>` : ""}
       <td style="border:1px solid #999;padding:5px;"></td><td style="border:1px solid #999;padding:5px;"></td>
     </tr>`;
     body += `</tbody></table>`;
+    // Grading scale legend -- reference key built from existing bands config.
+    body += `<div style="font-size:8pt;font-weight:bold;color:#0f766e;margin:4px 0 2px;">GRADING SCALE</div>`;
+    body += `<table style="width:100%;border-collapse:collapse;font-size:8.5pt;margin-bottom:6px;">
+      <thead><tr><th style="border:1px solid #999;padding:3px 5px;background:#0f766e;color:white;">MARKS RANGE</th><th style="border:1px solid #999;padding:3px 5px;background:#0f766e;color:white;">GRADE</th><th style="border:1px solid #999;padding:3px 5px;background:#0f766e;color:white;">REMARK</th></tr></thead>
+      <tbody>${bands.map((b,i)=>`<tr style="background:${i%2===0?"#ffffff":"#f0fdfa"};"><td style="border:1px solid #999;padding:2px 5px;text-align:center;">${b.min}${b.max!==b.min?`-${b.max}`:""}</td><td style="border:1px solid #999;padding:2px 5px;text-align:center;font-weight:bold;color:#0f766e;">${escapeHtml(b.grade)}</td><td style="border:1px solid #999;padding:2px 5px;text-align:center;">${escapeHtml(b.label)}</td></tr>`).join("")}</tbody>
+    </table>`;
     body += `<p style="font-size:11pt;line-height:2.2;margin-top:6px;">`;
     if (!isLower) body += `<b>DIVISION:</b> ${hasX ? "X" : totMk ? div : "-"}&nbsp;&nbsp;&nbsp;`;
     body += `</p>`;
@@ -1373,9 +1387,8 @@ function exportReportCardsWord({ school, cls, term, year, isLower, rows, allPosi
       <p style="font-size:11pt;line-height:2;"><b>Head Teacher's Comment:</b> <span style="font-weight:bold;font-style:italic;color:#dc2626;">${escapeHtml(comments.head) || ".............................................................................."}</span> <b>Sign:</b> ......................</p>
       <p style="font-size:11pt;line-height:2;"><b>Next Term begins on</b> <span style="font-weight:bold;font-style:italic;color:#1d4ed8;">${escapeHtml(school.nextOpens||".......................")}</span> <b>Ends on</b> <span style="font-weight:bold;font-style:italic;color:#1d4ed8;">${escapeHtml(school.nextEnds||".......................")}</span></p>
       <p style="font-size:11pt;line-height:2;"><b>Requirements:</b> <span style="font-weight:bold;font-style:italic;color:#15803d;">${escapeHtml(school.requirements||"...........................................................................................")}</span></p>
-      <p style="font-size:11pt;line-height:2;"><b>Requirements:</b> ${escapeHtml(school.requirements || "...........................................................................................")}</p>
       <p style="font-size:11pt;line-height:2;"><b>Parent's Signature after reading:</b> ...................................................................</p>`;
-    body += `</div>`;
+    body += `</div></div>`;
   });
   downloadWordHtml(`${cls} ${term} ${year} Report Cards`, body, `${safeFileName(cls)}_${safeFileName(term)}_${year}_Report_Cards.doc`, { pageSize: "210mm 297mm", margin: "12mm" });
 }
@@ -5954,25 +5967,31 @@ function ReportCard({ school, r, term, year, cls, position, totalInClass, isLowe
   const comments = autoComments({ isLower, totMk, div, hasX, seed: `${s.id}-${term}-${year}` });
   return (
     <div className="report-card-sheet" style={{width:"210mm",minHeight:"297mm",maxWidth:"210mm",boxSizing:"border-box",padding:"10mm",background:"white"}}>
-      <div style={{background:"white",border:"3px solid #1e3a6e",borderRadius:12,overflow:"hidden",boxShadow:"0 4px 20px rgba(0,0,0,0.1)"}}>
-        <div style={{background:"linear-gradient(135deg,#1e3a6e 0%,#1e40af 100%)",color:"white",padding:"16px 20px",textAlign:"center"}}>
-          {school.logo && <img src={school.logo} alt="logo" style={{width:44,height:44,objectFit:"contain",display:"block",margin:"0 auto 6px"}}/>}
-          <div style={{fontWeight:800,fontSize:20,letterSpacing:1}}>{school.name}</div>
+      {/* Outer gold double-border, inner navy double-border -- mirrors the
+          nested-frame look of the template while staying to border styles
+          (double/solid) that Word's HTML renderer actually supports, so the
+          Word export and this on-screen preview look the same. */}
+      <div style={{border:"7px double #d97706",borderRadius:10,padding:6,background:"white"}}>
+      <div style={{border:"3px double #1e3a6e",borderRadius:6,overflow:"hidden",background:"white"}}>
+        <div style={{background:"linear-gradient(135deg,#1e3a6e 0%,#1e40af 100%)",color:"white",padding:"16px 20px",textAlign:"center",borderBottom:"4px solid #d97706"}}>
+          {school.logo && <img src={school.logo} alt="logo" style={{width:48,height:48,objectFit:"contain",display:"block",margin:"0 auto 6px",borderRadius:"50%",border:"2px solid #fbbf24"}}/>}
+          <div style={{fontWeight:800,fontSize:21,letterSpacing:1}}>{school.name}</div>
           <div style={{fontSize:11,opacity:0.9,marginTop:2}}>{school.poBox} - {school.email}</div>
-          <div style={{marginTop:8,display:"inline-block",background:"rgba(255,255,255,0.15)",borderRadius:20,padding:"3px 16px",fontSize:12,fontWeight:600}}>
-            PUPIL'S ACADEMIC REPORT CARD - END OF {term.toUpperCase()} {year}
+          <div style={{marginTop:10,display:"inline-block",background:"#d97706",borderRadius:20,padding:"5px 22px",fontSize:13,fontWeight:800,letterSpacing:0.5,color:"white"}}>
+            PUPIL'S ACADEMIC REPORT CARD
           </div>
+          <div style={{marginTop:4,fontSize:11.5,fontWeight:600,opacity:0.95}}>END OF {term.toUpperCase()} {year}</div>
         </div>
-        <div style={{background:"#fefce8",borderBottom:"2px solid #fde68a",padding:"10px 16px",display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,fontSize:13,alignItems:"center"}}>
-          <div><b>NAME:</b> <span style={{fontWeight:800,fontStyle:"italic"}}>{s.name}</span></div>
-          <div><b>CLASS:</b> {cls}</div>
-          <div><b>TERM:</b> {term}</div>
-          {s.lin && <div style={{gridColumn:"1/-1",fontSize:12,color:"#1e3a6e"}}><b>LIN:</b> <span style={{fontStyle:"italic",color:"#2563eb",fontWeight:700}}>{s.lin}</span></div>}
+        <div style={{background:"#f0fdfa",borderBottom:"2px solid #99f6e4",padding:"10px 16px",display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,fontSize:13,alignItems:"center"}}>
+          <div><b style={{color:"#0f766e"}}>NAME:</b> <span style={{fontWeight:800,fontStyle:"italic"}}>{s.name}</span></div>
+          <div><b style={{color:"#0f766e"}}>CLASS:</b> {cls}</div>
+          <div><b style={{color:"#0f766e"}}>TERM:</b> {term}</div>
+          {s.lin && <div style={{gridColumn:"1/-1",fontSize:12,color:"#1e3a6e"}}><b style={{color:"#0f766e"}}>LIN:</b> <span style={{fontStyle:"italic",color:"#2563eb",fontWeight:700}}>{s.lin}</span></div>}
         </div>
         <div style={{padding:"12px 16px"}}>
           <table style={{width:"100%",fontSize:13}}>
             <thead>
-              <tr style={{background:"#1e3a6e",color:"white"}}>
+              <tr style={{background:"#0f766e",color:"white"}}>
                 <th style={{...th,textAlign:"left",color:"white"}}>SUBJECT</th>
                 {!isLower&&<><th style={{...th,color:"white"}}>CA</th><th style={{...th,color:"white"}}>EXAM</th></>}
                 <th style={{...th,color:"white"}}>{isLower?"MARK":"AVERAGE"}</th>
@@ -5985,17 +6004,17 @@ function ReportCard({ school, r, term, year, cls, position, totalInClass, isLowe
               {perSub.map((p,i)=>{
                 const isUnscored=isLower&&lowerSubjectMax(p.sub)!==100;
                 return (
-                  <tr key={p.sub} style={{background:i%2===0?"white":"#f8fafc"}}>
+                  <tr key={p.sub} style={{background:i%2===0?"white":"#f0fdfa"}}>
                     <td style={{...td,fontWeight:600,textAlign:"left"}}>{p.sub}{isUnscored?` (/${lowerSubjectMax(p.sub)})`:""}</td>
                     {!isLower&&<><td style={{...td,background:"#fefce8"}}>{p.isX?"X":p.ca??"-"}</td><td style={{...td,background:"#f0fdf4"}}>{p.isX?"X":p.exam??"-"}</td></>}
                     <td style={{...td,fontWeight:700,fontSize:15}}>{p.isX?"X":p.av??"-"}</td>
                     {!isLower&&<td style={td}>{isUnscored?"-":(p.isX?"X":p.av!==undefined?p.agg:"-")}</td>}
-                    <td style={{...td,fontWeight:700,color:"#1e40af"}}>{isUnscored?"-":(p.isX?"Absent":p.av!==undefined?remarkFor(p.av):"-")}</td>
+                    <td style={{...td,fontWeight:700,color:"#0f766e"}}>{isUnscored?"-":(p.isX?"Absent":p.av!==undefined?remarkFor(p.av):"-")}</td>
                     <td style={{...td,fontWeight:600,color:"#7c3aed"}}>{((initials||{})[cls]||{})[p.sub]||""}</td>
                   </tr>
                 );
               })}
-              <tr style={{background:"#dbeafe",fontWeight:700}}>
+              <tr style={{background:"#fef3c7",fontWeight:700}}>
                 <td style={{...td,textAlign:"left"}} colSpan={isLower?1:3}>TOTAL</td>
                 <td style={{...td,fontSize:15}}>{totMk||"-"}</td>
                 {!isLower&&<td style={td}>{hasX?"X":totAgg||"-"}</td>}
@@ -6004,6 +6023,30 @@ function ReportCard({ school, r, term, year, cls, position, totalInClass, isLowe
             </tbody>
           </table>
         </div>
+        {/* Grading scale legend -- purely a reference key built from the
+            existing bands configuration, not a new field to fill in. */}
+        <div style={{padding:"0 16px 12px"}}>
+          <div style={{fontSize:11,fontWeight:800,color:"#0f766e",marginBottom:4}}>GRADING SCALE</div>
+          <table style={{width:"100%",fontSize:10.5,borderCollapse:"collapse"}}>
+            <thead>
+              <tr style={{background:"#0f766e",color:"white"}}>
+                <th style={{...th,padding:"4px 6px",color:"white"}}>MARKS RANGE</th>
+                <th style={{...th,padding:"4px 6px",color:"white"}}>GRADE</th>
+                <th style={{...th,padding:"4px 6px",color:"white"}}>REMARK</th>
+              </tr>
+            </thead>
+            <tbody>
+              {bands.map((b,i)=>(
+                <tr key={b.grade} style={{background:i%2===0?"white":"#f0fdfa"}}>
+                  <td style={{...td,padding:"3px 6px"}}>{b.min}{b.max!==b.min?`-${b.max}`:""}</td>
+                  <td style={{...td,padding:"3px 6px",fontWeight:700,color:"#0f766e"}}>{b.grade}</td>
+                  <td style={{...td,padding:"3px 6px"}}>{b.label}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
       </div>
       <div style={{padding:"12px 4px 0",fontSize:13,lineHeight:2}}>
         {!isLower&&<div><b>DIVISION:</b> <span style={{color:"#1e40af",fontWeight:700}}>{hasX?"X":totMk?div:"-"}</span></div>}
