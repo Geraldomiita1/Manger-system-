@@ -1921,24 +1921,28 @@ export default function App() {
       if (JSON.stringify(merged) !== JSON.stringify(monthlyMarks)) setMonthlyMarks(merged);
     } finally { inFlightRef.current.delete("mkis_monthlymarks"); }
   })(); } }, [monthlyMarks, dataReady]);
-  useEffect(() => { if (dataReady) { (async () => {
-    // Previously this set lastSeenRef synchronously and fired saveShared()
-    // without awaiting it. That left a window, between the (instant)
-    // lastSeenRef update and the (not-instant) write actually landing,
-    // where the poll could read back the OLD remote value, see it didn't
-    // match the already-advanced lastSeenRef, and revert local state to
-    // that stale value -- which is exactly why grading-band edits could
-    // seem to vanish or need re-entering. Routing through updateShared()
-    // (used by the keys below that never had this problem) plus the
-    // inFlightRef guard fixes it the same way.
-    inFlightRef.current.add("mkis_bands");
-    try {
-      const merged = await updateShared("mkis_bands", bands);
-      await writeAuditEntry("mkis_bands", "UPDATE", "Grade bands / thresholds updated");
-      lastSeenRef.current.mkis_bands = JSON.stringify(merged);
-      if (JSON.stringify(merged) !== JSON.stringify(bands)) setBands(merged);
-    } finally { inFlightRef.current.delete("mkis_bands"); }
-  })(); } }, [bands, dataReady]);
+  useEffect(() => {
+    if (!dataReady) return;
+    // Debounced: bands is edited via a grid of text/number inputs where
+    // every keystroke updates this state. Without a debounce, each
+    // keystroke kicked off its own overlapping read-merge-write round
+    // trip, and on a slow connection those could finish OUT OF ORDER --
+    // an earlier keystroke's save landing after a later one's, silently
+    // overwriting what you just typed in actual storage even though the
+    // screen still showed it correctly. Only the LAST scheduled timer
+    // survives (React cleanup below cancels every prior one), so exactly
+    // one save fires, 700ms after typing pauses.
+    const t = setTimeout(() => { (async () => {
+      inFlightRef.current.add("mkis_bands");
+      try {
+        const merged = await updateShared("mkis_bands", bands);
+        await writeAuditEntry("mkis_bands", "UPDATE", "Grade bands / thresholds updated");
+        lastSeenRef.current.mkis_bands = JSON.stringify(merged);
+        if (JSON.stringify(merged) !== JSON.stringify(bands)) setBands(merged);
+      } finally { inFlightRef.current.delete("mkis_bands"); }
+    })(); }, 700);
+    return () => clearTimeout(t);
+  }, [bands, dataReady]);
   useEffect(() => { if (dataReady) { (async () => {
     inFlightRef.current.add("mkis_special_bands");
     try {
@@ -1987,30 +1991,36 @@ export default function App() {
       if (JSON.stringify(merged) !== JSON.stringify(examTimetable)) setExamTimetable(merged);
     } finally { inFlightRef.current.delete("mkis_examtimetable"); }
   })(); } }, [examTimetable, dataReady]);
-  useEffect(() => { if (dataReady) { (async () => {
-    // See the mkis_bands effect above for why this needs to go through
-    // updateShared()+inFlightRef rather than a synchronous lastSeenRef
-    // update paired with an un-awaited saveShared().
-    inFlightRef.current.add("mkis_divisions");
-    try {
-      const merged = await updateShared("mkis_divisions", divisions);
-      await writeAuditEntry("mkis_divisions", "UPDATE", "Division pass-mark thresholds updated");
-      lastSeenRef.current.mkis_divisions = JSON.stringify(merged);
-      if (JSON.stringify(merged) !== JSON.stringify(divisions)) setDivisions(merged);
-    } finally { inFlightRef.current.delete("mkis_divisions"); }
-  })(); } }, [divisions, dataReady]);
-  useEffect(() => { if (dataReady) { (async () => {
-    // This is the one that made School Settings (name, motto, logo, term
-    // dates, requirements, etc.) feel like it kept "disappearing" or
-    // needing to be re-entered -- same root cause as mkis_bands above.
-    inFlightRef.current.add("mkis_school");
-    try {
-      const merged = await updateShared("mkis_school", school);
-      await writeAuditEntry("mkis_school", "UPDATE", `School settings updated — ${school.name||""}`);
-      lastSeenRef.current.mkis_school = JSON.stringify(merged);
-      if (JSON.stringify(merged) !== JSON.stringify(school)) setSchool(merged);
-    } finally { inFlightRef.current.delete("mkis_school"); }
-  })(); } }, [school, dataReady]);
+  useEffect(() => {
+    if (!dataReady) return;
+    // Debounced -- see the mkis_bands effect above for why.
+    const t = setTimeout(() => { (async () => {
+      inFlightRef.current.add("mkis_divisions");
+      try {
+        const merged = await updateShared("mkis_divisions", divisions);
+        await writeAuditEntry("mkis_divisions", "UPDATE", "Division pass-mark thresholds updated");
+        lastSeenRef.current.mkis_divisions = JSON.stringify(merged);
+        if (JSON.stringify(merged) !== JSON.stringify(divisions)) setDivisions(merged);
+      } finally { inFlightRef.current.delete("mkis_divisions"); }
+    })(); }, 700);
+    return () => clearTimeout(t);
+  }, [divisions, dataReady]);
+  useEffect(() => {
+    if (!dataReady) return;
+    // Debounced -- School Settings has 11 text fields all bound directly
+    // to keystrokes, making it the worst-affected screen for the
+    // overlapping-out-of-order-writes problem described above.
+    const t = setTimeout(() => { (async () => {
+      inFlightRef.current.add("mkis_school");
+      try {
+        const merged = await updateShared("mkis_school", school);
+        await writeAuditEntry("mkis_school", "UPDATE", `School settings updated — ${school.name||""}`);
+        lastSeenRef.current.mkis_school = JSON.stringify(merged);
+        if (JSON.stringify(merged) !== JSON.stringify(school)) setSchool(merged);
+      } finally { inFlightRef.current.delete("mkis_school"); }
+    })(); }, 700);
+    return () => clearTimeout(t);
+  }, [school, dataReady]);
   useEffect(() => { if (dataReady) { (async () => {
     inFlightRef.current.add("mkis_accounts");
     try {
@@ -6617,7 +6627,7 @@ function Settings({ school, setSchool, bands, setBands, specialBands, setSpecial
                 <tr key={i} style={{background:i%2===0?"white":"#f8fafc"}}>
                   {["min","max","grade","label"].map(f=>(
                     <td key={f} style={{padding:"4px 6px"}}>
-                      <input value={b[f]} onChange={e=>setBands(prev=>prev.map((x,j)=>j===i?{...x,[f]:f==="min"||f==="max"?Number(e.target.value):e.target.value}:x))}
+                      <input value={b[f]} onChange={e=>{ markEditing(); setBands(prev=>prev.map((x,j)=>j===i?{...x,[f]:f==="min"||f==="max"?Number(e.target.value):e.target.value}:x)); }}
                         style={{...inp,width:f==="label"?120:70,padding:"4px 6px",fontSize:12}}/>
                     </td>
                   ))}
@@ -6643,7 +6653,7 @@ function Settings({ school, setSchool, bands, setBands, specialBands, setSpecial
                 <tr key={i} style={{background:i%2===0?"white":"#f8fafc"}}>
                   {["name","min","max"].map(f=>(
                     <td key={f} style={{padding:"4px 6px"}}>
-                      <input value={d[f]} onChange={e=>setDivisions(prev=>prev.map((x,j)=>j===i?{...x,[f]:f==="name"?e.target.value:Number(e.target.value)}:x))}
+                      <input value={d[f]} onChange={e=>{ markEditing(); setDivisions(prev=>prev.map((x,j)=>j===i?{...x,[f]:f==="name"?e.target.value:Number(e.target.value)}:x)); }}
                         style={{...inp,width:80,padding:"4px 6px",fontSize:12}}/>
                     </td>
                   ))}
