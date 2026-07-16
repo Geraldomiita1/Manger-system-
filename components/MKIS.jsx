@@ -1323,7 +1323,7 @@ function exportReportCardsWord({ school, cls, term, year, isLower, rows, allPosi
     body += `<div style="border:3px double #1e3a6e;padding:10px;">`;
     body += `<div style="text-align:center;background:#1e3a6e;color:white;padding:14px 10px 10px;border-bottom:4px solid #d97706;">`;
     if (school.logo) body += `<img src="${school.logo}" alt="logo" style="width:50px;height:50px;object-fit:contain;display:block;margin:0 auto 6px;border-radius:50%;border:2px solid #fbbf24;"/>`;
-    body += `<div style="font-weight:bold;font-size:16pt;letter-spacing:1px;">${escapeHtml(school.name || "")}</div>`;
+    body += `<div style="font-weight:bold;font-size:26pt;font-family:'Bookman Old Style','URW Bookman',serif;letter-spacing:1px;">${escapeHtml(school.name || "")}</div>`;
     const addr = [school.poBox, school.email].filter(Boolean).map(escapeHtml).join(" &bull; ");
     if (addr) body += `<div style="font-size:9pt;opacity:0.9;margin-top:2px;">${addr}</div>`;
     body += `<div style="margin-top:8px;display:inline-block;background:#d97706;border-radius:14px;padding:4px 18px;font-size:11pt;font-weight:bold;color:white;">PUPIL'S ACADEMIC REPORT CARD</div>`;
@@ -1334,7 +1334,7 @@ function exportReportCardsWord({ school, cls, term, year, isLower, rows, allPosi
         <td style="padding:4px 8px;font-size:12pt;"><b style="color:#0f766e;">NAME:</b> <b><i>${escapeHtml(s.name)}</i></b></td>
         <td style="padding:4px 8px;font-size:12pt;"><b style="color:#0f766e;">CLASS:</b> ${escapeHtml(cls)}</td>
         <td style="padding:4px 8px;font-size:12pt;"><b style="color:#0f766e;">TERM:</b> ${escapeHtml(term)}</td>
-        <td colspan="2" style="padding:4px 8px;font-size:12pt;"><b style="color:#0f766e;">POSITION:</b> ${position && position !== "-" ? ordinal(position) : "-"} out of ${totalInClass}</td>
+        <td colspan="2" style="padding:4px 8px;font-size:12pt;"><b style="color:#0f766e;">POSITION:</b> <b style="color:#dc2626;">${position && position !== "-" ? `${ordinal(position)} OUT OF ${totalInClass}` : "-"}</b></td>
       </tr>
     </table>`;
     const subHead = isLower
@@ -1362,7 +1362,7 @@ function exportReportCardsWord({ school, cls, term, year, isLower, rows, allPosi
         <td style="border:1px solid #999;padding:5px;font-weight:600;text-align:left;">${subName}</td>
         ${subCells}
         <td style="border:1px solid #999;padding:5px;text-align:center;font-weight:bold;color:#0f766e;">${remark}</td>
-        <td style="border:1px solid #999;padding:5px;text-align:center;font-weight:bold;color:#7c3aed;">${((initials||{})[cls]||{})[p.sub]||""}</td>
+        <td style="border:1px solid #999;padding:5px;text-align:center;font-weight:bold;color:#000000;">${((initials||{})[cls]||{})[p.sub]||""}</td>
       </tr>`;
     });
     const totColspan = isLower ? 1 : 3;
@@ -1374,17 +1374,19 @@ function exportReportCardsWord({ school, cls, term, year, isLower, rows, allPosi
     </tr>`;
     body += `</tbody></table>`;
     // Grading scale legend -- reference key built from existing bands config.
+    // Lower primary doesn't use letter grades, so the GRADE column is
+    // omitted there entirely rather than shown empty.
     body += `<div style="font-size:8pt;font-weight:bold;color:#0f766e;margin:4px 0 2px;">GRADING SCALE</div>`;
     body += `<table style="width:100%;border-collapse:collapse;font-size:8.5pt;margin-bottom:6px;">
-      <thead><tr><th style="border:1px solid #999;padding:3px 5px;background:#0f766e;color:white;">MARKS RANGE</th><th style="border:1px solid #999;padding:3px 5px;background:#0f766e;color:white;">GRADE</th><th style="border:1px solid #999;padding:3px 5px;background:#0f766e;color:white;">REMARK</th></tr></thead>
-      <tbody>${bands.map((b,i)=>`<tr style="background:${i%2===0?"#ffffff":"#f0fdfa"};"><td style="border:1px solid #999;padding:2px 5px;text-align:center;">${b.min}${b.max!==b.min?`-${b.max}`:""}</td><td style="border:1px solid #999;padding:2px 5px;text-align:center;font-weight:bold;color:#0f766e;">${escapeHtml(b.grade)}</td><td style="border:1px solid #999;padding:2px 5px;text-align:center;">${escapeHtml(b.label)}</td></tr>`).join("")}</tbody>
+      <thead><tr><th style="border:1px solid #999;padding:3px 5px;background:#0f766e;color:white;">MARKS RANGE</th>${!isLower ? `<th style="border:1px solid #999;padding:3px 5px;background:#0f766e;color:white;">GRADE</th>` : ""}<th style="border:1px solid #999;padding:3px 5px;background:#0f766e;color:white;">REMARK</th></tr></thead>
+      <tbody>${bands.map((b,i)=>`<tr style="background:${i%2===0?"#ffffff":"#f0fdfa"};"><td style="border:1px solid #999;padding:2px 5px;text-align:center;">${b.min}${b.max!==b.min?`-${b.max}`:""}</td>${!isLower ? `<td style="border:1px solid #999;padding:2px 5px;text-align:center;font-weight:bold;color:#0f766e;">${escapeHtml(b.grade)}</td>` : ""}<td style="border:1px solid #999;padding:2px 5px;text-align:center;">${escapeHtml(b.label)}</td></tr>`).join("")}</tbody>
     </table>`;
     body += `<p style="font-size:11pt;line-height:2.2;margin-top:6px;">`;
-    if (!isLower) body += `<b>DIVISION:</b> ${hasX ? "X" : totMk ? div : "-"}&nbsp;&nbsp;&nbsp;`;
+    if (!isLower) body += `<b>DIVISION:</b> <b style="color:#dc2626;">${hasX ? "X" : totMk ? div : "-"}</b>&nbsp;&nbsp;&nbsp;`;
     body += `</p>`;
     body += `<p style="font-size:11pt;line-height:2;"><b>CONDUCT:</b> ...........................................................................................</p>
-      <p style="font-size:11pt;line-height:2;"><b>Class Teacher's Comment:</b> <span style="font-weight:bold;font-style:italic;color:#1d4ed8;">${escapeHtml(comments.teacher) || ".............................................................................."}</span> <b>Sign:</b> ......................</p>
-      <p style="font-size:11pt;line-height:2;"><b>Head Teacher's Comment:</b> <span style="font-weight:bold;font-style:italic;color:#dc2626;">${escapeHtml(comments.head) || ".............................................................................."}</span> <b>Sign:</b> ......................</p>
+      <p style="font-size:11pt;line-height:2;"><b>Class Teacher's Comment:</b> <span style="font-weight:bold;font-style:italic;color:#1d4ed8;font-family:'Times New Roman',Times,serif;">${escapeHtml(comments.teacher) || ".............................................................................."}</span> <b>Sign:</b> ......................</p>
+      <p style="font-size:11pt;line-height:2;"><b>Head Teacher's Comment:</b> <span style="font-weight:bold;font-style:italic;color:#dc2626;font-family:'Times New Roman',Times,serif;">${escapeHtml(comments.head) || ".............................................................................."}</span> <b>Sign:</b> ......................</p>
       <p style="font-size:11pt;line-height:2;"><b>Next Term begins on</b> <span style="font-weight:bold;font-style:italic;color:#1d4ed8;">${escapeHtml(school.nextOpens||".......................")}</span> <b>Ends on</b> <span style="font-weight:bold;font-style:italic;color:#1d4ed8;">${escapeHtml(school.nextEnds||".......................")}</span></p>
       <p style="font-size:11pt;line-height:2;"><b>Requirements:</b> <span style="font-weight:bold;font-style:italic;color:#15803d;">${escapeHtml(school.requirements||"...........................................................................................")}</span></p>
       <p style="font-size:11pt;line-height:2;"><b>Parent's Signature after reading:</b> ...................................................................</p>`;
@@ -6033,17 +6035,18 @@ function ReportCard({ school, r, term, year, cls, position, totalInClass, isLowe
       <div style={{border:"3px double #1e3a6e",borderRadius:6,overflow:"hidden",background:"white"}}>
         <div style={{background:"linear-gradient(135deg,#1e3a6e 0%,#1e40af 100%)",color:"white",padding:"16px 20px",textAlign:"center",borderBottom:"4px solid #d97706"}}>
           {school.logo && <img src={school.logo} alt="logo" style={{width:48,height:48,objectFit:"contain",display:"block",margin:"0 auto 6px",borderRadius:"50%",border:"2px solid #fbbf24"}}/>}
-          <div style={{fontWeight:800,fontSize:21,letterSpacing:1}}>{school.name}</div>
+          <div style={{fontWeight:800,fontSize:26,fontFamily:"'Bookman Old Style', 'URW Bookman', serif",letterSpacing:1}}>{school.name}</div>
           <div style={{fontSize:11,opacity:0.9,marginTop:2}}>{school.poBox} - {school.email}</div>
           <div style={{marginTop:10,display:"inline-block",background:"#d97706",borderRadius:20,padding:"5px 22px",fontSize:13,fontWeight:800,letterSpacing:0.5,color:"white"}}>
             PUPIL'S ACADEMIC REPORT CARD
           </div>
           <div style={{marginTop:4,fontSize:11.5,fontWeight:600,opacity:0.95}}>END OF {term.toUpperCase()} {year}</div>
         </div>
-        <div style={{background:"#f0fdfa",borderBottom:"2px solid #99f6e4",padding:"10px 16px",display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,fontSize:13,alignItems:"center"}}>
+        <div style={{background:"#f0fdfa",borderBottom:"2px solid #99f6e4",padding:"10px 16px",display:"grid",gridTemplateColumns:"1.5fr 0.8fr 0.8fr 1.3fr",gap:8,fontSize:13,alignItems:"center"}}>
           <div><b style={{color:"#0f766e"}}>NAME:</b> <span style={{fontWeight:800,fontStyle:"italic"}}>{s.name}</span></div>
           <div><b style={{color:"#0f766e"}}>CLASS:</b> {cls}</div>
           <div><b style={{color:"#0f766e"}}>TERM:</b> {term}</div>
+          <div><b style={{color:"#0f766e"}}>POSITION:</b> <span style={{color:"#dc2626",fontWeight:800}}>{position && position !== "-" ? `${ordinal(position)} OUT OF ${totalInClass}` : "-"}</span></div>
           {s.lin && <div style={{gridColumn:"1/-1",fontSize:12,color:"#1e3a6e"}}><b style={{color:"#0f766e"}}>LIN:</b> <span style={{fontStyle:"italic",color:"#2563eb",fontWeight:700}}>{s.lin}</span></div>}
         </div>
         <div style={{padding:"12px 16px"}}>
@@ -6068,7 +6071,7 @@ function ReportCard({ school, r, term, year, cls, position, totalInClass, isLowe
                     <td style={{...td,fontWeight:700,fontSize:15}}>{p.isX?"X":p.av??"-"}</td>
                     {!isLower&&<td style={td}>{isUnscored?"-":(p.isX?"X":p.av!==undefined?p.agg:"-")}</td>}
                     <td style={{...td,fontWeight:700,color:"#0f766e"}}>{isUnscored?"-":(p.isX?"Absent":p.av!==undefined?remarkFor(p.av):"-")}</td>
-                    <td style={{...td,fontWeight:600,color:"#7c3aed"}}>{((initials||{})[cls]||{})[p.sub]||""}</td>
+                    <td style={{...td,fontWeight:700,color:"#000000"}}>{((initials||{})[cls]||{})[p.sub]||""}</td>
                   </tr>
                 );
               })}
@@ -6089,7 +6092,7 @@ function ReportCard({ school, r, term, year, cls, position, totalInClass, isLowe
             <thead>
               <tr style={{background:"#0f766e",color:"white"}}>
                 <th style={{...th,padding:"4px 6px",color:"white"}}>MARKS RANGE</th>
-                <th style={{...th,padding:"4px 6px",color:"white"}}>GRADE</th>
+                {!isLower&&<th style={{...th,padding:"4px 6px",color:"white"}}>GRADE</th>}
                 <th style={{...th,padding:"4px 6px",color:"white"}}>REMARK</th>
               </tr>
             </thead>
@@ -6097,7 +6100,7 @@ function ReportCard({ school, r, term, year, cls, position, totalInClass, isLowe
               {bands.map((b,i)=>(
                 <tr key={b.grade} style={{background:i%2===0?"white":"#f0fdfa"}}>
                   <td style={{...td,padding:"3px 6px"}}>{b.min}{b.max!==b.min?`-${b.max}`:""}</td>
-                  <td style={{...td,padding:"3px 6px",fontWeight:700,color:"#0f766e"}}>{b.grade}</td>
+                  {!isLower&&<td style={{...td,padding:"3px 6px",fontWeight:700,color:"#0f766e"}}>{b.grade}</td>}
                   <td style={{...td,padding:"3px 6px"}}>{b.label}</td>
                 </tr>
               ))}
@@ -6107,10 +6110,10 @@ function ReportCard({ school, r, term, year, cls, position, totalInClass, isLowe
       </div>
       </div>
       <div style={{padding:"12px 4px 0",fontSize:13,lineHeight:2}}>
-        {!isLower&&<div><b>DIVISION:</b> <span style={{color:"#1e40af",fontWeight:700}}>{hasX?"X":totMk?div:"-"}</span></div>}
+        {!isLower&&<div><b>DIVISION:</b> <span style={{color:"#dc2626",fontWeight:800}}>{hasX?"X":totMk?div:"-"}</span></div>}
         <div><b>CONDUCT:</b> ...........................................................................................</div>
-        <div><b>Class Teacher's Comment:</b> <span style={{fontWeight:700,fontStyle:"italic",color:"#1d4ed8"}}>{comments.teacher || ".............................................................................."}</span> <b>Sign:</b> ......................</div>
-        <div><b>Head Teacher's Comment:</b> <span style={{fontWeight:700,fontStyle:"italic",color:"#dc2626"}}>{comments.head || ".............................................................................."}</span> <b>Sign:</b> ......................</div>
+        <div><b>Class Teacher's Comment:</b> <span style={{fontWeight:700,fontStyle:"italic",color:"#1d4ed8",fontFamily:"'Times New Roman', Times, serif"}}>{comments.teacher || ".............................................................................."}</span> <b>Sign:</b> ......................</div>
+        <div><b>Head Teacher's Comment:</b> <span style={{fontWeight:700,fontStyle:"italic",color:"#dc2626",fontFamily:"'Times New Roman', Times, serif"}}>{comments.head || ".............................................................................."}</span> <b>Sign:</b> ......................</div>
         <div><b>Next Term begins on</b> <span style={{fontWeight:700,fontStyle:"italic",color:"#1d4ed8"}}>{school.nextOpens||"......................."}</span> <b>Ends on</b> <span style={{fontWeight:700,fontStyle:"italic",color:"#1d4ed8"}}>{school.nextEnds||"......................."}</span></div>
         <div><b>Requirements:</b> <span style={{fontWeight:700,fontStyle:"italic",color:"#15803d"}}>{school.requirements||"..........................................................................................."}</span></div>
         <div><b>Parent's Signature after reading:</b> ...................................................................</div>
