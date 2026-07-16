@@ -1323,8 +1323,9 @@ function exportReportCardsWord({ school, cls, term, year, isLower, rows, allPosi
     body += `<div style="border:3px double #1e3a6e;padding:10px;">`;
     body += `<div style="text-align:center;background:#1e3a6e;color:white;padding:14px 10px 10px;border-bottom:4px solid #d97706;">`;
     if (school.logo) body += `<img src="${school.logo}" alt="logo" style="width:50px;height:50px;object-fit:contain;display:block;margin:0 auto 6px;border-radius:50%;border:2px solid #fbbf24;"/>`;
-    body += `<div style="font-weight:bold;font-size:26pt;font-family:'Bookman Old Style','URW Bookman',serif;letter-spacing:1px;">${escapeHtml(school.name || "")}</div>`;
-    const addr = [school.poBox, school.email].filter(Boolean).map(escapeHtml).join(" &bull; ");
+    body += `<div style="font-weight:bold;font-size:26pt;font-family:Georgia,serif;letter-spacing:1px;">${escapeHtml(school.name || "")}</div>`;
+    if (school.motto) body += `<div style="font-size:10.5pt;font-style:italic;opacity:0.95;margin-top:1px;">&quot;${escapeHtml(school.motto)}&quot;</div>`;
+    const addr = [school.poBox, school.email, school.tel ? `Tel: ${school.tel}` : null].filter(Boolean).map(escapeHtml).join(" &bull; ");
     if (addr) body += `<div style="font-size:9pt;opacity:0.9;margin-top:2px;">${addr}</div>`;
     body += `<div style="margin-top:8px;display:inline-block;background:#d97706;border-radius:14px;padding:4px 18px;font-size:11pt;font-weight:bold;color:white;">PUPIL'S ACADEMIC REPORT CARD</div>`;
     body += `<div style="margin-top:3px;font-size:9.5pt;font-weight:600;">END OF ${escapeHtml(term.toUpperCase())} ${escapeHtml(String(year))}</div>`;
@@ -1334,7 +1335,7 @@ function exportReportCardsWord({ school, cls, term, year, isLower, rows, allPosi
         <td style="padding:4px 8px;font-size:12pt;"><b style="color:#0f766e;">NAME:</b> <b><i>${escapeHtml(s.name)}</i></b></td>
         <td style="padding:4px 8px;font-size:12pt;"><b style="color:#0f766e;">CLASS:</b> ${escapeHtml(cls)}</td>
         <td style="padding:4px 8px;font-size:12pt;"><b style="color:#0f766e;">TERM:</b> ${escapeHtml(term)}</td>
-        <td colspan="2" style="padding:4px 8px;font-size:12pt;"><b style="color:#0f766e;">POSITION:</b> <b style="color:#dc2626;">${position && position !== "-" ? `${ordinal(position)} OUT OF ${totalInClass}` : "-"}</b></td>
+        <td colspan="2" style="padding:4px 8px;font-size:12pt;"><b style="color:#0f766e;">POSITION:</b> ${position && position !== "-" ? `<b style="color:#dc2626;">${ordinal(position)}</b> <span style="color:#000000;">OUT OF</span> <b style="color:#2563eb;">${totalInClass}</b>` : "-"}</td>
       </tr>
     </table>`;
     const subHead = isLower
@@ -1384,12 +1385,14 @@ function exportReportCardsWord({ school, cls, term, year, isLower, rows, allPosi
     body += `<p style="font-size:11pt;line-height:2.2;margin-top:6px;">`;
     if (!isLower) body += `<b>DIVISION:</b> <b style="color:#dc2626;">${hasX ? "X" : totMk ? div : "-"}</b>&nbsp;&nbsp;&nbsp;`;
     body += `</p>`;
+    body += `<div style="font-family:'Times New Roman',Times,serif;">`;
     body += `<p style="font-size:11pt;line-height:2;"><b>CONDUCT:</b> ...........................................................................................</p>
-      <p style="font-size:11pt;line-height:2;"><b>Class Teacher's Comment:</b> <span style="font-weight:bold;font-style:italic;color:#1d4ed8;font-family:'Times New Roman',Times,serif;">${escapeHtml(comments.teacher) || ".............................................................................."}</span> <b>Sign:</b> ......................</p>
-      <p style="font-size:11pt;line-height:2;"><b>Head Teacher's Comment:</b> <span style="font-weight:bold;font-style:italic;color:#dc2626;font-family:'Times New Roman',Times,serif;">${escapeHtml(comments.head) || ".............................................................................."}</span> <b>Sign:</b> ......................</p>
+      <p style="font-size:12pt;line-height:2;"><b>Class Teacher's Comment:</b> <span style="font-weight:bold;font-style:italic;color:#1d4ed8;">${escapeHtml(comments.teacher) || ".............................................................................."}</span> <b>Sign:</b> ......................</p>
+      <p style="font-size:12pt;line-height:2;"><b>Head Teacher's Comment:</b> <span style="font-weight:bold;font-style:italic;color:#dc2626;">${escapeHtml(comments.head) || ".............................................................................."}</span> <b>Sign:</b> ......................</p>
       <p style="font-size:11pt;line-height:2;"><b>Next Term begins on</b> <span style="font-weight:bold;font-style:italic;color:#1d4ed8;">${escapeHtml(school.nextOpens||".......................")}</span> <b>Ends on</b> <span style="font-weight:bold;font-style:italic;color:#1d4ed8;">${escapeHtml(school.nextEnds||".......................")}</span></p>
       <p style="font-size:11pt;line-height:2;"><b>Requirements:</b> <span style="font-weight:bold;font-style:italic;color:#15803d;">${escapeHtml(school.requirements||"...........................................................................................")}</span></p>
       <p style="font-size:11pt;line-height:2;"><b>Parent's Signature after reading:</b> ...................................................................</p>`;
+    body += `</div>`;
     body += `</div></div>`;
   });
   downloadWordHtml(`${cls} ${term} ${year} Report Cards`, body, `${safeFileName(cls)}_${safeFileName(term)}_${year}_Report_Cards.doc`, { pageSize: "210mm 297mm", margin: "12mm" });
@@ -6035,8 +6038,9 @@ function ReportCard({ school, r, term, year, cls, position, totalInClass, isLowe
       <div style={{border:"3px double #1e3a6e",borderRadius:6,overflow:"hidden",background:"white"}}>
         <div style={{background:"linear-gradient(135deg,#1e3a6e 0%,#1e40af 100%)",color:"white",padding:"16px 20px",textAlign:"center",borderBottom:"4px solid #d97706"}}>
           {school.logo && <img src={school.logo} alt="logo" style={{width:48,height:48,objectFit:"contain",display:"block",margin:"0 auto 6px",borderRadius:"50%",border:"2px solid #fbbf24"}}/>}
-          <div style={{fontWeight:800,fontSize:26,fontFamily:"'Bookman Old Style', 'URW Bookman', serif",letterSpacing:1}}>{school.name}</div>
-          <div style={{fontSize:11,opacity:0.9,marginTop:2}}>{school.poBox} - {school.email}</div>
+          <div style={{fontWeight:800,fontSize:26,fontFamily:"Georgia,serif",letterSpacing:1}}>{school.name}</div>
+          {school.motto && <div style={{fontSize:11.5,fontStyle:"italic",opacity:0.95,marginTop:1}}>"{school.motto}"</div>}
+          <div style={{fontSize:11,opacity:0.9,marginTop:2}}>{school.poBox} - {school.email}{school.tel?` - Tel: ${school.tel}`:""}</div>
           <div style={{marginTop:10,display:"inline-block",background:"#d97706",borderRadius:20,padding:"5px 22px",fontSize:13,fontWeight:800,letterSpacing:0.5,color:"white"}}>
             PUPIL'S ACADEMIC REPORT CARD
           </div>
@@ -6046,7 +6050,7 @@ function ReportCard({ school, r, term, year, cls, position, totalInClass, isLowe
           <div><b style={{color:"#0f766e"}}>NAME:</b> <span style={{fontWeight:800,fontStyle:"italic"}}>{s.name}</span></div>
           <div><b style={{color:"#0f766e"}}>CLASS:</b> {cls}</div>
           <div><b style={{color:"#0f766e"}}>TERM:</b> {term}</div>
-          <div><b style={{color:"#0f766e"}}>POSITION:</b> <span style={{color:"#dc2626",fontWeight:800}}>{position && position !== "-" ? `${ordinal(position)} OUT OF ${totalInClass}` : "-"}</span></div>
+          <div><b style={{color:"#0f766e"}}>POSITION:</b> {position && position !== "-" ? (<><span style={{color:"#dc2626",fontWeight:800}}>{ordinal(position)}</span> <span style={{color:"#000000"}}>OUT OF</span> <span style={{color:"#2563eb",fontWeight:800}}>{totalInClass}</span></>) : "-"}</div>
           {s.lin && <div style={{gridColumn:"1/-1",fontSize:12,color:"#1e3a6e"}}><b style={{color:"#0f766e"}}>LIN:</b> <span style={{fontStyle:"italic",color:"#2563eb",fontWeight:700}}>{s.lin}</span></div>}
         </div>
         <div style={{padding:"12px 16px"}}>
@@ -6111,9 +6115,11 @@ function ReportCard({ school, r, term, year, cls, position, totalInClass, isLowe
       </div>
       <div style={{padding:"12px 4px 0",fontSize:13,lineHeight:2}}>
         {!isLower&&<div><b>DIVISION:</b> <span style={{color:"#dc2626",fontWeight:800}}>{hasX?"X":totMk?div:"-"}</span></div>}
+      </div>
+      <div style={{padding:"0 4px 0",fontSize:13,lineHeight:2,fontFamily:"'Times New Roman', Times, serif"}}>
         <div><b>CONDUCT:</b> ...........................................................................................</div>
-        <div><b>Class Teacher's Comment:</b> <span style={{fontWeight:700,fontStyle:"italic",color:"#1d4ed8",fontFamily:"'Times New Roman', Times, serif"}}>{comments.teacher || ".............................................................................."}</span> <b>Sign:</b> ......................</div>
-        <div><b>Head Teacher's Comment:</b> <span style={{fontWeight:700,fontStyle:"italic",color:"#dc2626",fontFamily:"'Times New Roman', Times, serif"}}>{comments.head || ".............................................................................."}</span> <b>Sign:</b> ......................</div>
+        <div style={{fontSize:12}}><b>Class Teacher's Comment:</b> <span style={{fontWeight:700,fontStyle:"italic",color:"#1d4ed8"}}>{comments.teacher || ".............................................................................."}</span> <b>Sign:</b> ......................</div>
+        <div style={{fontSize:12}}><b>Head Teacher's Comment:</b> <span style={{fontWeight:700,fontStyle:"italic",color:"#dc2626"}}>{comments.head || ".............................................................................."}</span> <b>Sign:</b> ......................</div>
         <div><b>Next Term begins on</b> <span style={{fontWeight:700,fontStyle:"italic",color:"#1d4ed8"}}>{school.nextOpens||"......................."}</span> <b>Ends on</b> <span style={{fontWeight:700,fontStyle:"italic",color:"#1d4ed8"}}>{school.nextEnds||"......................."}</span></div>
         <div><b>Requirements:</b> <span style={{fontWeight:700,fontStyle:"italic",color:"#15803d"}}>{school.requirements||"..........................................................................................."}</span></div>
         <div><b>Parent's Signature after reading:</b> ...................................................................</div>
