@@ -1216,7 +1216,10 @@ function computeMonthRows({ month, classStudents, monthlyMarks, tk, subjects, is
   });
   const positions = rankWithTies(rows.map(r => (r.totMk > 0 ? r.totMk : null)), rows.map(r => typeof r.totAgg === "number" ? r.totAgg : null));
   const indexed = rows.map((r, i) => ({ ...r, pos: positions[i] }));
-  return [...indexed].sort((a, b) => { if (a.pos === "-") return 1; if (b.pos === "-") return -1; return a.pos - b.pos; });
+  const sorted = [...indexed].sort((a, b) => { if (a.pos === "-") return 1; if (b.pos === "-") return -1; return a.pos - b.pos; });
+  // Exclude learners who sat no papers at all this month (blank on every
+  // subject) from the exported mark sheet -- they haven't done this exam.
+  return sorted.filter(r => r.perSub.some(p => !p.isX));
 }
 function exportMonthlyExcel({ school, cls, term, year, isLower, subjects, monthsData }) {
   const wb = XLSX.utils.book_new();
@@ -3754,7 +3757,7 @@ function MonthBlock({ month, cls, classStudents, monthlyMarks, updateMonthlyMark
           </thead>
           <tbody>
             {(sortByPos ? sortedRows : indexedRows).map((r,i)=>(
-              <tr key={r.s.id} style={{background:i%2===0?"white":"#f8fafc"}}>
+              <tr key={r.s.id} className={r.perSub.every(p=>p.isX) ? "no-print" : ""} style={{background:i%2===0?"white":"#f8fafc"}}>
                 <td style={td}>{i+1}</td>
                 <td style={{...td,fontWeight:600,textAlign:"left"}}>{r.s.name}</td>
                 {r.perSub.map(p=>(
@@ -4339,7 +4342,7 @@ function MonthlyCards({ students, monthlyMarks, bands: defaultBands, specialBand
       return { month, perSub, totMk, totAgg, div, pos, hasX };
     });
     return { s, monthData };
-  }), [classStudents, months, monthlyMarks, tk, subjects, bands, divisions, isLower, allMonthPositions]);
+  }).filter(({monthData}) => monthData.some(md => md.perSub.some(p => !p.isX))), [classStudents, months, monthlyMarks, tk, subjects, bands, divisions, isLower, allMonthPositions]);
   return (
     <div>
       <div className="no-print" style={{display:"flex",gap:10,marginBottom:16,flexWrap:"wrap",alignItems:"flex-end",justifyContent:"space-between"}}>
@@ -4356,6 +4359,9 @@ function MonthlyCards({ students, monthlyMarks, bands: defaultBands, specialBand
       </div>
       {classStudents.length===0 && (
         <div style={{background:"white",borderRadius:12,padding:40,textAlign:"center",color:"#9ca3af",border:"1px solid #e5e7eb"}}>No students in {cls}.</div>
+      )}
+      {classStudents.length>0 && cardData.length===0 && (
+        <div style={{background:"#fffbeb",borderRadius:12,padding:24,textAlign:"center",color:"#92400e",border:"1px solid #fde68a",marginBottom:16}}>No {cls} learners have any monthly marks recorded yet for {term} {year}.</div>
       )}
       <div style={{display:"flex",flexDirection:"column",gap:24}}>
         {cardData.map(({s, monthData})=>(
@@ -4519,7 +4525,7 @@ function MonthlySlips({ students, monthlyMarks, bands: defaultBands, specialBand
       return { month, perSub, totMk, totAgg, div, pos, hasX };
     });
     return { s, monthData };
-  }), [classStudents, months, monthlyMarks, tk, subjects, bands, divisions, isLower, allMonthPositions]);
+  }).filter(({monthData}) => monthData.some(md => md.perSub.some(p => !p.isX))), [classStudents, months, monthlyMarks, tk, subjects, bands, divisions, isLower, allMonthPositions]);
   // Split into pages of 9 (3x3) so print and PDF download both produce
   // exactly the same fixed layout: one landscape A4 sheet per 9 pupils.
   const slipPages = useMemo(() => {
@@ -4552,6 +4558,9 @@ function MonthlySlips({ students, monthlyMarks, bands: defaultBands, specialBand
       </div>
       {classStudents.length===0 && (
         <div style={{background:"white",borderRadius:12,padding:40,textAlign:"center",color:"#9ca3af",border:"1px solid #e5e7eb"}}>No students in {cls}.</div>
+      )}
+      {classStudents.length>0 && cardData.length===0 && (
+        <div style={{background:"#fffbeb",borderRadius:12,padding:24,textAlign:"center",color:"#92400e",border:"1px solid #fde68a",marginBottom:16}}>No {cls} learners have any monthly marks recorded yet for {term} {year}.</div>
       )}
       <div ref={pagesWrapRef}>
         {slipPages.map((pageItems, pIdx) => (
@@ -5816,7 +5825,7 @@ function ResultSheets({ students, termMarks, bands: defaultBands, specialBands, 
     const totAgg=hasX?"X":perSub.reduce((a,p)=>a+(p.agg||0),0);
     const div=hasX?"X":(typeof totAgg==="number"?divisionOf(totAgg,isLower?5:4,divisions):"X");
     return {s,perSub,totMk,totAgg,div,hasX};
-  }),[classStudents,termMarks,tk,subjects,bands,divisions,isLower]);
+  }).filter(r=>r.perSub.some(p=>!p.isX)),[classStudents,termMarks,tk,subjects,bands,divisions,isLower]);
   const positions = useMemo(()=>rankWithTies(rows.map(r=>r.totMk>0?r.totMk:null), rows.map(r=>typeof r.totAgg==="number"?r.totAgg:null)),[rows]);
   const sortedRows = useMemo(()=>{
     const indexed=rows.map((r,i)=>({...r,pos:positions[i]}));
@@ -5859,6 +5868,9 @@ function ResultSheets({ students, termMarks, bands: defaultBands, specialBands, 
           <button onClick={()=>window.print()} style={btnPrimary}>🖨️ Print Result Sheet</button>
         </div>
       </div>
+      {classStudents.length>0 && sortedRows.length===0 && (
+        <div style={{background:"#fffbeb",borderRadius:12,padding:24,textAlign:"center",color:"#92400e",border:"1px solid #fde68a",marginBottom:16}}>No {cls} learners have any {term} {year} marks recorded yet.</div>
+      )}
       <div ref={sheetCardRef} style={{background:"white",borderRadius:12,border:"1px solid #e5e7eb",overflow:"hidden",marginBottom:24}}>
         <div style={{background:"#1e3a6e",color:"white",padding:"12px 16px",textAlign:"center",display:"flex",alignItems:"center",justifyContent:"center",gap:10}}>
           {school.logo && <img src={school.logo} alt="logo" style={{width:36,height:36,objectFit:"contain",flexShrink:0}}/>}
@@ -6013,7 +6025,7 @@ function ReportCards({ students, termMarks, bands: defaultBands, specialBands, d
     const totAgg=hasX?"X":perSub.reduce((a,p)=>a+(p.agg||0),0);
     const div=hasX?"X":(typeof totAgg==="number"?divisionOf(totAgg,isLower?5:4,divisions):"X");
     return {s,perSub,totMk,totAgg,div,hasX};
-  }),[classStudents,termMarks,tk,subjects,bands,divisions,isLower]);
+  }).filter(r=>r.perSub.some(p=>!p.isX)),[classStudents,termMarks,tk,subjects,bands,divisions,isLower]);
   const allClassStudents=useMemo(()=>students.filter(s=>s.className===cls),[students,cls]);
   const allPositions=useMemo(()=>{
     const pm={};
@@ -6057,6 +6069,9 @@ function ReportCards({ students, termMarks, bands: defaultBands, specialBands, d
         </div>
       </div>
       {classStudents.length===0&&<div style={{background:"white",borderRadius:12,padding:40,textAlign:"center",color:"#9ca3af",border:"1px solid #e5e7eb"}}>No students found in {cls}.</div>}
+      {classStudents.length>0 && rows.length===0 && (
+        <div style={{background:"#fffbeb",borderRadius:12,padding:24,textAlign:"center",color:"#92400e",border:"1px solid #fde68a",marginBottom:16}}>No {cls} learners have any {term} {year} marks recorded yet.</div>
+      )}
       <div ref={cardListRef} className="report-card-list">
         {rows.map(r=>(
           <ReportCard key={r.s.id} school={school} r={r} term={term} year={year} cls={cls}
