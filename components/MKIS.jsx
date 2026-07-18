@@ -4762,14 +4762,14 @@ function PleCertificateDesign1({ rec, school, year, pdfRef }) {
         </div>
         {/* Certify text */}
         <div style={{textAlign:"center",fontSize:16,marginBottom:16,color:"#374151",fontStyle:"italic"}}>This is to certify that</div>
+        {s.photo && (
+          <div style={{textAlign:"center",marginBottom:14}}>
+            <img src={s.photo} alt="Candidate" style={{width:90,height:105,objectFit:"cover",borderRadius:6,border:"2.5px solid #1e3a6e"}}/>
+          </div>
+        )}
         <div style={{textAlign:"center",marginBottom:10}}>
           <span style={{fontWeight:900,fontSize:24,borderBottom:"2.5px solid #1e3a6e",paddingBottom:3,textTransform:"uppercase",letterSpacing:1.5}}>{s.name}</span>
           {s.indexNo && <div style={{fontSize:16,marginTop:8,color:"#374151"}}>Index No. <b>{s.indexNo}</b></div>}
-          {s.photo && (
-            <div style={{marginTop:12}}>
-              <img src={s.photo} alt="Candidate" style={{width:90,height:105,objectFit:"cover",borderRadius:6,border:"2.5px solid #1e3a6e"}}/>
-            </div>
-          )}
         </div>
         <div style={{textAlign:"center",fontSize:16,color:"#374151",marginBottom:24,lineHeight:1.8}}>
           successfully completed {he} Primary Leaving Examination (PLE) in <b>{year}</b> at <b>{school.name}.</b>
@@ -4852,13 +4852,13 @@ function PleCertificateDesign2({ rec, school, year, pdfRef }) {
         {/* Name block */}
         <div style={{background:"#f0fdf4",border:"2px solid #22c55e",borderRadius:12,padding:"18px 24px",marginBottom:22,textAlign:"center"}}>
           <div style={{fontSize:14,color:"#15803d",fontWeight:700,marginBottom:6,textTransform:"uppercase",letterSpacing:1.5}}>This is to certify that</div>
-          <div style={{fontWeight:900,fontSize:25,color:"#1e3a6e",textTransform:"uppercase",letterSpacing:1.5,marginBottom:6}}>{s.name}</div>
-          {s.indexNo && <div style={{fontSize:15,color:"#374151",marginBottom:6}}>Index No: <b>{s.indexNo}</b></div>}
           {s.photo && (
             <div style={{marginBottom:8}}>
               <img src={s.photo} alt="Candidate" style={{width:88,height:100,objectFit:"cover",borderRadius:6,border:"2px solid #22c55e"}}/>
             </div>
           )}
+          <div style={{fontWeight:900,fontSize:25,color:"#1e3a6e",textTransform:"uppercase",letterSpacing:1.5,marginBottom:6}}>{s.name}</div>
+          {s.indexNo && <div style={{fontSize:15,color:"#374151",marginBottom:6}}>Index No: <b>{s.indexNo}</b></div>}
           <div style={{fontSize:15,color:"#374151",lineHeight:1.8}}>
             successfully completed {he} Primary Leaving Examination (PLE) in <b>{year}</b> at <b>{school.name}.</b>
           </div>
@@ -4932,15 +4932,15 @@ function PleCertificateDesign3({ rec, school, year, pdfRef }) {
           <div style={{fontSize:14,color:"#6b7280",marginTop:5,fontStyle:"italic"}}>Uganda National Examinations Board — {year}</div>
         </div>
         <div style={{textAlign:"center",fontSize:16,margin:"0 0 14px",color:"#374151",fontStyle:"italic"}}>This is to certify that</div>
+        {s.photo && (
+          <div style={{textAlign:"center",marginBottom:14}}>
+            <img src={s.photo} alt="Candidate" style={{width:88,height:100,objectFit:"cover",borderRadius:6,border:"2px solid #7b1c1c"}}/>
+          </div>
+        )}
         {/* Name */}
         <div style={{textAlign:"center",marginBottom:14}}>
           <div style={{display:"inline-block",background:"#7b1c1c",color:"white",padding:"9px 36px",borderRadius:5,fontWeight:900,fontSize:23,textTransform:"uppercase",letterSpacing:2}}>{s.name}</div>
           {s.indexNo && <div style={{fontSize:16,color:"#374151",marginTop:10}}>Index No. <b>{s.indexNo}</b></div>}
-          {s.photo && (
-            <div style={{marginTop:10}}>
-              <img src={s.photo} alt="Candidate" style={{width:88,height:100,objectFit:"cover",borderRadius:6,border:"2px solid #7b1c1c"}}/>
-            </div>
-          )}
         </div>
         <div style={{textAlign:"center",fontSize:16,color:"#374151",marginBottom:22,lineHeight:1.9}}>
           successfully completed {he} Primary Leaving Examination (PLE)<br/>in <b>{year}</b> at <b style={{color:"#7b1c1c"}}>{school.name}</b>
@@ -4996,11 +4996,16 @@ function PleCertificateDesign3({ rec, school, year, pdfRef }) {
 function PleCertificateDesign4({ rec, school, year, pdfRef }) {
   const s = rec;
   const he = s.gender==="F"?"her":"his";
-  const zigzag = "repeating-linear-gradient(135deg,#dc2626 0 4px,#fde68a 4px 8px)";
+  const zigzag = `url("data:image/svg+xml;utf8,${encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16">' +
+    '<rect width="16" height="16" fill="#fde68a"/>' +
+    '<path d="M0,16 L16,0 M-4,4 L4,-4 M12,20 L20,12" stroke="#dc2626" stroke-width="6"/>' +
+    '</svg>'
+  )}")`;
   return (
     <div ref={pdfRef} className="ple-cert" style={{width:"210mm",height:"297mm",boxSizing:"border-box",background:"white",fontFamily:"Georgia,serif",position:"relative",overflow:"hidden"}}>
       {/* Outer zigzag border band */}
-      <div style={{position:"absolute",inset:14,background:zigzag,zIndex:0}}/>
+      <div style={{position:"absolute",inset:14,backgroundImage:zigzag,backgroundRepeat:"repeat",zIndex:0}}/>
       {/* Inner solid red border, inset within the zigzag band */}
       <div style={{position:"absolute",inset:26,border:"3px solid #dc2626",background:"white",zIndex:1}}/>
       {/* Content — fixed 0.6in top/bottom margin, natural flow (no stretch) so nothing drifts */}
@@ -5026,14 +5031,14 @@ function PleCertificateDesign4({ rec, school, year, pdfRef }) {
 
         {/* Certify text + name */}
         <div style={{textAlign:"center",fontSize:16,color:"#374151",marginBottom:8}}>This is to certify that</div>
+        {s.photo && (
+          <div style={{textAlign:"center",marginBottom:10}}>
+            <img src={s.photo} alt="Candidate" style={{width:88,height:100,objectFit:"cover",borderRadius:6,border:"2px solid #dc2626"}}/>
+          </div>
+        )}
         <div style={{textAlign:"center",marginBottom:10}}>
           <span style={{fontWeight:900,fontSize:23,textTransform:"uppercase",letterSpacing:1.5,textDecoration:"underline",textUnderlineOffset:5}}>{s.name}</span>
           {s.indexNo && <span style={{fontSize:16,color:"#374151",marginLeft:14}}>Index No. <b>{s.indexNo}</b></span>}
-          {s.photo && (
-            <div style={{marginTop:10}}>
-              <img src={s.photo} alt="Candidate" style={{width:88,height:100,objectFit:"cover",borderRadius:6,border:"2px solid #dc2626"}}/>
-            </div>
-          )}
         </div>
         <div style={{textAlign:"center",fontSize:16,color:"#111827",marginBottom:24,lineHeight:1.6}}>
           successfully completed {he} Primary Leaving Examination<br/>(PLE) in <b>{year}</b> at <b>{school.name}.</b>
