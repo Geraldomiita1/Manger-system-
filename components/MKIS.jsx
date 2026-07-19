@@ -5157,8 +5157,8 @@ function PleCertificateDesign5({ rec, school, year, pdfRef }) {
             <img src={s.photo} alt="Candidate" style={{width:80,height:92,objectFit:"cover",borderRadius:6,border:"2px solid #7a1f3d"}}/>
           </div>
         )}
-        <div style={{textAlign:"center",marginBottom:14}}>
-          <span style={{fontFamily:"'Brush Script MT',cursive",fontStyle:"italic",fontSize:42,color:"#7a1f3d"}}>{s.name}</span>
+        <div style={{textAlign:"center",marginBottom:14,padding:"0 16px"}}>
+          <span style={{fontFamily:"'EB Garamond','Garamond','Times New Roman',serif",fontWeight:900,fontSize:s.name&&s.name.length>18?26:32,color:"#7a1f3d",display:"inline-block",maxWidth:"100%",wordBreak:"break-word",letterSpacing:1}}>{s.name}</span>
         </div>
         <div style={{textAlign:"center",fontSize:14,color:"#374151",lineHeight:1.7,marginBottom:16,padding:"0 20px"}}>
           who has successfully completed the Primary Leaving Examination (PLE) at <b>{school.name}</b>{schoolTown && <>, {schoolTown}</>} in <b>{year}</b>.
