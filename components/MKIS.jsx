@@ -5168,7 +5168,7 @@ function PleCertificateDesign5({ rec, school, year, pdfRef }) {
         <div style={{textAlign:"center",marginBottom:8,padding:"0 16px"}}>
           <span style={{fontFamily:"'EB Garamond','Garamond','Times New Roman',serif",fontWeight:900,fontSize:s.name&&s.name.length>18?24:30,color:"#7a1f3d",display:"inline-block",maxWidth:"100%",wordBreak:"break-word",letterSpacing:1}}>{s.name}</span>
         </div>
-        <div style={{textAlign:"center",fontSize:14,color:"#374151",lineHeight:1.6,marginBottom:10,padding:"0 20px"}}>
+        <div style={{textAlign:"center",fontSize:14,color:"#374151",lineHeight:1.6,marginBottom:20,padding:"0 20px"}}>
           Index No. <b>{s.indexNo||"........................."}</b>, who has successfully completed the Primary Leaving Examination (PLE) at <b>{school.name}</b>{schoolTown && <>, {schoolTown}</>} in <b>{year}</b>.
         </div>
         {/* Results row */}
@@ -5185,14 +5185,16 @@ function PleCertificateDesign5({ rec, school, year, pdfRef }) {
             <div><span style={{color:"#6b7280"}}>Total Aggregate: </span><b style={{fontSize:17,color:"#000"}}>{s.totalAgg||"—"}</b></div>
             <div><span style={{color:"#6b7280"}}>Division: </span><b style={{fontSize:17,color:"#dc2626"}}>{s.division?romanDiv(s.division):"—"}</b></div>
           </div>
-          {/* Leadership (with LIN alongside) / Co-curricular / Conduct */}
+          {/* LIN (on top) / Leadership / Co-curricular / Conduct */}
           <div style={{border:"1px solid #f0e2b0",borderRadius:8,marginBottom:16,background:"#fffdf5"}}>
-            <div style={{display:"flex",alignItems:"center",gap:10,fontSize:13,padding:"9px 16px"}}>
+            <div style={{display:"flex",justifyContent:"center",fontSize:13,padding:"9px 16px"}}>
+              <span style={{color:"#374151",fontWeight:700}}>LIN: </span>
+              <span style={{color:"#1e3a6e",marginLeft:6}}>{s.lin||"—"}</span>
+            </div>
+            <div style={{display:"flex",alignItems:"center",gap:10,fontSize:13,padding:"9px 16px",borderTop:"1px solid #f0e2b0"}}>
               <span>🎓</span>
               <span style={{color:"#374151",fontWeight:700,whiteSpace:"nowrap"}}>LEADERSHIP POSITION(S):</span>
               <span style={{color:"#1e3a6e",flex:1}}>{s.leadership||"—"}</span>
-              <span style={{color:"#374151",fontWeight:700,whiteSpace:"nowrap"}}>LIN:</span>
-              <span style={{color:"#1e3a6e"}}>{s.lin||"—"}</span>
             </div>
             {[["🏆","CO-CURRICULAR ACTIVITIES",s.cocurricular],["🛡","CONDUCT",s.conduct]].map(([icon,label,val])=>(
               <div key={label} style={{display:"flex",alignItems:"center",gap:10,fontSize:13,padding:"9px 16px",borderTop:"1px solid #f0e2b0"}}>
@@ -5204,7 +5206,7 @@ function PleCertificateDesign5({ rec, school, year, pdfRef }) {
           </div>
           {/* Recommendation sentence */}
           <div style={{textAlign:"center",fontSize:14,color:"#374151",fontStyle:"italic",lineHeight:1.7,padding:"12px 24px",marginBottom:22}}>
-            I congratulate {herHim} on successfully completing the Primary Leaving Examination. {heShe} is encouraged to continue working hard and we recommend {herHim} for admission to secondary school.
+            I congratulate {herHim} on successfully completing the Primary Leaving Examination. {heShe} is encouraged to continue working hard and I recommend {herHim} for admission to secondary school.
           </div>
           {/* Seal medallion */}
           <div style={{display:"flex",justifyContent:"center",marginBottom:22}}>
