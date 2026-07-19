@@ -4837,7 +4837,18 @@ function PleCertificateDesign2({ rec, school, year, pdfRef }) {
   const s = rec;
   const he = s.gender==="F"?"her":"his";
   return (
-    <div ref={pdfRef} className="ple-cert" style={{width:"210mm",height:"297mm",boxSizing:"border-box",background:"white",fontFamily:"'Segoe UI',system-ui,sans-serif",overflow:"hidden",display:"flex",flexDirection:"column"}}>
+    <div ref={pdfRef} className="ple-cert" style={{width:"210mm",height:"297mm",boxSizing:"border-box",background:"white",fontFamily:"'Segoe UI',system-ui,sans-serif",overflow:"hidden",position:"relative",display:"flex",flexDirection:"column"}}>
+      {/* Decorative tri-tone border frame */}
+      <div style={{position:"absolute",inset:10,border:"9px solid #1e3a6e",borderRadius:14,pointerEvents:"none",zIndex:3}}/>
+      <div style={{position:"absolute",inset:21,border:"2.5px solid #22c55e",borderRadius:8,pointerEvents:"none",zIndex:3}}/>
+      <div style={{position:"absolute",inset:27,border:"1px solid #0ea5e9",borderRadius:5,pointerEvents:"none",zIndex:3}}/>
+      {/* Corner accent dots */}
+      <div style={{position:"absolute",top:15,left:15,width:12,height:12,borderRadius:"50%",background:"#0ea5e9",zIndex:4}}/>
+      <div style={{position:"absolute",top:15,right:15,width:12,height:12,borderRadius:"50%",background:"#22c55e",zIndex:4}}/>
+      <div style={{position:"absolute",bottom:15,left:15,width:12,height:12,borderRadius:"50%",background:"#22c55e",zIndex:4}}/>
+      <div style={{position:"absolute",bottom:15,right:15,width:12,height:12,borderRadius:"50%",background:"#0ea5e9",zIndex:4}}/>
+      {/* Content wrapper, inset clear of the border frame */}
+      <div style={{position:"relative",zIndex:1,margin:34,display:"flex",flexDirection:"column",flex:1,borderRadius:6,overflow:"hidden"}}>
       {/* Top gradient banner */}
       <div style={{background:"linear-gradient(135deg,#1e3a6e 0%,#1e40af 55%,#0ea5e9 100%)",color:"white",padding:"30px 36px",textAlign:"center",flexShrink:0}}>
         {school.logo && <img src={school.logo} alt="logo" style={{width:52,height:52,objectFit:"contain",display:"block",margin:"0 auto 8px"}}/>}
@@ -4905,6 +4916,7 @@ function PleCertificateDesign2({ rec, school, year, pdfRef }) {
             <span style={{borderBottom:"1px solid #374151",display:"inline-block",width:160,marginTop:8}}>&nbsp;</span>
           </div>
         </div>
+      </div>
       </div>
     </div>
   );
@@ -5092,11 +5104,112 @@ function PleCertificateDesign4({ rec, school, year, pdfRef }) {
     </div>
   );
 }
+// Chain-link border tile (gold ring pattern) rendered as an actual SVG image
+// rather than a CSS gradient -- gradients don't rasterize reliably through
+// html2canvas during PDF export (see Design 4's zigzag border), so any
+// repeating decorative border here uses the same tiled-image approach.
+const CHAIN_TILE = `url("data:image/svg+xml;utf8,${encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22">' +
+  '<circle cx="11" cy="11" r="8" fill="none" stroke="#d4a017" stroke-width="3"/>' +
+  '<circle cx="11" cy="11" r="3" fill="#d4a017"/>' +
+  '</svg>'
+)}")`;
+function PleCertificateDesign5({ rec, school, year, pdfRef }) {
+  const s = rec;
+  const he = s.gender==="F"?"her":"his";
+  const corner = { position:"absolute", fontSize:30, color:"#d4a017", zIndex:2, lineHeight:1 };
+  return (
+    <div ref={pdfRef} className="ple-cert" style={{width:"210mm",height:"297mm",boxSizing:"border-box",background:"#fffdf8",fontFamily:"Georgia,serif",position:"relative",overflow:"hidden"}}>
+      {/* Outer gold chain band */}
+      <div style={{position:"absolute",inset:12,backgroundImage:CHAIN_TILE,backgroundRepeat:"repeat",backgroundColor:"#fff8e1",zIndex:0}}/>
+      {/* Inner maroon border, inset within the chain band */}
+      <div style={{position:"absolute",inset:26,border:"3px solid #7a1f3d",background:"white",zIndex:1}}/>
+      <div style={{position:"absolute",inset:32,border:"1px solid #7a1f3d",zIndex:1}}/>
+      {/* Corner flourishes */}
+      <div style={{...corner,top:36,left:36}}>❦</div>
+      <div style={{...corner,top:36,right:36,transform:"scaleX(-1)"}}>❦</div>
+      <div style={{...corner,bottom:36,left:36,transform:"scaleY(-1)"}}>❦</div>
+      <div style={{...corner,bottom:36,right:36,transform:"scale(-1,-1)"}}>❦</div>
+      {/* Content */}
+      <div style={{position:"relative",zIndex:2,padding:"64px 64px 48px",display:"flex",flexDirection:"column",height:"100%",boxSizing:"border-box"}}>
+        {/* School header */}
+        <div style={{textAlign:"center",marginBottom:14}}>
+          {school.logo && <img src={school.logo} alt="logo" style={{width:50,height:50,objectFit:"contain",display:"block",margin:"0 auto 6px"}}/>}
+          <div style={{fontWeight:900,fontSize:18,color:"#7a1f3d",letterSpacing:1,textTransform:"uppercase"}}>{school.name}</div>
+          <div style={{fontSize:12,color:"#6b7280",marginTop:3}}>{school.poBox}{school.tel?` | Tel: ${school.tel}`:""}</div>
+        </div>
+        {/* Title */}
+        <div style={{textAlign:"center",marginBottom:18}}>
+          <div style={{fontSize:44,fontWeight:900,color:"#7a1f3d",letterSpacing:6,textTransform:"uppercase",fontFamily:"'Times New Roman',serif"}}>Certificate</div>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:14,marginTop:6}}>
+            <div style={{height:1,width:70,background:"#d4a017"}}/>
+            <div style={{fontSize:15,color:"#374151",letterSpacing:3,textTransform:"uppercase"}}>of PLE Recommendation</div>
+            <div style={{height:1,width:70,background:"#d4a017"}}/>
+          </div>
+        </div>
+        <div style={{textAlign:"center",fontSize:14,color:"#6b7280",letterSpacing:1,textTransform:"uppercase",marginBottom:6}}>This certificate is presented to</div>
+        {s.photo && (
+          <div style={{textAlign:"center",marginBottom:10}}>
+            <img src={s.photo} alt="Candidate" style={{width:80,height:92,objectFit:"cover",borderRadius:6,border:"2px solid #7a1f3d"}}/>
+          </div>
+        )}
+        <div style={{textAlign:"center",marginBottom:14}}>
+          <span style={{fontFamily:"'Brush Script MT',cursive",fontStyle:"italic",fontSize:42,color:"#7a1f3d"}}>{s.name}</span>
+          {s.indexNo && <div style={{fontSize:14,color:"#374151",marginTop:6}}>Index No. <b>{s.indexNo}</b></div>}
+        </div>
+        <div style={{textAlign:"center",fontSize:14,color:"#374151",lineHeight:1.7,marginBottom:20,padding:"0 20px"}}>
+          successfully completed {he} Primary Leaving Examination (PLE) in <b>{year}</b> at <b>{school.name}.</b>
+        </div>
+        {/* Results row */}
+        <div style={{display:"flex",flexDirection:"column"}}>
+          <div style={{display:"flex",justifyContent:"center",gap:0,marginBottom:16,border:"1px solid #d4a017",borderRadius:8,overflow:"hidden"}}>
+            {PLE_SUBJECTS.map((sub,i)=>(
+              <div key={sub} style={{flex:1,textAlign:"center",padding:"10px 6px",borderRight:i<PLE_SUBJECTS.length-1?"1px solid #f0e2b0":"none",background:i%2===0?"#fffdf5":"white"}}>
+                <div style={{fontSize:11,color:"#6b7280",textTransform:"uppercase",letterSpacing:0.5}}>{pleSubLabel(sub)}</div>
+                <div style={{fontSize:20,fontWeight:900,color:"#7a1f3d",marginTop:2}}>{s.results?.[sub]||"—"}</div>
+              </div>
+            ))}
+          </div>
+          <div style={{display:"flex",justifyContent:"center",gap:40,fontSize:15,marginBottom:16}}>
+            <div><span style={{color:"#6b7280"}}>Total Agg: </span><b style={{fontSize:18}}>{s.totalAgg||"—"}</b></div>
+            <div><span style={{color:"#6b7280"}}>Division: </span><b style={{fontSize:18,color:"#7a1f3d"}}>{s.division||"—"}</b></div>
+            {s.lin && <div><span style={{color:"#6b7280"}}>LIN: </span><b style={{fontSize:15}}>{s.lin}</b></div>}
+          </div>
+          {/* Recommendation sentence */}
+          <div style={{textAlign:"center",fontSize:14,color:"#374151",fontStyle:"italic",lineHeight:1.7,padding:"12px 24px",marginBottom:22}}>
+            {pleRecommendation(s.name,s.gender,s.totalAgg,s.division)}
+          </div>
+          {/* Seal medallion */}
+          <div style={{display:"flex",justifyContent:"center",marginBottom:22}}>
+            <div style={{width:76,height:76,borderRadius:"50%",border:"3px solid #d4a017",background:"#7a1f3d",color:"#fde68a",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:700,letterSpacing:0.5,textAlign:"center",lineHeight:1.3}}>
+              <div style={{fontSize:16}}>★</div>
+              <div>PLE</div>
+              <div>{year}</div>
+            </div>
+          </div>
+          {/* Date + Signature footer */}
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end",padding:"0 10px"}}>
+            <div style={{textAlign:"center"}}>
+              <div style={{borderBottom:"1px solid #7a1f3d",width:170,marginBottom:6}}>&nbsp;</div>
+              <div style={{fontSize:13,color:"#374151",textTransform:"uppercase",letterSpacing:1}}>Date</div>
+            </div>
+            <div style={{textAlign:"center"}}>
+              <div style={{borderBottom:"1px solid #7a1f3d",width:170,marginBottom:6}}>&nbsp;</div>
+              <div style={{fontWeight:900,fontSize:13,textTransform:"uppercase"}}>{school.headTeacher||"HEAD TEACHER"}</div>
+              <div style={{fontSize:12,color:"#6b7280"}}>Headteacher — Signature</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 const CERT_DESIGNS = [
   { id:1, label:"Design 1 — Gold & Navy", Component: PleCertificateDesign1 },
   { id:2, label:"Design 2 — Modern Blue/Green", Component: PleCertificateDesign2 },
   { id:3, label:"Design 3 — Maroon & Gold", Component: PleCertificateDesign3 },
   { id:4, label:"Design 4 — Classic Red Zigzag (with logo)", Component: PleCertificateDesign4 },
+  { id:5, label:"Design 5 — Gold Chain & Maroon (Appreciation style)", Component: PleCertificateDesign5 },
 ];
 function PleInfo({ students, setStudents, school, markEditing, municipalPerf, setMunicipalPerf }) {
   const [tab, setTab] = useState("records");
