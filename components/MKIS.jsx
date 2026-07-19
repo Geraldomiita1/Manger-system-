@@ -5120,6 +5120,7 @@ function PleCertificateDesign5({ rec, school, year, pdfRef }) {
   const heShe = s.gender==="F"?"She":"He";
   const herHim = s.gender==="F"?"her":"him";
   const schoolTown = school.poBox?.includes(",") ? school.poBox.split(",").pop().trim() : "";
+  const romanDiv = (d) => ({"1":"I","2":"II","3":"III","4":"IV","5":"V"}[d] || d);
   const corner = { position:"absolute", fontSize:30, color:"#d4a017", zIndex:2, lineHeight:1 };
   return (
     <div ref={pdfRef} className="ple-cert" style={{width:"210mm",height:"297mm",boxSizing:"border-box",background:"#fffdf8",fontFamily:"Georgia,serif",position:"relative",overflow:"hidden"}}>
@@ -5138,7 +5139,8 @@ function PleCertificateDesign5({ rec, school, year, pdfRef }) {
         {/* School header */}
         <div style={{textAlign:"center",marginBottom:14}}>
           {school.logo && <img src={school.logo} alt="logo" style={{width:50,height:50,objectFit:"contain",display:"block",margin:"0 auto 6px"}}/>}
-          <div style={{fontWeight:900,fontSize:18,color:"#7a1f3d",letterSpacing:1,textTransform:"uppercase"}}>{school.name}</div>
+          <div style={{fontWeight:900,fontSize:28,color:"#111827",letterSpacing:1,textTransform:"uppercase"}}>{school.name}</div>
+          {school.motto && <div style={{fontSize:12,color:"#7a1f3d",fontStyle:"italic",marginTop:2}}>"{school.motto}"</div>}
           <div style={{fontSize:12,color:"#6b7280",marginTop:3}}>{school.poBox}{school.tel?` | Tel: ${school.tel}`:""}</div>
         </div>
         {/* Title */}
@@ -5161,7 +5163,7 @@ function PleCertificateDesign5({ rec, school, year, pdfRef }) {
           <span style={{fontFamily:"'EB Garamond','Garamond','Times New Roman',serif",fontWeight:900,fontSize:s.name&&s.name.length>18?26:32,color:"#7a1f3d",display:"inline-block",maxWidth:"100%",wordBreak:"break-word",letterSpacing:1}}>{s.name}</span>
         </div>
         <div style={{textAlign:"center",fontSize:14,color:"#374151",lineHeight:1.7,marginBottom:16,padding:"0 20px"}}>
-          who has successfully completed the Primary Leaving Examination (PLE) at <b>{school.name}</b>{schoolTown && <>, {schoolTown}</>} in <b>{year}</b>.
+          Index No. <b>{s.indexNo||"........................."}</b>, who has successfully completed the Primary Leaving Examination (PLE) at <b>{school.name}</b>{schoolTown && <>, {schoolTown}</>} in <b>{year}</b>.
         </div>
         {/* Results row */}
         <div style={{display:"flex",flexDirection:"column"}}>
@@ -5169,18 +5171,17 @@ function PleCertificateDesign5({ rec, school, year, pdfRef }) {
             {PLE_SUBJECTS.map((sub,i)=>(
               <div key={sub} style={{flex:1,textAlign:"center",padding:"10px 6px",borderRight:i<PLE_SUBJECTS.length-1?"1px solid #f0e2b0":"none",background:i%2===0?"#fffdf5":"white"}}>
                 <div style={{fontSize:11,color:"#6b7280",textTransform:"uppercase",letterSpacing:0.5}}>{pleSubLabel(sub)}</div>
-                <div style={{fontSize:20,fontWeight:900,color:"#7a1f3d",marginTop:2}}>{s.results?.[sub]||"—"}</div>
+                <div style={{fontSize:20,fontWeight:900,color:"#000",marginTop:2}}>{s.results?.[sub]||"—"}</div>
               </div>
             ))}
           </div>
-          {/* Index No / LIN row */}
-          <div style={{display:"flex",justifyContent:"space-between",fontSize:14,color:"#374151",border:"1px solid #f0e2b0",borderRadius:8,padding:"10px 18px",marginBottom:14,background:"#fffdf5"}}>
-            <div>INDEX NO.: <b>{s.indexNo||"—"}</b></div>
+          {/* LIN row */}
+          <div style={{display:"flex",justifyContent:"center",fontSize:14,color:"#374151",border:"1px solid #f0e2b0",borderRadius:8,padding:"10px 18px",marginBottom:14,background:"#fffdf5"}}>
             <div>LIN: <b>{s.lin||"—"}</b></div>
           </div>
           <div style={{display:"flex",justifyContent:"center",gap:40,fontSize:15,marginBottom:14}}>
-            <div><span style={{color:"#6b7280"}}>Total Aggregate: </span><b style={{fontSize:18}}>{s.totalAgg||"—"}</b></div>
-            <div><span style={{color:"#6b7280"}}>Division: </span><b style={{fontSize:18,color:"#7a1f3d"}}>{s.division||"—"}</b></div>
+            <div><span style={{color:"#6b7280"}}>Total Aggregate: </span><b style={{fontSize:18,color:"#000"}}>{s.totalAgg||"—"}</b></div>
+            <div><span style={{color:"#6b7280"}}>Division: </span><b style={{fontSize:18,color:"#dc2626"}}>{s.division?romanDiv(s.division):"—"}</b></div>
           </div>
           {/* Leadership / Co-curricular / Conduct */}
           <div style={{border:"1px solid #f0e2b0",borderRadius:8,marginBottom:16,background:"#fffdf5"}}>
@@ -5213,7 +5214,7 @@ function PleCertificateDesign5({ rec, school, year, pdfRef }) {
             <div style={{textAlign:"center"}}>
               <div style={{borderBottom:"1px solid #7a1f3d",width:170,marginBottom:6}}>&nbsp;</div>
               <div style={{fontWeight:900,fontSize:13,textTransform:"uppercase"}}>{school.headTeacher||"HEAD TEACHER"}</div>
-              <div style={{fontSize:12,color:"#6b7280"}}>Headteacher — Signature</div>
+              <div style={{fontSize:12,color:"#6b7280"}}>Headteacher</div>
             </div>
           </div>
         </div>
