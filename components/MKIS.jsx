@@ -5123,7 +5123,7 @@ function PleCertificateDesign5({ rec, school, year, pdfRef }) {
   const romanDiv = (d) => ({"1":"I","2":"II","3":"III","4":"IV","5":"V"}[d] || d);
   const corner = { position:"absolute", fontSize:30, color:"#d4a017", zIndex:2, lineHeight:1 };
   return (
-    <div ref={pdfRef} className="ple-cert" style={{width:"210mm",height:"297mm",boxSizing:"border-box",background:"#fffdf8",fontFamily:"Georgia,serif",position:"relative",overflow:"hidden"}}>
+    <div ref={pdfRef} className="ple-cert" style={{width:"210mm",minHeight:"297mm",boxSizing:"border-box",background:"#fffdf8",fontFamily:"Georgia,serif",position:"relative",overflow:"visible"}}>
       {/* Outer gold chain band */}
       <div style={{position:"absolute",inset:12,backgroundImage:CHAIN_TILE,backgroundRepeat:"repeat",backgroundColor:"#fff8e1",zIndex:0}}/>
       {/* Inner maroon border, inset within the chain band */}
@@ -5135,53 +5135,53 @@ function PleCertificateDesign5({ rec, school, year, pdfRef }) {
       <div style={{...corner,bottom:36,left:36,transform:"scaleY(-1)"}}>❦</div>
       <div style={{...corner,bottom:36,right:36,transform:"scale(-1,-1)"}}>❦</div>
       {/* Content */}
-      <div style={{position:"relative",zIndex:2,padding:"64px 64px 48px",display:"flex",flexDirection:"column",height:"100%",boxSizing:"border-box"}}>
+      <div style={{position:"relative",zIndex:2,padding:"30px 60px 30px",display:"flex",flexDirection:"column",minHeight:"100%",boxSizing:"border-box"}}>
         {/* School header */}
-        <div style={{textAlign:"center",marginBottom:14}}>
-          {school.logo && <img src={school.logo} alt="logo" style={{width:50,height:50,objectFit:"contain",display:"block",margin:"0 auto 6px"}}/>}
+        <div style={{textAlign:"center",marginBottom:8}}>
+          {school.logo && <img src={school.logo} alt="logo" style={{width:46,height:46,objectFit:"contain",display:"block",margin:"-6px auto 4px"}}/>}
           <div style={{fontWeight:900,fontSize:28,color:"#111827",letterSpacing:1,textTransform:"uppercase"}}>{school.name}</div>
           {school.motto && <div style={{fontSize:12,color:"#7a1f3d",fontStyle:"italic",marginTop:2}}>"{school.motto}"</div>}
           <div style={{fontSize:12,color:"#6b7280",marginTop:3}}>{school.poBox}{school.tel?` | Tel: ${school.tel}`:""}</div>
         </div>
         {/* Title */}
-        <div style={{textAlign:"center",marginBottom:14}}>
-          <div style={{fontSize:20,fontWeight:900,color:"#7a1f3d",letterSpacing:2,textTransform:"uppercase",marginBottom:4}}>Primary Leaving Examination (PLE)</div>
-          <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:16}}>
-            <span style={{fontSize:26,color:"#d4a017"}}>❧</span>
-            <div style={{fontSize:44,fontWeight:900,color:"#1e3a6e",letterSpacing:6,textTransform:"uppercase",fontFamily:"'Times New Roman',serif"}}>Certificate</div>
-            <span style={{fontSize:26,color:"#d4a017",transform:"scaleX(-1)",display:"inline-block"}}>❧</span>
+        <div style={{textAlign:"center",marginBottom:8}}>
+          <div style={{fontSize:18,fontWeight:900,color:"#7a1f3d",letterSpacing:2,textTransform:"uppercase",marginBottom:3}}>Primary Leaving Examination (PLE)</div>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:14}}>
+            <span style={{fontSize:22,color:"#d4a017"}}>❧</span>
+            <div style={{fontSize:28,fontWeight:900,color:"#1e3a6e",letterSpacing:5,textTransform:"uppercase",fontFamily:"'Times New Roman',serif"}}>Certificate</div>
+            <span style={{fontSize:22,color:"#d4a017",transform:"scaleX(-1)",display:"inline-block"}}>❧</span>
           </div>
-          <div style={{fontSize:15,color:"#374151",letterSpacing:3,textTransform:"uppercase",marginTop:6}}>of Completion and Recommendation</div>
+          <div style={{fontSize:15,color:"#374151",letterSpacing:3,textTransform:"uppercase",marginTop:5}}>of Completion and Recommendation</div>
         </div>
-        <div style={{textAlign:"center",fontSize:14,color:"#6b7280",letterSpacing:1,textTransform:"uppercase",marginBottom:6}}>This certificate is presented to</div>
+        <div style={{textAlign:"center",fontSize:14,color:"#6b7280",fontStyle:"italic",marginBottom:5}}>This certificate is presented to</div>
         {s.photo && (
-          <div style={{textAlign:"center",marginBottom:10}}>
-            <img src={s.photo} alt="Candidate" style={{width:80,height:92,objectFit:"cover",borderRadius:6,border:"2px solid #7a1f3d"}}/>
+          <div style={{textAlign:"center",marginBottom:6}}>
+            <img src={s.photo} alt="Candidate" style={{width:64,height:74,objectFit:"cover",borderRadius:6,border:"2px solid #7a1f3d"}}/>
           </div>
         )}
-        <div style={{textAlign:"center",marginBottom:14,padding:"0 16px"}}>
-          <span style={{fontFamily:"'EB Garamond','Garamond','Times New Roman',serif",fontWeight:900,fontSize:s.name&&s.name.length>18?26:32,color:"#7a1f3d",display:"inline-block",maxWidth:"100%",wordBreak:"break-word",letterSpacing:1}}>{s.name}</span>
+        <div style={{textAlign:"center",marginBottom:8,padding:"0 16px"}}>
+          <span style={{fontFamily:"'EB Garamond','Garamond','Times New Roman',serif",fontWeight:900,fontSize:s.name&&s.name.length>18?24:30,color:"#7a1f3d",display:"inline-block",maxWidth:"100%",wordBreak:"break-word",letterSpacing:1}}>{s.name}</span>
         </div>
-        <div style={{textAlign:"center",fontSize:14,color:"#374151",lineHeight:1.7,marginBottom:16,padding:"0 20px"}}>
+        <div style={{textAlign:"center",fontSize:14,color:"#374151",lineHeight:1.6,marginBottom:10,padding:"0 20px"}}>
           Index No. <b>{s.indexNo||"........................."}</b>, who has successfully completed the Primary Leaving Examination (PLE) at <b>{school.name}</b>{schoolTown && <>, {schoolTown}</>} in <b>{year}</b>.
         </div>
         {/* Results row */}
         <div style={{display:"flex",flexDirection:"column"}}>
-          <div style={{display:"flex",justifyContent:"center",gap:0,marginBottom:14,border:"1px solid #d4a017",borderRadius:8,overflow:"hidden"}}>
+          <div style={{display:"flex",justifyContent:"center",gap:0,marginBottom:10,border:"1px solid #d4a017",borderRadius:8,overflow:"hidden"}}>
             {PLE_SUBJECTS.map((sub,i)=>(
-              <div key={sub} style={{flex:1,textAlign:"center",padding:"10px 6px",borderRight:i<PLE_SUBJECTS.length-1?"1px solid #f0e2b0":"none",background:i%2===0?"#fffdf5":"white"}}>
+              <div key={sub} style={{flex:1,textAlign:"center",padding:"8px 6px",borderRight:i<PLE_SUBJECTS.length-1?"1px solid #f0e2b0":"none",background:i%2===0?"#fffdf5":"white"}}>
                 <div style={{fontSize:11,color:"#6b7280",textTransform:"uppercase",letterSpacing:0.5}}>{pleSubLabel(sub)}</div>
-                <div style={{fontSize:20,fontWeight:900,color:"#000",marginTop:2}}>{s.results?.[sub]||"—"}</div>
+                <div style={{fontSize:18,fontWeight:900,color:"#000",marginTop:2}}>{s.results?.[sub]||"—"}</div>
               </div>
             ))}
           </div>
           {/* LIN row */}
-          <div style={{display:"flex",justifyContent:"center",fontSize:14,color:"#374151",border:"1px solid #f0e2b0",borderRadius:8,padding:"10px 18px",marginBottom:14,background:"#fffdf5"}}>
+          <div style={{display:"flex",justifyContent:"center",fontSize:14,color:"#374151",border:"1px solid #f0e2b0",borderRadius:8,padding:"8px 18px",marginBottom:10,background:"#fffdf5"}}>
             <div>LIN: <b>{s.lin||"—"}</b></div>
           </div>
-          <div style={{display:"flex",justifyContent:"center",gap:40,fontSize:15,marginBottom:14}}>
-            <div><span style={{color:"#6b7280"}}>Total Aggregate: </span><b style={{fontSize:18,color:"#000"}}>{s.totalAgg||"—"}</b></div>
-            <div><span style={{color:"#6b7280"}}>Division: </span><b style={{fontSize:18,color:"#dc2626"}}>{s.division?romanDiv(s.division):"—"}</b></div>
+          <div style={{display:"flex",justifyContent:"center",gap:40,fontSize:15,marginBottom:10}}>
+            <div><span style={{color:"#6b7280"}}>Total Aggregate: </span><b style={{fontSize:17,color:"#000"}}>{s.totalAgg||"—"}</b></div>
+            <div><span style={{color:"#6b7280"}}>Division: </span><b style={{fontSize:17,color:"#dc2626"}}>{s.division?romanDiv(s.division):"—"}</b></div>
           </div>
           {/* Leadership / Co-curricular / Conduct */}
           <div style={{border:"1px solid #f0e2b0",borderRadius:8,marginBottom:16,background:"#fffdf5"}}>
