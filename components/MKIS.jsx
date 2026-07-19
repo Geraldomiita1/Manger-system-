@@ -5117,6 +5117,8 @@ const CHAIN_TILE = `url("data:image/svg+xml;utf8,${encodeURIComponent(
 function PleCertificateDesign5({ rec, school, year, pdfRef }) {
   const s = rec;
   const he = s.gender==="F"?"her":"his";
+  const heShe = s.gender==="F"?"She":"He";
+  const herHim = s.gender==="F"?"her":"him";
   const schoolTown = school.poBox?.includes(",") ? school.poBox.split(",").pop().trim() : "";
   const corner = { position:"absolute", fontSize:30, color:"#d4a017", zIndex:2, lineHeight:1 };
   return (
@@ -5192,7 +5194,7 @@ function PleCertificateDesign5({ rec, school, year, pdfRef }) {
           </div>
           {/* Recommendation sentence */}
           <div style={{textAlign:"center",fontSize:14,color:"#374151",fontStyle:"italic",lineHeight:1.7,padding:"12px 24px",marginBottom:22}}>
-            {pleRecommendation(s.name,s.gender,s.totalAgg,s.division)}
+            I congratulate {herHim} on successfully completing the Primary Leaving Examination. {heShe} is encouraged to continue working hard and we recommend {herHim} for admission to secondary school.
           </div>
           {/* Seal medallion */}
           <div style={{display:"flex",justifyContent:"center",marginBottom:22}}>
