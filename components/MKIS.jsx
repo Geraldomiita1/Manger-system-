@@ -5117,6 +5117,7 @@ const CHAIN_TILE = `url("data:image/svg+xml;utf8,${encodeURIComponent(
 function PleCertificateDesign5({ rec, school, year, pdfRef }) {
   const s = rec;
   const he = s.gender==="F"?"her":"his";
+  const schoolTown = school.poBox?.includes(",") ? school.poBox.split(",").pop().trim() : "";
   const corner = { position:"absolute", fontSize:30, color:"#d4a017", zIndex:2, lineHeight:1 };
   return (
     <div ref={pdfRef} className="ple-cert" style={{width:"210mm",height:"297mm",boxSizing:"border-box",background:"#fffdf8",fontFamily:"Georgia,serif",position:"relative",overflow:"hidden"}}>
@@ -5139,13 +5140,14 @@ function PleCertificateDesign5({ rec, school, year, pdfRef }) {
           <div style={{fontSize:12,color:"#6b7280",marginTop:3}}>{school.poBox}{school.tel?` | Tel: ${school.tel}`:""}</div>
         </div>
         {/* Title */}
-        <div style={{textAlign:"center",marginBottom:18}}>
-          <div style={{fontSize:44,fontWeight:900,color:"#1e3a6e",letterSpacing:6,textTransform:"uppercase",fontFamily:"'Times New Roman',serif"}}>Certificate</div>
-          <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:14,marginTop:6}}>
-            <div style={{height:1,width:70,background:"#d4a017"}}/>
-            <div style={{fontSize:15,color:"#374151",letterSpacing:3,textTransform:"uppercase"}}>of PLE Recommendation</div>
-            <div style={{height:1,width:70,background:"#d4a017"}}/>
+        <div style={{textAlign:"center",marginBottom:14}}>
+          <div style={{fontSize:20,fontWeight:900,color:"#7a1f3d",letterSpacing:2,textTransform:"uppercase",marginBottom:4}}>Primary Leaving Examination (PLE)</div>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:16}}>
+            <span style={{fontSize:26,color:"#d4a017"}}>❧</span>
+            <div style={{fontSize:44,fontWeight:900,color:"#1e3a6e",letterSpacing:6,textTransform:"uppercase",fontFamily:"'Times New Roman',serif"}}>Certificate</div>
+            <span style={{fontSize:26,color:"#d4a017",transform:"scaleX(-1)",display:"inline-block"}}>❧</span>
           </div>
+          <div style={{fontSize:15,color:"#374151",letterSpacing:3,textTransform:"uppercase",marginTop:6}}>of Completion and Recommendation</div>
         </div>
         <div style={{textAlign:"center",fontSize:14,color:"#6b7280",letterSpacing:1,textTransform:"uppercase",marginBottom:6}}>This certificate is presented to</div>
         {s.photo && (
@@ -5157,7 +5159,7 @@ function PleCertificateDesign5({ rec, school, year, pdfRef }) {
           <span style={{fontFamily:"'Brush Script MT',cursive",fontStyle:"italic",fontSize:42,color:"#7a1f3d"}}>{s.name}</span>
         </div>
         <div style={{textAlign:"center",fontSize:14,color:"#374151",lineHeight:1.7,marginBottom:16,padding:"0 20px"}}>
-          who has successfully completed the Primary Leaving Examination (PLE) at <b>{school.name}</b> in <b>{year}</b>.
+          who has successfully completed the Primary Leaving Examination (PLE) at <b>{school.name}</b>{schoolTown && <>, {schoolTown}</>} in <b>{year}</b>.
         </div>
         {/* Results row */}
         <div style={{display:"flex",flexDirection:"column"}}>
@@ -5171,16 +5173,16 @@ function PleCertificateDesign5({ rec, school, year, pdfRef }) {
           </div>
           {/* Index No / LIN row */}
           <div style={{display:"flex",justifyContent:"space-between",fontSize:14,color:"#374151",border:"1px solid #f0e2b0",borderRadius:8,padding:"10px 18px",marginBottom:14,background:"#fffdf5"}}>
-            <div>Index No.: <b>{s.indexNo||"—"}</b></div>
+            <div>INDEX NO.: <b>{s.indexNo||"—"}</b></div>
             <div>LIN: <b>{s.lin||"—"}</b></div>
           </div>
           <div style={{display:"flex",justifyContent:"center",gap:40,fontSize:15,marginBottom:14}}>
-            <div><span style={{color:"#6b7280"}}>Total Agg: </span><b style={{fontSize:18}}>{s.totalAgg||"—"}</b></div>
+            <div><span style={{color:"#6b7280"}}>Total Aggregate: </span><b style={{fontSize:18}}>{s.totalAgg||"—"}</b></div>
             <div><span style={{color:"#6b7280"}}>Division: </span><b style={{fontSize:18,color:"#7a1f3d"}}>{s.division||"—"}</b></div>
           </div>
           {/* Leadership / Co-curricular / Conduct */}
           <div style={{border:"1px solid #f0e2b0",borderRadius:8,marginBottom:16,background:"#fffdf5"}}>
-            {[["🎓","Leadership Position(s)",s.leadership],["🏆","Co-curricular Activities",s.cocurricular],["🛡","Conduct",s.conduct]].map(([icon,label,val],i)=>(
+            {[["🎓","LEADERSHIP POSITION(S)",s.leadership],["🏆","CO-CURRICULAR ACTIVITIES",s.cocurricular],["🛡","CONDUCT",s.conduct]].map(([icon,label,val],i)=>(
               <div key={label} style={{display:"flex",alignItems:"center",gap:10,fontSize:13,padding:"9px 16px",borderTop:i>0?"1px solid #f0e2b0":"none"}}>
                 <span>{icon}</span>
                 <span style={{color:"#374151",fontWeight:700,whiteSpace:"nowrap"}}>{label}:</span>
