@@ -5617,16 +5617,16 @@ function PleInfo({ students, setStudents, school, markEditing, municipalPerf, se
               </div>
               {/* Table */}
               <div style={{overflowX:"auto"}}>
-                <table style={{width:"100%",fontSize:12,borderCollapse:"collapse",minWidth:700}}>
+                <table style={{width:"100%",fontSize:12,borderCollapse:"collapse",minWidth:800}}>
                   <thead>
                     <tr style={{background:"#1e3a6e",color:"white"}}>
-                      {["#","Year","Index No","NAME","SEX","ENG","SCI","SST","MTC","AGG","DIV","Conduct","Co-curr","Leadership"].map(h=>(
+                      {["#","Year","Index No","NAME","SEX","LIN","ENG","SCI","SST","MTC","AGG","DIV","Conduct","Co-curr","Leadership"].map(h=>(
                         <th key={h} style={{padding:"8px 8px",textAlign:"left",fontWeight:700,whiteSpace:"nowrap",fontSize:11}}>{h}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
-                    {sortedP7.length===0 && <tr><td colSpan={14} style={{padding:24,textAlign:"center",color:"#9ca3af"}}>No P7 learners found. Add them in the LEARNERS page.</td></tr>}
+                    {sortedP7.length===0 && <tr><td colSpan={15} style={{padding:24,textAlign:"center",color:"#9ca3af"}}>No P7 learners found. Add them in the LEARNERS page.</td></tr>}
                     {sortedP7.map((s,i)=>{
                       const rec = pleData[s.id]||{};
                       const hasResults = PLE_SUBJECTS.some(sub=>rec.results?.[sub]);
@@ -5640,6 +5640,17 @@ function PleInfo({ students, setStudents, school, markEditing, municipalPerf, se
                           </td>
                           <td style={{padding:"5px 8px",fontWeight:700,whiteSpace:"nowrap",color:"#1e3a6e"}}>{s.name}</td>
                           <td style={{padding:"5px 8px",textAlign:"center"}}>{s.gender}</td>
+                          <td style={{padding:"3px 4px"}}>
+                            <input
+                              value={rec.lin||""}
+                              onChange={e=>updatePle(s.id,"lin",e.target.value.toUpperCase())}
+                              maxLength={14}
+                              placeholder="U10F0112A54423"
+                              title="14 characters: U + 2 digits + F/M + 4 digits + A + 5 digits, e.g. U10F0112A54423"
+                              style={{...inp,padding:"2px 4px",width:118,fontSize:11,textTransform:"uppercase",
+                                borderColor: rec.lin && !/^U\d{2}[FM]\d{4}A\d{5}$/.test(rec.lin) ? "#dc2626" : undefined}}
+                            />
+                          </td>
                           {PLE_SUBJECTS.map(sub=>(
                             <td key={sub} style={{padding:"3px 4px",textAlign:"center"}}>
                               <input type="number" min={1} max={9} value={rec.results?.[sub]||""} onChange={e=>updateResult(s.id,sub,e.target.value)} style={{...inp,padding:"2px 3px",width:38,fontSize:12,textAlign:"center",fontWeight:700}}/>
