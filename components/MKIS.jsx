@@ -5135,13 +5135,19 @@ function PleCertificateDesign5({ rec, school, year, pdfRef }) {
       <div style={{...corner,bottom:36,left:36,transform:"scaleY(-1)"}}>❦</div>
       <div style={{...corner,bottom:36,right:36,transform:"scale(-1,-1)"}}>❦</div>
       {/* Content */}
-      <div style={{position:"relative",zIndex:2,padding:"30px 60px 30px",display:"flex",flexDirection:"column",minHeight:"100%",boxSizing:"border-box"}}>
+      <div style={{position:"relative",zIndex:2,padding:"36px 60px 30px",display:"flex",flexDirection:"column",minHeight:"100%",boxSizing:"border-box"}}>
         {/* School header */}
-        <div style={{textAlign:"center",marginBottom:8}}>
-          {school.logo && <img src={school.logo} alt="logo" style={{width:46,height:46,objectFit:"contain",display:"block",margin:"-6px auto 4px"}}/>}
+        <div style={{textAlign:"center",marginBottom:14}}>
+          {school.logo && <img src={school.logo} alt="logo" style={{width:46,height:46,objectFit:"contain",display:"block",margin:"0 auto 4px"}}/>}
           <div style={{fontWeight:900,fontSize:28,color:"#111827",letterSpacing:1,textTransform:"uppercase"}}>{school.name}</div>
           {school.motto && <div style={{fontSize:12,color:"#7a1f3d",fontStyle:"italic",marginTop:2}}>"{school.motto}"</div>}
           <div style={{fontSize:12,color:"#6b7280",marginTop:3}}>{school.poBox}{school.tel?` | Tel: ${school.tel}`:""}</div>
+        </div>
+        {/* Decorative broken divider with three stars */}
+        <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:12,margin:"0 0 16px"}}>
+          <div style={{height:4,flex:1,maxWidth:180,background:"#f97316",borderRadius:2}}/>
+          <div style={{display:"flex",gap:8,color:"#f97316",fontSize:16,letterSpacing:2}}>★★★</div>
+          <div style={{height:4,flex:1,maxWidth:180,background:"#f97316",borderRadius:2}}/>
         </div>
         {/* Title */}
         <div style={{textAlign:"center",marginBottom:8}}>
@@ -5175,18 +5181,21 @@ function PleCertificateDesign5({ rec, school, year, pdfRef }) {
               </div>
             ))}
           </div>
-          {/* LIN row */}
-          <div style={{display:"flex",justifyContent:"center",fontSize:14,color:"#374151",border:"1px solid #f0e2b0",borderRadius:8,padding:"8px 18px",marginBottom:10,background:"#fffdf5"}}>
-            <div>LIN: <b>{s.lin||"—"}</b></div>
-          </div>
           <div style={{display:"flex",justifyContent:"center",gap:40,fontSize:15,marginBottom:10}}>
             <div><span style={{color:"#6b7280"}}>Total Aggregate: </span><b style={{fontSize:17,color:"#000"}}>{s.totalAgg||"—"}</b></div>
             <div><span style={{color:"#6b7280"}}>Division: </span><b style={{fontSize:17,color:"#dc2626"}}>{s.division?romanDiv(s.division):"—"}</b></div>
           </div>
-          {/* Leadership / Co-curricular / Conduct */}
+          {/* Leadership (with LIN alongside) / Co-curricular / Conduct */}
           <div style={{border:"1px solid #f0e2b0",borderRadius:8,marginBottom:16,background:"#fffdf5"}}>
-            {[["🎓","LEADERSHIP POSITION(S)",s.leadership],["🏆","CO-CURRICULAR ACTIVITIES",s.cocurricular],["🛡","CONDUCT",s.conduct]].map(([icon,label,val],i)=>(
-              <div key={label} style={{display:"flex",alignItems:"center",gap:10,fontSize:13,padding:"9px 16px",borderTop:i>0?"1px solid #f0e2b0":"none"}}>
+            <div style={{display:"flex",alignItems:"center",gap:10,fontSize:13,padding:"9px 16px"}}>
+              <span>🎓</span>
+              <span style={{color:"#374151",fontWeight:700,whiteSpace:"nowrap"}}>LEADERSHIP POSITION(S):</span>
+              <span style={{color:"#1e3a6e",flex:1}}>{s.leadership||"—"}</span>
+              <span style={{color:"#374151",fontWeight:700,whiteSpace:"nowrap"}}>LIN:</span>
+              <span style={{color:"#1e3a6e"}}>{s.lin||"—"}</span>
+            </div>
+            {[["🏆","CO-CURRICULAR ACTIVITIES",s.cocurricular],["🛡","CONDUCT",s.conduct]].map(([icon,label,val])=>(
+              <div key={label} style={{display:"flex",alignItems:"center",gap:10,fontSize:13,padding:"9px 16px",borderTop:"1px solid #f0e2b0"}}>
                 <span>{icon}</span>
                 <span style={{color:"#374151",fontWeight:700,whiteSpace:"nowrap"}}>{label}:</span>
                 <span style={{color:"#1e3a6e",flex:1}}>{val||"—"}</span>
