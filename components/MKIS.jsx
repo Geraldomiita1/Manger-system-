@@ -1707,7 +1707,7 @@ function SchoolCrest({ size = 64, ink = "#0f1115", paper = "#ffffff" }) {
     </svg>
   );
 }
-const PAGES = ["DASHBOARD","MARK ENTRY","MONTHLY EXAMS","GROUP WORK","EXAM TIMETABLE","MONTHLY CARDS","MONTHLY SLIPS","RESULT SHEETS","REPORT CARDS","LEARNERS","PLE INFO","MANAGE REQUESTS","SETTINGS","AUDIT LOG","DOWNLOAD CENTRE"];
+const PAGES = ["DASHBOARD","MARK ENTRY","MONTHLY EXAMS","GROUP WORK","EXAM TIMETABLE","MONTHLY CARDS","MONTHLY SLIPS","RESULT SHEETS","REPORT CARDS","LEARNERS","SWEEPING ROTA","PLE INFO","MANAGE REQUESTS","SETTINGS","AUDIT LOG","DOWNLOAD CENTRE"];
 // Pages only the admin account can see/use. Teachers never see these in the sidebar.
 const ADMIN_ONLY_PAGES = ["MANAGE REQUESTS", "SETTINGS", "AUDIT LOG"];
 // ─── APP ─────────────────────────────────────────────────────────────────────
@@ -2377,7 +2377,7 @@ export default function App() {
         </div>
         <nav style={{flex:1,padding:"8px 0"}}>
           {PAGES.filter(p => !ADMIN_ONLY_PAGES.includes(p) || role==="admin").map(p => {
-            const icons = {"DASHBOARD":"📊","MARK ENTRY":"📝","MONTHLY EXAMS":"📅","GROUP WORK":"👨‍👩‍👧‍👦","EXAM TIMETABLE":"🗓️","MONTHLY CARDS":"🗂️","MONTHLY SLIPS":"🎫","RESULT SHEETS":"📋","REPORT CARDS":"🎓","LEARNERS":"👥","PLE INFO":"🏅","MANAGE REQUESTS":"🛂","SETTINGS":"⚙️","AUDIT LOG":"🕓","DOWNLOAD CENTRE":"📥"};
+            const icons = {"DASHBOARD":"📊","MARK ENTRY":"📝","MONTHLY EXAMS":"📅","GROUP WORK":"👨‍👩‍👧‍👦","EXAM TIMETABLE":"🗓️","MONTHLY CARDS":"🗂️","MONTHLY SLIPS":"🎫","RESULT SHEETS":"📋","REPORT CARDS":"🎓","LEARNERS":"👥","SWEEPING ROTA":"🧹","PLE INFO":"🏅","MANAGE REQUESTS":"🛂","SETTINGS":"⚙️","AUDIT LOG":"🕓","DOWNLOAD CENTRE":"📥"};
             const pendingCount = p==="MANAGE REQUESTS" ? changeRequests.filter(r=>r.status==="pending").length : 0;
             return (
               <button key={p} onClick={()=>setPage(p)}
@@ -2415,6 +2415,7 @@ export default function App() {
           {page==="RESULT SHEETS" && <ResultSheets {...props} />}
           {page==="REPORT CARDS" && <ReportCards {...props} />}
           {page==="LEARNERS" && <Students {...props} />}
+          {page==="SWEEPING ROTA" && <SweepingRota students={students} school={school} markEditing={markEditing} />}
           {page==="PLE INFO" && <PleInfo students={students} setStudents={setStudents} school={school} markEditing={markEditing} municipalPerf={municipalPerf} setMunicipalPerf={setMunicipalPerf} />}
           {page==="MANAGE REQUESTS" && role==="admin" && <ManageRequests {...props} />}
           {page==="SETTINGS" && role==="admin" && <Settings {...props} />}
@@ -2974,6 +2975,189 @@ function Students({ students, setStudents, addStudent, deleteStudent, promoteStu
           </div>
         </div>
       )}
+    </div>
+  );
+}
+// ─── SWEEPING ROTA ───────────────────────────────────────────────────────────
+const SWEEP_WEEKDAYS = ["Monday","Tuesday","Wednesday","Thursday","Friday"];
+const SWEEP_DUTIES = [["brk","Break Time"],["lunch","Lunch Time"],["games","Games Time"]];
+function SweepingRota({ students, school, markEditing }) {
+  const [rotas, setRotas] = useState({});
+  const [loaded, setLoaded] = useState(false);
+  const [year, setYear] = useState(school.year || String(new Date().getFullYear()));
+  const [term, setTerm] = useState(TERMS[0]);
+  const [cls, setCls] = useState(ALL_CLASSES[0]);
+  const [weeks, setWeeks] = useState(13);
+  const [pdfBusy, setPdfBusy] = useState(false);
+  const sheetRef = useRef(null);
+
+  useEffect(() => {
+    let alive = true;
+    loadShared("mkis_sweeping_rota", {}).then(r => { if (alive) { setRotas(r||{}); setLoaded(true); } });
+    return () => { alive = false; };
+  }, []);
+
+  const rotaId = `${year}__${term}__${cls}`.replace(/\s+/g,"_");
+  const current = rotas[rotaId];
+
+  const persist = (next) => { setRotas(next); saveShared("mkis_sweeping_rota", next); };
+
+  const classStudents = useMemo(() =>
+    students.filter(s=>s.className===cls).sort((a,b)=>a.name.localeCompare(b.name)),
+  [students, cls]);
+
+  // Chunk learners into duty groups of at least 4. If there's a small
+  // remainder, spread it across existing groups rather than leaving a
+  // group smaller than 4.
+  const buildGroups = () => {
+    const names = classStudents.map(s=>s.name);
+    if (names.length === 0) return [];
+    const numGroups = Math.max(1, Math.floor(names.length / 4));
+    const groups = Array.from({length:numGroups}, () => []);
+    names.forEach((n,i) => groups[i % numGroups].push(n));
+    return groups;
+  };
+
+  const generate = () => {
+    const groups = buildGroups();
+    if (groups.length === 0) { alert(`No learners found in ${cls}. Add them in the LEARNERS page first.`); return; }
+    const numWeeks = Math.max(1, Math.min(13, Number(weeks) || 1));
+    let slot = 0;
+    const schedule = [];
+    for (let w=1; w<=numWeeks; w++) {
+      const days = SWEEP_WEEKDAYS.map(day => {
+        const row = { day };
+        SWEEP_DUTIES.forEach(([key]) => { row[key] = groups[slot % groups.length].join(", "); slot++; });
+        return row;
+      });
+      schedule.push({ week:w, days });
+    }
+    markEditing && markEditing();
+    persist({ ...rotas, [rotaId]: { year, term, cls, weeks:numWeeks, schedule, updatedAt:new Date().toISOString() } });
+  };
+
+  const updateCell = (wIdx, dIdx, key, value) => {
+    if (!current) return;
+    const schedule = current.schedule.map((wk,wi) => wi!==wIdx ? wk : { ...wk, days: wk.days.map((d,di) => di!==dIdx ? d : { ...d, [key]: value }) });
+    markEditing && markEditing();
+    persist({ ...rotas, [rotaId]: { ...current, schedule, updatedAt:new Date().toISOString() } });
+  };
+
+  const deleteRota = (id) => {
+    if (!window.confirm("Delete this sweeping rota? This cannot be undone.")) return;
+    const next = { ...rotas };
+    delete next[id];
+    persist(next);
+  };
+
+  const openRota = (r) => { setYear(r.year); setTerm(r.term); setCls(r.cls); setWeeks(r.weeks); };
+
+  const savedList = Object.entries(rotas).sort((a,b) => (b[1].updatedAt||"").localeCompare(a[1].updatedAt||""));
+
+  const exportWord = () => {
+    const rows = current.schedule.map(wk => wk.days.map((d,di) => `
+      <tr>
+        ${di===0 ? `<td rowspan="5" style="font-weight:bold;">Week ${wk.week}</td>` : ""}
+        <td class="name-cell">${escapeHtml(d.day)}</td>
+        <td>${escapeHtml(d.brk)}</td>
+        <td>${escapeHtml(d.lunch)}</td>
+        <td>${escapeHtml(d.games)}</td>
+      </tr>`).join("")).join("");
+    const body = `
+      <div class="title">${escapeHtml(school.name)}</div>
+      <div class="addr">${escapeHtml(school.poBox||"")}</div>
+      <div class="subtitle">SWEEPING ROTA — ${escapeHtml(cls)}, ${escapeHtml(term)} ${escapeHtml(String(year))}</div>
+      <table>
+        <thead><tr><th>Week</th><th>Day</th><th>Break Time</th><th>Lunch Time</th><th>Games Time</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+    downloadWordHtml(`Sweeping Rota - ${cls}`, body, `${safeFileName(cls)}_${safeFileName(term)}_${year}_Sweeping_Rota.doc`, { pageSize:"210mm 297mm" });
+  };
+
+  if (!loaded) return <div style={{padding:20,color:"#9ca3af"}}>Loading…</div>;
+
+  return (
+    <div>
+      <div className="no-print" style={{display:"flex",gap:10,marginBottom:16,flexWrap:"wrap",alignItems:"flex-end",justifyContent:"space-between"}}>
+        <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"flex-end"}}>
+          <Sel label="Class" value={cls} onChange={setCls} opts={ALL_CLASSES}/>
+          <Sel label="Term" value={term} onChange={setTerm} opts={TERMS}/>
+          <div><label style={lbl}>Year</label><input type="number" value={year} onChange={e=>setYear(e.target.value)} style={{...inp,width:90}}/></div>
+          <div><label style={lbl}>Number of Weeks</label><input type="number" min={1} max={13} value={weeks} onChange={e=>setWeeks(e.target.value)} style={{...inp,width:90}}/></div>
+        </div>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+          <button onClick={generate} style={btnPrimary}>🔄 Auto Generate Rota</button>
+          {current && <>
+            <button onClick={exportWord} style={btnWord}>📄 Export Word</button>
+            <button disabled={pdfBusy} onClick={async()=>{
+              setPdfBusy(true);
+              try { await downloadNodesAsPdf([sheetRef.current], `${safeFileName(cls)}_${safeFileName(term)}_${year}_Sweeping_Rota.pdf`, "portrait"); }
+              finally { setPdfBusy(false); }
+            }} style={pdfBusy?btnPdfBusy:btnPdf}>{pdfBusy?"⏳ Generating...":"📕 Export PDF"}</button>
+            <button onClick={()=>window.print()} style={btnGhost}>🖨️ Print Rota</button>
+          </>}
+        </div>
+      </div>
+
+      {!current && (
+        <div style={{background:"#fffbeb",borderRadius:12,padding:24,textAlign:"center",color:"#92400e",border:"1px solid #fde68a",marginBottom:20}}>
+          No sweeping rota yet for {cls}, {term} {year}. Set the number of weeks above and click "Auto Generate Rota".
+        </div>
+      )}
+
+      {current && (
+        <div ref={sheetRef} style={{background:"white",borderRadius:12,border:"1px solid #e5e7eb",padding:24,marginBottom:24}}>
+          <div style={{textAlign:"center",marginBottom:4,fontWeight:900,fontSize:18,color:"#1e3a6e"}}>{school.name}</div>
+          <div style={{textAlign:"center",fontSize:12,color:"#6b7280",marginBottom:10}}>{school.poBox}</div>
+          <div style={{textAlign:"center",fontWeight:800,fontSize:14,marginBottom:16,textTransform:"uppercase",letterSpacing:1}}>
+            Sweeping Rota — {cls}, {term} {year}
+          </div>
+          <table style={{width:"100%",fontSize:12,borderCollapse:"collapse"}}>
+            <thead>
+              <tr>
+                {["Week","Day","Break Time","Lunch Time","Games Time"].map(h=>(
+                  <th key={h} style={{background:"#1e3a6e",color:"white",padding:"8px 6px",border:"1px solid #1e3a6e"}}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {current.schedule.map((wk,wIdx)=>
+                wk.days.map((d,dIdx)=>(
+                  <tr key={`${wIdx}-${dIdx}`} style={{background:wIdx%2===0?"white":"#f8fafc"}}>
+                    {dIdx===0 && <td rowSpan={5} style={{border:"1px solid #d1d5db",fontWeight:800,textAlign:"center",background:"#eff6ff"}}>Week {wk.week}</td>}
+                    <td style={{border:"1px solid #d1d5db",padding:"6px 8px",fontWeight:700,textAlign:"center"}}>{d.day}</td>
+                    {SWEEP_DUTIES.map(([key])=>(
+                      <td key={key} style={{border:"1px solid #d1d5db",padding:2}}>
+                        <textarea
+                          className="no-print-textarea"
+                          value={d[key]}
+                          onChange={e=>updateCell(wIdx,dIdx,key,e.target.value)}
+                          rows={2}
+                          style={{width:"100%",border:"none",resize:"vertical",fontSize:12,padding:"4px 6px",background:"transparent",fontFamily:"inherit"}}
+                        />
+                      </td>
+                    ))}
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <div className="no-print" style={{background:"white",borderRadius:12,border:"1px solid #e5e7eb",padding:20}}>
+        <div style={{fontWeight:800,fontSize:14,marginBottom:12,color:"#1e3a6e"}}>📁 Saved Rotas</div>
+        {savedList.length===0 && <div style={{color:"#9ca3af",fontSize:13}}>No rotas saved yet.</div>}
+        {savedList.map(([id,r])=>(
+          <div key={id} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 10px",borderBottom:"1px solid #f1f5f9",fontSize:13}}>
+            <div><b>{r.cls}</b> — {r.term} {r.year} <span style={{color:"#9ca3af"}}>({r.weeks} weeks)</span></div>
+            <div style={{display:"flex",gap:8}}>
+              <button onClick={()=>openRota(r)} style={{...btnGhost,padding:"5px 12px",fontSize:12}}>Open</button>
+              <button onClick={()=>deleteRota(id)} style={{padding:"5px 12px",fontSize:12,background:"#fee2e2",color:"#991b1b",border:"none",borderRadius:6,cursor:"pointer"}}>Delete</button>
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -5177,19 +5361,19 @@ function PleCertificateDesign5({ rec, school, year, pdfRef }) {
             {PLE_SUBJECTS.map((sub,i)=>(
               <div key={sub} style={{flex:1,textAlign:"center",padding:"8px 6px",borderRight:i<PLE_SUBJECTS.length-1?"1px solid #f0e2b0":"none",background:i%2===0?"#fffdf5":"white"}}>
                 <div style={{fontSize:11,color:"#6b7280",textTransform:"uppercase",letterSpacing:0.5}}>{pleSubLabel(sub)}</div>
-                <div style={{fontSize:18,fontWeight:900,color:"#000",marginTop:2}}>{s.results?.[sub]||"—"}</div>
+                <div style={{fontSize:18,fontWeight:900,color:"#000",marginTop:2,fontFamily:"'Times New Roman',Times,serif"}}>{s.results?.[sub]||"—"}</div>
               </div>
             ))}
           </div>
           <div style={{display:"flex",justifyContent:"center",gap:40,fontSize:15,marginBottom:10}}>
-            <div><span style={{color:"#6b7280"}}>Total Aggregate: </span><b style={{fontSize:17,color:"#000"}}>{s.totalAgg||"—"}</b></div>
-            <div><span style={{color:"#6b7280"}}>Division: </span><b style={{fontSize:17,color:"#dc2626"}}>{s.division?romanDiv(s.division):"—"}</b></div>
+            <div><span style={{color:"#6b7280"}}>Total Aggregate: </span><b style={{fontSize:17,color:"#000",fontFamily:"'Times New Roman',Times,serif"}}>{s.totalAgg||"—"}</b></div>
+            <div><span style={{color:"#6b7280"}}>Division: </span><b style={{fontSize:17,color:"#dc2626",fontFamily:"'Times New Roman',Times,serif"}}>{s.division?romanDiv(s.division):"—"}</b></div>
           </div>
           {/* LIN (on top) / Leadership / Co-curricular / Conduct */}
           <div style={{border:"1px solid #f0e2b0",borderRadius:8,marginBottom:16,background:"#fffdf5"}}>
             <div style={{display:"flex",justifyContent:"center",fontSize:13,padding:"9px 16px"}}>
               <span style={{color:"#374151",fontWeight:700}}>LIN: </span>
-              <span style={{color:"#1e3a6e",marginLeft:6}}>{s.lin||"—"}</span>
+              <span style={{color:"#1e3a6e",marginLeft:6,fontFamily:"'Times New Roman',Times,serif"}}>{s.lin||"—"}</span>
             </div>
             <div style={{display:"flex",alignItems:"center",gap:10,fontSize:13,padding:"9px 16px",borderTop:"1px solid #f0e2b0"}}>
               <span>🎓</span>
@@ -5647,7 +5831,7 @@ function PleInfo({ students, setStudents, school, markEditing, municipalPerf, se
                               maxLength={14}
                               placeholder="U10F0112A54423"
                               title="14 characters: U + 2 digits + F/M + 4 digits + A + 5 digits, e.g. U10F0112A54423"
-                              style={{...inp,padding:"2px 4px",width:118,fontSize:11,textTransform:"uppercase",
+                              style={{...inp,padding:"2px 4px",width:118,fontSize:11,textTransform:"uppercase",fontFamily:"'Times New Roman',Times,serif",
                                 borderColor: rec.lin && !/^U\d{2}[FM]\d{4}A\d{5}$/.test(rec.lin) ? "#dc2626" : undefined}}
                             />
                           </td>
