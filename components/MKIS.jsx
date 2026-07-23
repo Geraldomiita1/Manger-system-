@@ -3699,6 +3699,11 @@ function MockInfo({ students, school, bands: defaultBands, specialBands, divisio
         </div>
       </div>
       <div ref={sheetRef} style={{overflowX:"auto"}}>
+        <div style={{textAlign:"center",marginBottom:12}}>
+          {school.logo && <img src={school.logo} alt="School badge" style={{width:56,height:56,objectFit:"contain",display:"block",margin:"0 auto 6px"}}/>}
+          <div style={{fontWeight:900,fontSize:16,color:"#1e3a6e",textTransform:"uppercase",letterSpacing:0.5}}>{school.name}</div>
+          <div style={{fontSize:11,color:"#6b7280",marginTop:2}}>{school.poBox}{school.tel?` | Tel: ${school.tel}`:""}</div>
+        </div>
         <div style={{textAlign:"center",marginBottom:10,fontWeight:800,fontSize:14,color:"#1e3a6e",textTransform:"uppercase",letterSpacing:0.5}}>
           {mockType} {showResults?"":"— Blank Mark Sheet"} — {cls}, {year}
         </div>
