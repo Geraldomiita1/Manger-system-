@@ -1726,6 +1726,7 @@ export default function App() {
   const [students, setStudents] = useState([]);
   const [termMarks, setTermMarks] = useState({});
   const [monthlyMarks, setMonthlyMarks] = useState({});
+  const [monthlyResetBackups, setMonthlyResetBackups] = useState({});
   const [groupWork, setGroupWork] = useState(DEFAULT_GROUP_WORK);
   const [municipalPerf, setMunicipalPerf] = useState(DEFAULT_MUNICIPAL_PERF);
   const [examTimetable, setExamTimetable] = useState(DEFAULT_EXAM_TIMETABLE);
@@ -2151,19 +2152,53 @@ export default function App() {
   const resetMonthlyMonth = useCallback((cls, tk, month) => {
     markEditing();
     const [term, year] = tk.split("__");
+    const backupKey = `${cls}__${tk}__${month}`;
+    // Snapshot every affected learner's marks for this exact month before
+    // clearing them, so an accidental reset can be undone with Restore.
+    const snapshot = {};
+    students.filter(s=>s.className===cls).forEach(s => {
+      const m = monthlyMarks[s.id]?.[tk]?.[month];
+      if (m !== undefined) snapshot[s.id] = m;
+    });
+    setMonthlyResetBackups(prev => ({ ...prev, [backupKey]: { snapshot, at: new Date().toISOString() } }));
     stampAudit("mkis_monthlymarks", `Monthly marks RESET — ${cls} ${term} ${year} ${month}`);
     setMonthlyMarks(prev => {
       const next = { ...prev };
       students.filter(s=>s.className===cls).forEach(s => {
         if (next[s.id]?.[tk]?.[month] !== undefined) {
-          const tkObj = { ...next[s.id][tk] };
-          delete tkObj[month];
-          next[s.id] = { ...next[s.id], [tk]: tkObj };
+          // Set to undefined rather than delete the key: the sync merge
+          // (deepMergeObjects) only overwrites keys that exist on the local
+          // side, even with an undefined value. Deleting the key entirely
+          // means the merge never revisits it and the old remote value for
+          // this month silently comes right back on the next sync -- which
+          // is exactly the bug where Reset appeared to do nothing.
+          next[s.id] = { ...next[s.id], [tk]: { ...next[s.id][tk], [month]: undefined } };
         }
       });
       return next;
     });
-  }, [students]);
+  }, [students, monthlyMarks]);
+  const restoreMonthlyMonth = useCallback((cls, tk, month) => {
+    const backupKey = `${cls}__${tk}__${month}`;
+    const backup = monthlyResetBackups[backupKey];
+    if (!backup) return;
+    const [term, year] = tk.split("__");
+    markEditing();
+    stampAudit("mkis_monthlymarks", `Monthly marks RESTORED — ${cls} ${term} ${year} ${month}`);
+    setMonthlyMarks(prev => {
+      const next = { ...prev };
+      Object.entries(backup.snapshot).forEach(([sid, markData]) => {
+        next[sid] = { ...next[sid], [tk]: { ...next[sid]?.[tk], [month]: markData } };
+      });
+      return next;
+    });
+    setMonthlyResetBackups(prev => ({ ...prev, [backupKey]: undefined }));
+  }, [monthlyResetBackups]);
+  // Reset backups are a secondary safety-net, not core marks data, so they're
+  // kept simple: loaded once and saved as-is, outside the merge/polling
+  // system the main data keys use.
+  useEffect(() => { loadShared("mkis_monthly_reset_backups", {}).then(b => setMonthlyResetBackups(b||{})); }, []);
+  useEffect(() => { if (dataReady) saveShared("mkis_monthly_reset_backups", monthlyResetBackups); }, [monthlyResetBackups, dataReady]);
   // ── Save & lock for Mark Entry / Monthly Exams ───────────────────────────
   const lockTermEntry = useCallback((cls, tk) => {
     markEditing();
@@ -2380,7 +2415,7 @@ export default function App() {
       </div>
     );
   }
-  const props = { students, setStudents, termMarks, setTermMarks, monthlyMarks, setMonthlyMarks, groupWork, setGroupWork, municipalPerf, setMunicipalPerf, examTimetable, setExamTimetable, bands, setBands, specialBands, setSpecialBands, divisions, setDivisions, school, setSchool, accounts, setAccounts, initials, setInitials, updateTermMark, updateMonthlyMark, resetMonthlyMonth, requestOrApplyTermMark, requestOrApplyMonthlyMark, addStudent, deleteStudent, forceRestoreData, promoteStudents, role, currentUser, changeRequests, submitChangeRequest, approveChangeRequest, rejectChangeRequest, lockedTerm, lockTermEntry, unlockTermEntry, lockedMonthly, lockMonthlyEntry, unlockMonthlyEntry, requestUnlockTerm, requestUnlockMonthly, markEditing, stampAudit, dashboardPerfTerm, setDashboardPerfTerm, dashboardPerfYear, setDashboardPerfYear };
+  const props = { students, setStudents, termMarks, setTermMarks, monthlyMarks, setMonthlyMarks, groupWork, setGroupWork, municipalPerf, setMunicipalPerf, examTimetable, setExamTimetable, bands, setBands, specialBands, setSpecialBands, divisions, setDivisions, school, setSchool, accounts, setAccounts, initials, setInitials, updateTermMark, updateMonthlyMark, resetMonthlyMonth, restoreMonthlyMonth, monthlyResetBackups, requestOrApplyTermMark, requestOrApplyMonthlyMark, addStudent, deleteStudent, forceRestoreData, promoteStudents, role, currentUser, changeRequests, submitChangeRequest, approveChangeRequest, rejectChangeRequest, lockedTerm, lockTermEntry, unlockTermEntry, lockedMonthly, lockMonthlyEntry, unlockMonthlyEntry, requestUnlockTerm, requestUnlockMonthly, markEditing, stampAudit, dashboardPerfTerm, setDashboardPerfTerm, dashboardPerfYear, setDashboardPerfYear };
   return (
     <div className="app-shell" style={{display:"flex",minHeight:"100vh",fontFamily:"'Segoe UI',system-ui,sans-serif",background:"#f1f5f9"}}>
       {/* SIDEBAR */}
@@ -3748,7 +3783,7 @@ function MockInfo({ students, school, bands: defaultBands, specialBands, divisio
   );
 }
 // ─── MONTHLY EXAMS ───────────────────────────────────────────────────────────
-function MonthlyExams({ students, monthlyMarks, updateMonthlyMark, resetMonthlyMonth, requestOrApplyMonthlyMark, role, bands: defaultBands, specialBands, divisions, school, lockedMonthly, lockMonthlyEntry, unlockMonthlyEntry, changeRequests, requestUnlockMonthly }) {
+function MonthlyExams({ students, monthlyMarks, updateMonthlyMark, resetMonthlyMonth, restoreMonthlyMonth, monthlyResetBackups, requestOrApplyMonthlyMark, role, bands: defaultBands, specialBands, divisions, school, lockedMonthly, lockMonthlyEntry, unlockMonthlyEntry, changeRequests, requestUnlockMonthly }) {
   const [cls, setCls] = useState("P4");
   const [term, setTerm] = useState("Term I");
   const [year, setYear] = useState(school.year||String(new Date().getFullYear()));
@@ -4024,7 +4059,7 @@ function MonthlyExams({ students, monthlyMarks, updateMonthlyMark, resetMonthlyM
         {months.map(month=>(
           <MonthBlock key={month} month={month} term={term} year={year} cls={cls} school={school}
             classStudents={classStudents} monthlyMarks={monthlyMarks} role={role}
-            updateMonthlyMark={updateMonthlyMark} resetMonthlyMonth={resetMonthlyMonth} requestOrApplyMonthlyMark={handleMarkChange} bands={bands} divisions={divisions} tk={tk}
+            updateMonthlyMark={updateMonthlyMark} resetMonthlyMonth={resetMonthlyMonth} restoreMonthlyMonth={restoreMonthlyMonth} monthlyResetBackups={monthlyResetBackups} requestOrApplyMonthlyMark={handleMarkChange} bands={bands} divisions={divisions} tk={tk}
             lockedMonthly={lockedMonthly} lockMonthlyEntry={lockMonthlyEntry} unlockMonthlyEntry={unlockMonthlyEntry}
             changeRequests={changeRequests} requestUnlockMonthly={requestUnlockMonthly} />
         ))}
@@ -4032,7 +4067,7 @@ function MonthlyExams({ students, monthlyMarks, updateMonthlyMark, resetMonthlyM
     </div>
   );
 }
-function MonthBlock({ month, cls, classStudents, monthlyMarks, updateMonthlyMark, resetMonthlyMonth, requestOrApplyMonthlyMark, bands, divisions, tk, year, term, role, lockedMonthly, lockMonthlyEntry, unlockMonthlyEntry, changeRequests, requestUnlockMonthly, school }) {
+function MonthBlock({ month, cls, classStudents, monthlyMarks, updateMonthlyMark, resetMonthlyMonth, restoreMonthlyMonth, monthlyResetBackups, requestOrApplyMonthlyMark, bands, divisions, tk, year, term, role, lockedMonthly, lockMonthlyEntry, unlockMonthlyEntry, changeRequests, requestUnlockMonthly, school }) {
   const isLower = LOWER_CLASSES.includes(cls);
   const subjects = isLower ? LOWER_MONTHLY_SUBJECTS : MONTHLY_SUBJECTS;
   const rows = useMemo(()=> classStudents.map(s=>{
@@ -4077,6 +4112,13 @@ function MonthBlock({ month, cls, classStudents, monthlyMarks, updateMonthlyMark
       resetMonthlyMonth(cls, tk, month);
     }
   };
+  const backupKey = `${cls}__${tk}__${month}`;
+  const hasBackup = !!monthlyResetBackups?.[backupKey];
+  const handleRestore = () => {
+    if (window.confirm(`Restore ${month} Results back to what they were before the last reset?`)) {
+      restoreMonthlyMonth(cls, tk, month);
+    }
+  };
   const [sortByPos, setSortByPos] = useState(false);
   return (
     <div className="month-block-sheet" style={{marginBottom:24}}>
@@ -4105,6 +4147,11 @@ function MonthBlock({ month, cls, classStudents, monthlyMarks, updateMonthlyMark
           {role==="admin" && (
             <button onClick={handleReset} style={{padding:"5px 12px",fontSize:11,background:"#fee2e2",color:"#991b1b",border:"none",borderRadius:8,fontWeight:700,cursor:"pointer"}} title={`Clear all ${month} marks for ${cls} back to blank`}>
               ♻️ Reset
+            </button>
+          )}
+          {role==="admin" && hasBackup && (
+            <button onClick={handleRestore} style={{padding:"5px 12px",fontSize:11,background:"#dbeafe",color:"#1e40af",border:"none",borderRadius:8,fontWeight:700,cursor:"pointer"}} title={`Bring back ${month} marks from before the last reset`}>
+              ⏪ Restore
             </button>
           )}
           <span style={{fontSize:12,opacity:0.8}}>{cls} - {classStudents.length} STUDENTS</span>
