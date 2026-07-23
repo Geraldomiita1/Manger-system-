@@ -1707,7 +1707,7 @@ function SchoolCrest({ size = 64, ink = "#0f1115", paper = "#ffffff" }) {
     </svg>
   );
 }
-const PAGES = ["DASHBOARD","MARK ENTRY","MONTHLY EXAMS","GROUP WORK","EXAM TIMETABLE","MONTHLY CARDS","MONTHLY SLIPS","RESULT SHEETS","REPORT CARDS","LEARNERS","SWEEPING ROTA","PLE INFO","MANAGE REQUESTS","SETTINGS","AUDIT LOG","DOWNLOAD CENTRE"];
+const PAGES = ["DASHBOARD","MARK ENTRY","MONTHLY EXAMS","GROUP WORK","EXAM TIMETABLE","MONTHLY CARDS","MONTHLY SLIPS","RESULT SHEETS","REPORT CARDS","LEARNERS","SWEEPING ROTA","MOCK INFO","PLE INFO","MANAGE REQUESTS","SETTINGS","AUDIT LOG","DOWNLOAD CENTRE"];
 // Pages only the admin account can see/use. Teachers never see these in the sidebar.
 const ADMIN_ONLY_PAGES = ["MANAGE REQUESTS", "SETTINGS", "AUDIT LOG"];
 // ─── APP ─────────────────────────────────────────────────────────────────────
@@ -2148,6 +2148,22 @@ export default function App() {
       [sid]: { ...prev[sid], [tk]: { ...prev[sid]?.[tk], [month]: { ...prev[sid]?.[tk]?.[month], [sub]: { ...prev[sid]?.[tk]?.[month]?.[sub], [field]: val } } } }
     }));
   }, [students]);
+  const resetMonthlyMonth = useCallback((cls, tk, month) => {
+    markEditing();
+    const [term, year] = tk.split("__");
+    stampAudit("mkis_monthlymarks", `Monthly marks RESET — ${cls} ${term} ${year} ${month}`);
+    setMonthlyMarks(prev => {
+      const next = { ...prev };
+      students.filter(s=>s.className===cls).forEach(s => {
+        if (next[s.id]?.[tk]?.[month] !== undefined) {
+          const tkObj = { ...next[s.id][tk] };
+          delete tkObj[month];
+          next[s.id] = { ...next[s.id], [tk]: tkObj };
+        }
+      });
+      return next;
+    });
+  }, [students]);
   // ── Save & lock for Mark Entry / Monthly Exams ───────────────────────────
   const lockTermEntry = useCallback((cls, tk) => {
     markEditing();
@@ -2364,7 +2380,7 @@ export default function App() {
       </div>
     );
   }
-  const props = { students, setStudents, termMarks, setTermMarks, monthlyMarks, setMonthlyMarks, groupWork, setGroupWork, municipalPerf, setMunicipalPerf, examTimetable, setExamTimetable, bands, setBands, specialBands, setSpecialBands, divisions, setDivisions, school, setSchool, accounts, setAccounts, initials, setInitials, updateTermMark, updateMonthlyMark, requestOrApplyTermMark, requestOrApplyMonthlyMark, addStudent, deleteStudent, forceRestoreData, promoteStudents, role, currentUser, changeRequests, submitChangeRequest, approveChangeRequest, rejectChangeRequest, lockedTerm, lockTermEntry, unlockTermEntry, lockedMonthly, lockMonthlyEntry, unlockMonthlyEntry, requestUnlockTerm, requestUnlockMonthly, markEditing, stampAudit, dashboardPerfTerm, setDashboardPerfTerm, dashboardPerfYear, setDashboardPerfYear };
+  const props = { students, setStudents, termMarks, setTermMarks, monthlyMarks, setMonthlyMarks, groupWork, setGroupWork, municipalPerf, setMunicipalPerf, examTimetable, setExamTimetable, bands, setBands, specialBands, setSpecialBands, divisions, setDivisions, school, setSchool, accounts, setAccounts, initials, setInitials, updateTermMark, updateMonthlyMark, resetMonthlyMonth, requestOrApplyTermMark, requestOrApplyMonthlyMark, addStudent, deleteStudent, forceRestoreData, promoteStudents, role, currentUser, changeRequests, submitChangeRequest, approveChangeRequest, rejectChangeRequest, lockedTerm, lockTermEntry, unlockTermEntry, lockedMonthly, lockMonthlyEntry, unlockMonthlyEntry, requestUnlockTerm, requestUnlockMonthly, markEditing, stampAudit, dashboardPerfTerm, setDashboardPerfTerm, dashboardPerfYear, setDashboardPerfYear };
   return (
     <div className="app-shell" style={{display:"flex",minHeight:"100vh",fontFamily:"'Segoe UI',system-ui,sans-serif",background:"#f1f5f9"}}>
       {/* SIDEBAR */}
@@ -2377,7 +2393,7 @@ export default function App() {
         </div>
         <nav style={{flex:1,padding:"8px 0"}}>
           {PAGES.filter(p => !ADMIN_ONLY_PAGES.includes(p) || role==="admin").map(p => {
-            const icons = {"DASHBOARD":"📊","MARK ENTRY":"📝","MONTHLY EXAMS":"📅","GROUP WORK":"👨‍👩‍👧‍👦","EXAM TIMETABLE":"🗓️","MONTHLY CARDS":"🗂️","MONTHLY SLIPS":"🎫","RESULT SHEETS":"📋","REPORT CARDS":"🎓","LEARNERS":"👥","SWEEPING ROTA":"🧹","PLE INFO":"🏅","MANAGE REQUESTS":"🛂","SETTINGS":"⚙️","AUDIT LOG":"🕓","DOWNLOAD CENTRE":"📥"};
+            const icons = {"DASHBOARD":"📊","MARK ENTRY":"📝","MONTHLY EXAMS":"📅","GROUP WORK":"👨‍👩‍👧‍👦","EXAM TIMETABLE":"🗓️","MONTHLY CARDS":"🗂️","MONTHLY SLIPS":"🎫","RESULT SHEETS":"📋","REPORT CARDS":"🎓","LEARNERS":"👥","SWEEPING ROTA":"🧹","MOCK INFO":"📄","PLE INFO":"🏅","MANAGE REQUESTS":"🛂","SETTINGS":"⚙️","AUDIT LOG":"🕓","DOWNLOAD CENTRE":"📥"};
             const pendingCount = p==="MANAGE REQUESTS" ? changeRequests.filter(r=>r.status==="pending").length : 0;
             return (
               <button key={p} onClick={()=>setPage(p)}
@@ -2416,6 +2432,7 @@ export default function App() {
           {page==="REPORT CARDS" && <ReportCards {...props} />}
           {page==="LEARNERS" && <Students {...props} />}
           {page==="SWEEPING ROTA" && <SweepingRota students={students} school={school} markEditing={markEditing} />}
+          {page==="MOCK INFO" && <MockInfo students={students} school={school} bands={bands} specialBands={specialBands} divisions={divisions} markEditing={markEditing} />}
           {page==="PLE INFO" && <PleInfo students={students} setStudents={setStudents} school={school} markEditing={markEditing} municipalPerf={municipalPerf} setMunicipalPerf={setMunicipalPerf} />}
           {page==="MANAGE REQUESTS" && role==="admin" && <ManageRequests {...props} />}
           {page==="SETTINGS" && role==="admin" && <Settings {...props} />}
@@ -3560,8 +3577,173 @@ function MarkEntry({ students, termMarks, setTermMarks, updateTermMark, requestO
     </div>
   );
 }
+// ─── MOCK INFO ───────────────────────────────────────────────────────────────
+const MOCK_TYPES = ["Municipal Mock", "TAEB Mock"];
+function MockInfo({ students, school, bands: defaultBands, specialBands, divisions, markEditing }) {
+  const [cls, setCls] = useState("P7");
+  const [mockType, setMockType] = useState(MOCK_TYPES[0]);
+  const [year, setYear] = useState(school.year || String(new Date().getFullYear()));
+  const [mockMarks, setMockMarks] = useState({});
+  const [loaded, setLoaded] = useState(false);
+  const [sortByPos, setSortByPos] = useState(false);
+  const [pdfBusy, setPdfBusy] = useState(false);
+  const [showResults, setShowResults] = useState(true);
+  const sheetRef = useRef(null);
+
+  useEffect(() => {
+    let alive = true;
+    loadShared("mkis_mock_marks", {}).then(m => { if (alive) { setMockMarks(m||{}); setLoaded(true); } });
+    return () => { alive = false; };
+  }, []);
+
+  const bands = useMemo(() => bandsForClass(cls, defaultBands, specialBands), [cls, defaultBands, specialBands]);
+  const isLower = LOWER_CLASSES.includes(cls);
+  const subjects = isLower ? LOWER_SUBJECTS : UPPER_SUBJECTS;
+  const mk = `${mockType}__${year}`;
+
+  const updateMockMark = (sid, sub, val) => {
+    markEditing && markEditing();
+    setMockMarks(prev => {
+      const next = { ...prev, [sid]: { ...prev[sid], [mk]: { ...prev[sid]?.[mk], [sub]: val } } };
+      saveShared("mkis_mock_marks", next);
+      return next;
+    });
+  };
+
+  const classStudents = useMemo(() =>
+    students.filter(s=>s.className===cls).sort((a,b)=>a.name.localeCompare(b.name)),
+  [students, cls]);
+
+  const rows = useMemo(() => classStudents.map(s => {
+    const m = mockMarks[s.id]?.[mk] || {};
+    const perSub = subjects.map(sub => {
+      const exam = m[sub];
+      const isX = exam===undefined || exam===null;
+      const max = isLower ? lowerSubjectMax(sub) : 100;
+      const agg = isX ? undefined : aggOf(exam, bands);
+      return { sub, exam, agg, isX, max };
+    });
+    const hasX = perSub.some(p=>p.isX);
+    const totMk = perSub.reduce((a,p)=>a+(p.exam??0),0);
+    const totAgg = hasX ? "X" : perSub.reduce((a,p)=>a+(p.agg||0),0);
+    const div = hasX ? "X" : (typeof totAgg==="number" ? divisionOf(totAgg, isLower?5:4, divisions) : "X");
+    return { s, perSub, totMk, totAgg, div, hasX };
+  }), [classStudents, mockMarks, mk, subjects, bands, divisions, isLower]);
+
+  const positions = useMemo(()=> rankWithTies(rows.map(r=>r.totMk>0?r.totMk:null), rows.map(r=>typeof r.totAgg==="number"?r.totAgg:null)), [rows]);
+  const indexedRows = useMemo(()=> rows.map((r,i)=>({...r, pos:positions[i]})), [rows, positions]);
+  const sortedRows = useMemo(()=>[...indexedRows].sort((a,b)=>{ if(a.pos==="-") return 1; if(b.pos==="-") return -1; return a.pos-b.pos; }), [indexedRows]);
+  const displayRows = sortByPos ? sortedRows : indexedRows;
+
+  const mockHeaders = ["S/N","NAME OF PUPIL",...subjects,"TOT MK",...(isLower?[]:["TOT AGG","DIV"]),"POS"];
+  const exportMockWord = () => {
+    const rowsHtml = displayRows.map((r,i)=>`
+      <tr>
+        <td>${i+1}</td><td class="name-cell">${escapeHtml(r.s.name)}</td>
+        ${r.perSub.map(p=>`<td>${showResults?escapeHtml(p.exam??""):""}</td>`).join("")}
+        <td>${showResults?escapeHtml(r.totMk||""):""}</td>
+        ${isLower?"":`<td>${showResults?escapeHtml(r.hasX?"X":r.totAgg||""):""}</td><td>${showResults?escapeHtml(r.hasX?"X":r.totMk?r.div:""):""}</td>`}
+        <td>${showResults&&r.pos!=="-"?escapeHtml(String(r.pos)):""}</td>
+      </tr>`).join("");
+    const body = `
+      <div class="title">${escapeHtml(school.name)}</div>
+      <div class="subtitle">${escapeHtml(mockType)} ${showResults?"":"— BLANK MARK SHEET"} — ${escapeHtml(cls)}, ${escapeHtml(String(year))}</div>
+      <table>
+        <thead><tr>${mockHeaders.map(h=>`<th>${escapeHtml(h)}</th>`).join("")}</tr></thead>
+        <tbody>${rowsHtml}</tbody>
+      </table>`;
+    downloadWordHtml(`${mockType} - ${cls}`, body, `${safeFileName(cls)}_${safeFileName(mockType)}_${year}${showResults?"":"_Blank"}.doc`, { pageSize:"297mm 210mm" });
+  };
+  const exportMockExcel = () => {
+    const data = displayRows.map((r,i)=>[
+      i+1, r.s.name,
+      ...r.perSub.map(p=> showResults ? (p.exam??"") : ""),
+      showResults ? (r.totMk||"") : "",
+      ...(isLower ? [] : [showResults?(r.hasX?"X":r.totAgg||""):"", showResults?(r.hasX?"X":r.totMk?r.div:""):""]),
+      showResults && r.pos!=="-" ? r.pos : "",
+    ]);
+    const ws = XLSX.utils.aoa_to_sheet([mockHeaders, ...data]);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, mockType.slice(0,28));
+    XLSX.writeFile(wb, `${safeFileName(cls)}_${safeFileName(mockType)}_${year}${showResults?"":"_Blank"}.xlsx`);
+  };
+
+  if (!loaded) return <div style={{padding:20,color:"#9ca3af"}}>Loading…</div>;
+
+  return (
+    <div>
+      <div className="no-print" style={{display:"flex",gap:10,marginBottom:16,flexWrap:"wrap",alignItems:"flex-end",justifyContent:"space-between"}}>
+        <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"flex-end"}}>
+          <Sel label="Class" value={cls} onChange={setCls} opts={ALL_CLASSES}/>
+          <Sel label="Mock Exam" value={mockType} onChange={setMockType} opts={MOCK_TYPES}/>
+          <div><label style={lbl}>Year</label><input type="number" value={year} onChange={e=>setYear(e.target.value)} style={{...inp,width:90}}/></div>
+        </div>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
+          <span style={{background:"#dbeafe",color:"#1e40af",borderRadius:20,padding:"4px 12px",fontSize:12,fontWeight:700}}>
+            {classStudents.length} students - {isLower?"Lower":"Upper"} Primary
+          </span>
+          <button onClick={()=>setSortByPos(v=>!v)} style={sortByPos?btnPrimary:btnGhost}>
+            {sortByPos ? "🔤 Show A–Z" : "📊 Sort Highest → Lowest"}
+          </button>
+          <button onClick={()=>setShowResults(v=>!v)} style={showResults?btnGhost:btnWarning}>
+            {showResults ? "🙈 Hide Results (Blank Sheet)" : "👁️ Show Results"}
+          </button>
+          <button onClick={exportMockWord} style={btnWord}>📄 Export Word</button>
+          <button onClick={exportMockExcel} style={{...btnPrimary,background:"linear-gradient(135deg,#15803d,#16a34a)"}}>📊 Export Excel</button>
+          <button disabled={pdfBusy} onClick={async()=>{
+            setPdfBusy(true);
+            try { await downloadNodesAsPdf([sheetRef.current], `${safeFileName(cls)}_${safeFileName(mockType)}_${year}${showResults?"":"_Blank"}.pdf`, "landscape"); }
+            finally { setPdfBusy(false); }
+          }} style={pdfBusy?btnPdfBusy:btnPdf}>{pdfBusy?"⏳ Generating...":"📕 Export PDF"}</button>
+          <button onClick={()=>window.print()} style={btnPrimary}>🖨️ Print</button>
+        </div>
+      </div>
+      <div ref={sheetRef} style={{overflowX:"auto"}}>
+        <div style={{textAlign:"center",marginBottom:10,fontWeight:800,fontSize:14,color:"#1e3a6e",textTransform:"uppercase",letterSpacing:0.5}}>
+          {mockType} {showResults?"":"— Blank Mark Sheet"} — {cls}, {year}
+        </div>
+        <table style={{width:"100%",fontSize:12,minWidth:900}}>
+          <thead>
+            <tr style={{background:"#1e3a6e",color:"white"}}>
+              <th style={th}>S/N</th>
+              <th style={{...th,textAlign:"left",minWidth:160}}>NAME OF PUPIL</th>
+              {subjects.map(s=><th key={s} style={th}>{s}{isLower&&lowerSubjectMax(s)!==100?` /${lowerSubjectMax(s)}`:""}</th>)}
+              <th style={th}>TOT MK</th>
+              {!isLower && <><th style={th}>TOT AGG</th><th style={th}>DIV</th></>}
+              <th style={th}>POS</th>
+            </tr>
+          </thead>
+          <tbody>
+            {displayRows.map((r,i)=>(
+              <tr key={r.s.id} style={{background:i%2===0?"white":"#f8fafc"}}>
+                <td style={td}>{i+1}</td>
+                <td style={{...td,fontWeight:600,textAlign:"left"}}>{r.s.name}</td>
+                {r.perSub.map(p=>(
+                  <td key={p.sub} style={td}>
+                    {showResults
+                      ? <MarkInput value={p.exam} existingVal={p.exam} max={p.max} style={markInput}
+                          onCommit={(newVal)=>updateMockMark(r.s.id,p.sub,newVal)} />
+                      : <div style={{width:markInput.width,height:20,borderBottom:"1px solid #9ca3af",margin:"0 auto"}}/>
+                    }
+                  </td>
+                ))}
+                <td style={{...td,fontWeight:700,background:"#ede9fe"}}>{showResults ? (r.totMk||"-") : <div style={{width:30,height:16,borderBottom:"1px solid #9ca3af",margin:"0 auto"}}/>}</td>
+                {!isLower && <>
+                  <td style={{...td,background:"#ede9fe",color:r.hasX?"#dc2626":"inherit",fontWeight:r.hasX?700:400}}>{showResults ? (r.hasX?"X":r.totAgg||"-") : <div style={{width:26,height:16,borderBottom:"1px solid #9ca3af",margin:"0 auto"}}/>}</td>
+                  <td style={{...td,fontWeight:700,color:r.hasX?"#dc2626":"#1e40af"}}>{showResults ? (r.hasX?"X":r.totMk?r.div:"-") : <div style={{width:20,height:16,borderBottom:"1px solid #9ca3af",margin:"0 auto"}}/>}</td>
+                </>}
+                <td style={td}>{showResults ? (r.pos!=="-"?<PositionBadge pos={r.pos} size={13}/>:"-") : <div style={{width:20,height:16,borderBottom:"1px solid #9ca3af",margin:"0 auto"}}/>}</td>
+              </tr>
+            ))}
+            {classStudents.length===0&&<tr><td colSpan={30} style={{padding:24,textAlign:"center",color:"#9ca3af"}}>No students in {cls}.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
 // ─── MONTHLY EXAMS ───────────────────────────────────────────────────────────
-function MonthlyExams({ students, monthlyMarks, updateMonthlyMark, requestOrApplyMonthlyMark, role, bands: defaultBands, specialBands, divisions, school, lockedMonthly, lockMonthlyEntry, unlockMonthlyEntry, changeRequests, requestUnlockMonthly }) {
+function MonthlyExams({ students, monthlyMarks, updateMonthlyMark, resetMonthlyMonth, requestOrApplyMonthlyMark, role, bands: defaultBands, specialBands, divisions, school, lockedMonthly, lockMonthlyEntry, unlockMonthlyEntry, changeRequests, requestUnlockMonthly }) {
   const [cls, setCls] = useState("P4");
   const [term, setTerm] = useState("Term I");
   const [year, setYear] = useState(school.year||String(new Date().getFullYear()));
@@ -3837,7 +4019,7 @@ function MonthlyExams({ students, monthlyMarks, updateMonthlyMark, requestOrAppl
         {months.map(month=>(
           <MonthBlock key={month} month={month} term={term} year={year} cls={cls} school={school}
             classStudents={classStudents} monthlyMarks={monthlyMarks} role={role}
-            updateMonthlyMark={updateMonthlyMark} requestOrApplyMonthlyMark={handleMarkChange} bands={bands} divisions={divisions} tk={tk}
+            updateMonthlyMark={updateMonthlyMark} resetMonthlyMonth={resetMonthlyMonth} requestOrApplyMonthlyMark={handleMarkChange} bands={bands} divisions={divisions} tk={tk}
             lockedMonthly={lockedMonthly} lockMonthlyEntry={lockMonthlyEntry} unlockMonthlyEntry={unlockMonthlyEntry}
             changeRequests={changeRequests} requestUnlockMonthly={requestUnlockMonthly} />
         ))}
@@ -3845,7 +4027,7 @@ function MonthlyExams({ students, monthlyMarks, updateMonthlyMark, requestOrAppl
     </div>
   );
 }
-function MonthBlock({ month, cls, classStudents, monthlyMarks, updateMonthlyMark, requestOrApplyMonthlyMark, bands, divisions, tk, year, term, role, lockedMonthly, lockMonthlyEntry, unlockMonthlyEntry, changeRequests, requestUnlockMonthly, school }) {
+function MonthBlock({ month, cls, classStudents, monthlyMarks, updateMonthlyMark, resetMonthlyMonth, requestOrApplyMonthlyMark, bands, divisions, tk, year, term, role, lockedMonthly, lockMonthlyEntry, unlockMonthlyEntry, changeRequests, requestUnlockMonthly, school }) {
   const isLower = LOWER_CLASSES.includes(cls);
   const subjects = isLower ? LOWER_MONTHLY_SUBJECTS : MONTHLY_SUBJECTS;
   const rows = useMemo(()=> classStudents.map(s=>{
@@ -3885,6 +4067,11 @@ function MonthBlock({ month, cls, classStudents, monthlyMarks, updateMonthlyMark
   const handleSave = () => lockMonthlyEntry(cls, tk, month);
   const handleUnlock = () => unlockMonthlyEntry(cls, tk, month);
   const handleRequestUnlock = () => requestUnlockMonthly(cls, tk, month);
+  const handleReset = () => {
+    if (window.confirm(`Are you sure you want to restore ${month} Results to original state?`)) {
+      resetMonthlyMonth(cls, tk, month);
+    }
+  };
   const [sortByPos, setSortByPos] = useState(false);
   return (
     <div className="month-block-sheet" style={{marginBottom:24}}>
@@ -3910,6 +4097,11 @@ function MonthBlock({ month, cls, classStudents, monthlyMarks, updateMonthlyMark
           <button onClick={()=>setSortByPos(v=>!v)} style={{...(sortByPos?btnPrimary:btnGhost),padding:"5px 10px",fontSize:11}} title="Toggle ordering between alphabetical and highest-to-lowest">
             {sortByPos ? "🔤 A–Z" : "📊 Sort H→L"}
           </button>
+          {role==="admin" && (
+            <button onClick={handleReset} style={{padding:"5px 12px",fontSize:11,background:"#fee2e2",color:"#991b1b",border:"none",borderRadius:8,fontWeight:700,cursor:"pointer"}} title={`Clear all ${month} marks for ${cls} back to blank`}>
+              ♻️ Reset
+            </button>
+          )}
           <span style={{fontSize:12,opacity:0.8}}>{cls} - {classStudents.length} STUDENTS</span>
         </div>
       </div>
@@ -5442,6 +5634,9 @@ function PleInfo({ students, setStudents, school, markEditing, municipalPerf, se
   const [mpYear, setMpYear] = useState(school.year||String(new Date().getFullYear()));
   const [mpFilter, setMpFilter] = useState("general"); // general | private | government
   const [mpPdfBusy, setMpPdfBusy] = useState(false);
+  const [pleShowResults, setPleShowResults] = useState(true);
+  const [plePdfBusy, setPlePdfBusy] = useState(false);
+  const pleRecordsRef = useRef(null);
   const mpCardRef = useRef(null);
   const mpRecord = municipalPerf?.[mpExamType]?.[mpYear] || { schools: [], inspector: "" };
   const mpAllSchools = mpRecord.schools || [];
@@ -5507,6 +5702,43 @@ function PleInfo({ students, setStudents, school, markEditing, municipalPerf, se
       const division = totalAgg ? (Number(totalAgg)<=12?"1":Number(totalAgg)<=24?"2":Number(totalAgg)<=36?"3":Number(totalAgg)<=48?"4":"U") : rec.division||"";
       return {...prev,[sid]:{...rec,totalAgg,division}};
     });
+  };
+  const plePrintHeaders = ["#","Year","Index No","NAME","SEX","LIN",...PLE_SUBJECTS,"AGG","DIV","Conduct","Co-curr","Leadership"];
+  const exportPleWord = () => {
+    const rowsHtml = sortedP7.map((s,i)=>{
+      const rec = pleData[s.id]||{};
+      return `<tr>
+        <td>${i+1}</td><td>${escapeHtml(year)}</td><td>${escapeHtml(rec.indexNo||"")}</td>
+        <td class="name-cell">${escapeHtml(s.name)}</td><td>${escapeHtml(s.gender)}</td><td>${escapeHtml(rec.lin||"")}</td>
+        ${PLE_SUBJECTS.map(sub=>`<td>${pleShowResults?escapeHtml(rec.results?.[sub]||""):""}</td>`).join("")}
+        <td>${pleShowResults?escapeHtml(rec.totalAgg||""):""}</td>
+        <td>${pleShowResults?escapeHtml(rec.division||""):""}</td>
+        <td>${escapeHtml(rec.conduct||"")}</td><td>${escapeHtml(rec.cocurricular||"")}</td><td>${escapeHtml(rec.leadership||"")}</td>
+      </tr>`;
+    }).join("");
+    const body = `
+      <div class="title">${escapeHtml(school.name)}</div>
+      <div class="subtitle">PLE RESULTS ${pleShowResults?"":"— BLANK MARK SHEET"} — ${escapeHtml(String(year))}</div>
+      <table>
+        <thead><tr>${plePrintHeaders.map(h=>`<th>${escapeHtml(h)}</th>`).join("")}</tr></thead>
+        <tbody>${rowsHtml}</tbody>
+      </table>`;
+    downloadWordHtml(`PLE Results ${year}`, body, `PLE_Results_${year}${pleShowResults?"":"_Blank"}.doc`, { pageSize:"297mm 210mm" });
+  };
+  const exportPleExcel = () => {
+    const data = sortedP7.map((s,i)=>{
+      const rec = pleData[s.id]||{};
+      return [
+        i+1, year, rec.indexNo||"", s.name, s.gender, rec.lin||"",
+        ...PLE_SUBJECTS.map(sub=> pleShowResults ? (rec.results?.[sub]||"") : ""),
+        pleShowResults ? (rec.totalAgg||"") : "", pleShowResults ? (rec.division||"") : "",
+        rec.conduct||"", rec.cocurricular||"", rec.leadership||"",
+      ];
+    });
+    const ws = XLSX.utils.aoa_to_sheet([plePrintHeaders, ...data]);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "PLE Results");
+    XLSX.writeFile(wb, `PLE_Results_${year}${pleShowResults?"":"_Blank"}.xlsx`);
   };
   // Applies the reviewed/edited OCR-parsed fields onto the chosen pupil's
   // PLE record in one go (recomputing totalAgg/division the same way
@@ -5784,7 +6016,20 @@ function PleInfo({ students, setStudents, school, markEditing, municipalPerf, se
             )}
 
             {/* UNEB-style result sheet */}
-            <div style={{background:"white",border:"1px solid #e5e7eb",borderRadius:10,overflow:"hidden"}}>
+            <div className="no-print" style={{display:"flex",gap:8,flexWrap:"wrap",justifyContent:"flex-end",marginBottom:12}}>
+              <button onClick={()=>setPleShowResults(v=>!v)} style={pleShowResults?btnGhost:btnWarning}>
+                {pleShowResults ? "🙈 Hide Results (Blank Sheet)" : "👁️ Show Results"}
+              </button>
+              <button onClick={exportPleWord} style={btnWord}>📄 Export Word</button>
+              <button onClick={exportPleExcel} style={{...btnPrimary,background:"linear-gradient(135deg,#15803d,#16a34a)"}}>📊 Export Excel</button>
+              <button disabled={plePdfBusy} onClick={async()=>{
+                setPlePdfBusy(true);
+                try { await downloadNodesAsPdf([pleRecordsRef.current], `${safeFileName(school.name)}_PLE_Results_${year}${pleShowResults?"":"_Blank"}.pdf`, "landscape"); }
+                finally { setPlePdfBusy(false); }
+              }} style={plePdfBusy?btnPdfBusy:btnPdf}>{plePdfBusy?"⏳ Generating...":"📕 Export PDF"}</button>
+              <button onClick={()=>window.print()} style={btnPrimary}>🖨️ Print</button>
+            </div>
+            <div ref={pleRecordsRef} style={{background:"white",border:"1px solid #e5e7eb",borderRadius:10,overflow:"hidden"}}>
               {/* UNEB header block */}
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",background:"#f8fafc",borderBottom:"2px solid #1e3a6e",padding:"10px 16px",fontSize:12}}>
                 <div>
@@ -5837,11 +6082,14 @@ function PleInfo({ students, setStudents, school, markEditing, municipalPerf, se
                           </td>
                           {PLE_SUBJECTS.map(sub=>(
                             <td key={sub} style={{padding:"3px 4px",textAlign:"center"}}>
-                              <input type="number" min={1} max={9} value={rec.results?.[sub]||""} onChange={e=>updateResult(s.id,sub,e.target.value)} style={{...inp,padding:"2px 3px",width:38,fontSize:12,textAlign:"center",fontWeight:700}}/>
+                              {pleShowResults
+                                ? <input type="number" min={1} max={9} value={rec.results?.[sub]||""} onChange={e=>updateResult(s.id,sub,e.target.value)} style={{...inp,padding:"2px 3px",width:38,fontSize:12,textAlign:"center",fontWeight:700}}/>
+                                : <div style={{width:38,height:20,borderBottom:"1px solid #9ca3af",margin:"0 auto"}}/>
+                              }
                             </td>
                           ))}
-                          <td style={{padding:"5px 8px",textAlign:"center",fontWeight:900,fontSize:14,color:"#1e3a6e"}}>{rec.totalAgg||"—"}</td>
-                          <td style={{padding:"5px 8px",textAlign:"center",fontWeight:900,fontSize:14,color:rec.division==="1"?"#15803d":rec.division==="2"?"#1e40af":rec.division==="3"?"#d97706":rec.division==="4"?"#ea580c":"#dc2626"}}>{rec.division||"—"}</td>
+                          <td style={{padding:"5px 8px",textAlign:"center",fontWeight:900,fontSize:14,color:"#1e3a6e"}}>{pleShowResults ? (rec.totalAgg||"—") : <div style={{width:30,height:16,borderBottom:"1px solid #9ca3af",margin:"0 auto"}}/>}</td>
+                          <td style={{padding:"5px 8px",textAlign:"center",fontWeight:900,fontSize:14,color:rec.division==="1"?"#15803d":rec.division==="2"?"#1e40af":rec.division==="3"?"#d97706":rec.division==="4"?"#ea580c":"#dc2626"}}>{pleShowResults ? (rec.division||"—") : <div style={{width:24,height:16,borderBottom:"1px solid #9ca3af",margin:"0 auto"}}/>}</td>
                           <td style={{padding:"3px 4px"}}><input value={rec.conduct||""} onChange={e=>updatePle(s.id,"conduct",e.target.value)} placeholder="Good" style={{...inp,padding:"2px 4px",width:60,fontSize:11}}/></td>
                           <td style={{padding:"3px 4px"}}><input value={rec.cocurricular||""} onChange={e=>updatePle(s.id,"cocurricular",e.target.value)} style={{...inp,padding:"2px 4px",width:70,fontSize:11}}/></td>
                           <td style={{padding:"3px 4px"}}><input value={rec.leadership||""} onChange={e=>updatePle(s.id,"leadership",e.target.value)} style={{...inp,padding:"2px 4px",width:70,fontSize:11}}/></td>
