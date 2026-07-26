@@ -3223,6 +3223,7 @@ function MarkEntry({ students, termMarks, setTermMarks, updateTermMark, requestO
   const [bulkMarkError, setBulkMarkError] = useState("");
   const [pendingToast, setPendingToast] = useState("");
   const [sortByPos, setSortByPos] = useState(false);
+  const [search, setSearch] = useState("");
   const bulkMarkFileRef = useRef();
   // Grading scale actually in effect for the selected class -- the Special
   // Grading Scale override if one's been set up for it, otherwise the
@@ -3296,6 +3297,12 @@ function MarkEntry({ students, termMarks, setTermMarks, updateTermMark, requestO
   const sortedRows = useMemo(()=>{
     return [...indexedRows].sort((a,b)=>{ if(a.pos==="-") return 1; if(b.pos==="-") return -1; return a.pos - b.pos; });
   }, [indexedRows]);
+  const displayRows = useMemo(() => {
+    const base = sortByPos ? sortedRows : indexedRows;
+    if (!search.trim()) return base;
+    const q = search.trim().toLowerCase();
+    return base.filter(r => r.s.name.toLowerCase().includes(q));
+  }, [sortByPos, sortedRows, indexedRows, search]);
   const parseTermMarksheetText = useCallback((text) => {
     const lines = text.split(/\r?\n/).filter(l=>l.trim());
     if (lines.length < 2) throw new Error("Data must have a header row and at least one data row.");
@@ -3418,6 +3425,7 @@ function MarkEntry({ students, termMarks, setTermMarks, updateTermMark, requestO
           <Sel label="Class" value={cls} onChange={setCls} opts={ALL_CLASSES}/>
           <Sel label="Term" value={term} onChange={setTerm} opts={TERMS}/>
           <div><label style={lbl}>Year</label><input type="number" value={year} onChange={e=>setYear(e.target.value)} style={{...inp,width:90}}/></div>
+          <div><label style={lbl}>Search Pupil</label><input value={search} onChange={e=>setSearch(e.target.value)} style={{...inp,width:160}} placeholder="Type a name..."/></div>
         </div>
         <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
           <span style={{background:"#dbeafe",color:"#1e40af",borderRadius:20,padding:"4px 12px",fontSize:12,fontWeight:700}}>
@@ -3572,7 +3580,7 @@ function MarkEntry({ students, termMarks, setTermMarks, updateTermMark, requestO
             )}
           </thead>
           <tbody>
-            {(sortByPos ? sortedRows : indexedRows).map((r,i)=>(
+            {displayRows.map((r,i)=>(
               <tr key={r.s.id} style={{background:i%2===0?"white":"#f8fafc"}}>
                 <td style={td}>{i+1}</td>
                 <td style={{...td,fontWeight:600,textAlign:"left"}}>{r.s.name}</td>
@@ -3606,6 +3614,7 @@ function MarkEntry({ students, termMarks, setTermMarks, updateTermMark, requestO
               </tr>
             ))}
             {classStudents.length===0&&<tr><td colSpan={30} style={{padding:24,textAlign:"center",color:"#9ca3af"}}>No students in {cls}.</td></tr>}
+            {classStudents.length>0&&displayRows.length===0&&<tr><td colSpan={30} style={{padding:24,textAlign:"center",color:"#9ca3af"}}>No pupil matches "{search}".</td></tr>}
           </tbody>
         </table>
       </div>
@@ -3789,6 +3798,7 @@ function MonthlyExams({ students, monthlyMarks, updateMonthlyMark, resetMonthlyM
   const [year, setYear] = useState(school.year||String(new Date().getFullYear()));
   const [pendingToast, setPendingToast] = useState("");
   const [pdfBusy, setPdfBusy] = useState(false);
+  const [search, setSearch] = useState("");
   const monthBlocksRef = useRef(null);
   const months = TERM_MONTHS[term];
   const tk = `${term}__${year}`;
@@ -3937,6 +3947,7 @@ function MonthlyExams({ students, monthlyMarks, updateMonthlyMark, resetMonthlyM
           <Sel label="Class" value={cls} onChange={setCls} opts={ALL_CLASSES}/>
           <Sel label="Term" value={term} onChange={setTerm} opts={TERMS}/>
           <div><label style={lbl}>Year</label><input type="number" value={year} onChange={e=>setYear(e.target.value)} style={{...inp,width:90}}/></div>
+          <div><label style={lbl}>Search Pupil</label><input value={search} onChange={e=>setSearch(e.target.value)} style={{...inp,width:160}} placeholder="Type a name..."/></div>
         </div>
         <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
           <span style={{background:"#dbeafe",color:"#1e40af",borderRadius:20,padding:"4px 12px",fontSize:12,fontWeight:700,alignSelf:"center"}}>{cls} - {classStudents.length} students</span>
@@ -4057,7 +4068,7 @@ function MonthlyExams({ students, monthlyMarks, updateMonthlyMark, resetMonthlyM
       )}
       <div ref={monthBlocksRef}>
         {months.map(month=>(
-          <MonthBlock key={month} month={month} term={term} year={year} cls={cls} school={school}
+          <MonthBlock key={month} month={month} term={term} year={year} cls={cls} school={school} search={search}
             classStudents={classStudents} monthlyMarks={monthlyMarks} role={role}
             updateMonthlyMark={updateMonthlyMark} resetMonthlyMonth={resetMonthlyMonth} restoreMonthlyMonth={restoreMonthlyMonth} monthlyResetBackups={monthlyResetBackups} requestOrApplyMonthlyMark={handleMarkChange} bands={bands} divisions={divisions} tk={tk}
             lockedMonthly={lockedMonthly} lockMonthlyEntry={lockMonthlyEntry} unlockMonthlyEntry={unlockMonthlyEntry}
@@ -4067,7 +4078,7 @@ function MonthlyExams({ students, monthlyMarks, updateMonthlyMark, resetMonthlyM
     </div>
   );
 }
-function MonthBlock({ month, cls, classStudents, monthlyMarks, updateMonthlyMark, resetMonthlyMonth, restoreMonthlyMonth, monthlyResetBackups, requestOrApplyMonthlyMark, bands, divisions, tk, year, term, role, lockedMonthly, lockMonthlyEntry, unlockMonthlyEntry, changeRequests, requestUnlockMonthly, school }) {
+function MonthBlock({ month, cls, classStudents, monthlyMarks, updateMonthlyMark, resetMonthlyMonth, restoreMonthlyMonth, monthlyResetBackups, requestOrApplyMonthlyMark, bands, divisions, tk, year, term, role, lockedMonthly, lockMonthlyEntry, unlockMonthlyEntry, changeRequests, requestUnlockMonthly, school, search }) {
   const isLower = LOWER_CLASSES.includes(cls);
   const subjects = isLower ? LOWER_MONTHLY_SUBJECTS : MONTHLY_SUBJECTS;
   const rows = useMemo(()=> classStudents.map(s=>{
@@ -4120,6 +4131,12 @@ function MonthBlock({ month, cls, classStudents, monthlyMarks, updateMonthlyMark
     }
   };
   const [sortByPos, setSortByPos] = useState(false);
+  const displayRows = useMemo(() => {
+    const base = sortByPos ? sortedRows : indexedRows;
+    if (!search || !search.trim()) return base;
+    const q = search.trim().toLowerCase();
+    return base.filter(r => r.s.name.toLowerCase().includes(q));
+  }, [sortByPos, sortedRows, indexedRows, search]);
   return (
     <div className="month-block-sheet" style={{marginBottom:24}}>
       <div style={{background:"#1e3a6e",color:"white",padding:"10px 16px",borderRadius:"8px 8px 0 0",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
@@ -4184,7 +4201,7 @@ function MonthBlock({ month, cls, classStudents, monthlyMarks, updateMonthlyMark
             )}
           </thead>
           <tbody>
-            {(sortByPos ? sortedRows : indexedRows).map((r,i)=>(
+            {displayRows.map((r,i)=>(
               <tr key={r.s.id} className={r.perSub.every(p=>p.isX) ? "no-print" : ""} style={{background:i%2===0?"white":"#f8fafc"}}>
                 <td style={td}>{i+1}</td>
                 <td style={{...td,fontWeight:600,textAlign:"left"}}>{r.s.name}</td>
@@ -4211,6 +4228,7 @@ function MonthBlock({ month, cls, classStudents, monthlyMarks, updateMonthlyMark
               </tr>
             ))}
             {classStudents.length===0&&<tr><td colSpan={20} style={{padding:16,textAlign:"center",color:"#9ca3af"}}>No students.</td></tr>}
+            {classStudents.length>0&&displayRows.length===0&&<tr><td colSpan={20} style={{padding:16,textAlign:"center",color:"#9ca3af"}}>No pupil matches "{search}".</td></tr>}
           </tbody>
         </table>
       </div>
@@ -7525,7 +7543,17 @@ function DownloadCentre({ students, termMarks, monthlyMarks, groupWork, municipa
     }, null, 2),
     "next.config.js":
 `/** @type {import('next').NextConfig} */
-const nextConfig = { reactStrictMode: true };
+const nextConfig = {
+  reactStrictMode: true,
+  // Enables "import X from './file?raw'" -- used by the app itself to embed
+  // its own MKIS.jsx source for the Download Centre. Without this rule,
+  // Next.js's webpack build silently resolves the import to an empty module,
+  // which is why the downloaded MKIS.jsx used to come out blank.
+  webpack(config) {
+    config.module.rules.push({ resourceQuery: /raw/, type: "asset/source" });
+    return config;
+  },
+};
 module.exports = nextConfig;
 `,
     "jsconfig.json": JSON.stringify({
