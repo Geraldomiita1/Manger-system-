@@ -1707,12 +1707,16 @@ function SchoolCrest({ size = 64, ink = "#0f1115", paper = "#ffffff" }) {
     </svg>
   );
 }
-const PAGES = ["DASHBOARD","MARK ENTRY","MONTHLY EXAMS","GROUP WORK","EXAM TIMETABLE","MONTHLY CARDS","MONTHLY SLIPS","RESULT SHEETS","REPORT CARDS","LEARNERS","SWEEPING ROTA","MOCK INFO","PLE INFO","MANAGE REQUESTS","SETTINGS","AUDIT LOG","DOWNLOAD CENTRE"];
+const PAGES = ["DASHBOARD","MARK ENTRY","MONTHLY EXAMS","GROUP WORK","EXAM TIMETABLE","MONTHLY CARDS","MONTHLY SLIPS","RESULT SHEETS","REPORT CARDS","LEARNERS","PUPIL PROFILE","SWEEPING ROTA","MOCK INFO","PLE INFO","MANAGE REQUESTS","SETTINGS","AUDIT LOG","DOWNLOAD CENTRE"];
 // Pages only the admin account can see/use. Teachers never see these in the sidebar.
 const ADMIN_ONLY_PAGES = ["MANAGE REQUESTS", "SETTINGS", "AUDIT LOG"];
 // ─── APP ─────────────────────────────────────────────────────────────────────
 export default function App() {
   const [page, setPage] = useState("DASHBOARD");
+  // Set by the Global Search box (top bar) or the "📈 Profile" button in
+  // Learners Area to deep-link straight into a specific pupil's profile.
+  const [pupilProfileTargetId, setPupilProfileTargetId] = useState(null);
+  const [gSearch, setGSearch] = useState("");
   // Dashboard's "Performance Period" Term/Year selector lives here rather
   // than as local state inside Dashboard itself. Every page in this app is
   // conditionally rendered ({page==="X" && <X/>}), so navigating away from
@@ -2353,13 +2357,50 @@ export default function App() {
     writeAuditEntry("session","RESTORE","Full data backup restored from file");
     deletedStudentIdsRef.current = new Set();
   }, []);
-  const promoteStudents = useCallback((fromClass) => {
+  // studentIds is optional -- when omitted, every learner in fromClass is
+  // promoted (old behaviour); when provided, only those specific learners move.
+  const promoteStudents = useCallback((fromClass, studentIds) => {
     markEditing();
     const classMap = {"P1":"P2","P2":"P3","P3":"P4","P4":"P5","P5":"P6","P6":"P7","P7":"Completed"};
     const toClass = classMap[fromClass] || fromClass;
-    stampAudit("mkis_students", `Learners PROMOTED — ${fromClass} → ${toClass}`);
-    setStudents(prev => prev.map(s => s.className === fromClass ? {...s, className: toClass} : s));
+    const idSet = studentIds ? new Set(studentIds) : null;
+    const count = idSet ? idSet.size : undefined;
+    stampAudit("mkis_students", idSet ? `${count} learner(s) PROMOTED — ${fromClass} → ${toClass}` : `Learners PROMOTED — ${fromClass} → ${toClass}`);
+    setStudents(prev => prev.map(s => (s.className === fromClass && (!idSet || idSet.has(s.id))) ? {...s, className: toClass} : s));
   }, []);
+  // Moves learners back one class level (the reverse of promote). Also
+  // supports an optional studentIds subset for selective demotion.
+  const demoteStudents = useCallback((fromClass, studentIds) => {
+    markEditing();
+    const classMap = {"P2":"P1","P3":"P2","P4":"P3","P5":"P4","P6":"P5","P7":"P6","Completed":"P7"};
+    const toClass = classMap[fromClass] || fromClass;
+    const idSet = studentIds ? new Set(studentIds) : null;
+    const count = idSet ? idSet.size : undefined;
+    stampAudit("mkis_students", idSet ? `${count} learner(s) DEMOTED — ${fromClass} → ${toClass}` : `Learners DEMOTED — ${fromClass} → ${toClass}`);
+    setStudents(prev => prev.map(s => (s.className === fromClass && (!idSet || idSet.has(s.id))) ? {...s, className: toClass} : s));
+  }, []);
+  const openPupilProfile = useCallback((studentId) => {
+    setPupilProfileTargetId(studentId);
+    setPage("PUPIL PROFILE");
+  }, []);
+  // Global Search (top bar): a single box that finds learners, jumps
+  // straight to matching nav pages, and surfaces pending change requests.
+  const gSearchResults = useMemo(() => {
+    const q = gSearch.trim().toLowerCase();
+    if (!q) return { pupils: [], pages: [], requests: [] };
+    const pupils = students.filter(s=>s.name.toLowerCase().includes(q)).slice(0,6);
+    const pages = PAGES.filter(p => (!ADMIN_ONLY_PAGES.includes(p) || role==="admin") && p.toLowerCase().includes(q)).slice(0,5);
+    const requests = role==="admin"
+      ? (changeRequests||[]).filter(r=>r.status==="pending" && (
+          (r.studentName||"").toLowerCase().includes(q) ||
+          (r.requestedBy||"").toLowerCase().includes(q) ||
+          (r.kind||"").toLowerCase().includes(q) ||
+          (r.cls||"").toLowerCase().includes(q)
+        )).slice(0,5)
+      : [];
+    return { pupils, pages, requests };
+  }, [gSearch, students, role, changeRequests]);
+  const gSearchHasResults = gSearchResults.pupils.length>0 || gSearchResults.pages.length>0 || gSearchResults.requests.length>0;
   if (!dataReady) {
     return (
       <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#f1f5f9",fontFamily:"'Segoe UI',system-ui,sans-serif"}}>
@@ -2415,7 +2456,7 @@ export default function App() {
       </div>
     );
   }
-  const props = { students, setStudents, termMarks, setTermMarks, monthlyMarks, setMonthlyMarks, groupWork, setGroupWork, municipalPerf, setMunicipalPerf, examTimetable, setExamTimetable, bands, setBands, specialBands, setSpecialBands, divisions, setDivisions, school, setSchool, accounts, setAccounts, initials, setInitials, updateTermMark, updateMonthlyMark, resetMonthlyMonth, restoreMonthlyMonth, monthlyResetBackups, requestOrApplyTermMark, requestOrApplyMonthlyMark, addStudent, deleteStudent, forceRestoreData, promoteStudents, role, currentUser, changeRequests, submitChangeRequest, approveChangeRequest, rejectChangeRequest, lockedTerm, lockTermEntry, unlockTermEntry, lockedMonthly, lockMonthlyEntry, unlockMonthlyEntry, requestUnlockTerm, requestUnlockMonthly, markEditing, stampAudit, dashboardPerfTerm, setDashboardPerfTerm, dashboardPerfYear, setDashboardPerfYear };
+  const props = { students, setStudents, termMarks, setTermMarks, monthlyMarks, setMonthlyMarks, groupWork, setGroupWork, municipalPerf, setMunicipalPerf, examTimetable, setExamTimetable, bands, setBands, specialBands, setSpecialBands, divisions, setDivisions, school, setSchool, accounts, setAccounts, initials, setInitials, updateTermMark, updateMonthlyMark, resetMonthlyMonth, restoreMonthlyMonth, monthlyResetBackups, requestOrApplyTermMark, requestOrApplyMonthlyMark, addStudent, deleteStudent, forceRestoreData, promoteStudents, demoteStudents, openPupilProfile, role, currentUser, changeRequests, submitChangeRequest, approveChangeRequest, rejectChangeRequest, lockedTerm, lockTermEntry, unlockTermEntry, lockedMonthly, lockMonthlyEntry, unlockMonthlyEntry, requestUnlockTerm, requestUnlockMonthly, markEditing, stampAudit, dashboardPerfTerm, setDashboardPerfTerm, dashboardPerfYear, setDashboardPerfYear };
   return (
     <div className="app-shell" style={{display:"flex",minHeight:"100vh",fontFamily:"'Segoe UI',system-ui,sans-serif",background:"#f1f5f9"}}>
       {/* SIDEBAR */}
@@ -2428,7 +2469,7 @@ export default function App() {
         </div>
         <nav style={{flex:1,padding:"8px 0"}}>
           {PAGES.filter(p => !ADMIN_ONLY_PAGES.includes(p) || role==="admin").map(p => {
-            const icons = {"DASHBOARD":"📊","MARK ENTRY":"📝","MONTHLY EXAMS":"📅","GROUP WORK":"👨‍👩‍👧‍👦","EXAM TIMETABLE":"🗓️","MONTHLY CARDS":"🗂️","MONTHLY SLIPS":"🎫","RESULT SHEETS":"📋","REPORT CARDS":"🎓","LEARNERS":"👥","SWEEPING ROTA":"🧹","MOCK INFO":"📄","PLE INFO":"🏅","MANAGE REQUESTS":"🛂","SETTINGS":"⚙️","AUDIT LOG":"🕓","DOWNLOAD CENTRE":"📥"};
+            const icons = {"DASHBOARD":"📊","MARK ENTRY":"📝","MONTHLY EXAMS":"📅","GROUP WORK":"👨‍👩‍👧‍👦","EXAM TIMETABLE":"🗓️","MONTHLY CARDS":"🗂️","MONTHLY SLIPS":"🎫","RESULT SHEETS":"📋","REPORT CARDS":"🎓","LEARNERS":"👥","PUPIL PROFILE":"📈","SWEEPING ROTA":"🧹","MOCK INFO":"📄","PLE INFO":"🏅","MANAGE REQUESTS":"🛂","SETTINGS":"⚙️","AUDIT LOG":"🕓","DOWNLOAD CENTRE":"📥"};
             const pendingCount = p==="MANAGE REQUESTS" ? changeRequests.filter(r=>r.status==="pending").length : 0;
             return (
               <button key={p} onClick={()=>setPage(p)}
@@ -2453,6 +2494,51 @@ export default function App() {
         <div className="no-print" style={{background:"white",padding:"12px 20px",borderBottom:"1px solid #e5e7eb",display:"flex",alignItems:"center",gap:12,position:"sticky",top:0,zIndex:10}}>
           <button onClick={()=>setSideOpen(v=>!v)} style={{background:"none",border:"none",cursor:"pointer",fontSize:20,color:"#374151"}}>☰</button>
           <h1 style={{fontSize:18,fontWeight:700,color:"#1e3a6e",margin:0}}>{page}</h1>
+          <div style={{position:"relative",width:260}}>
+            <input value={gSearch} onChange={e=>setGSearch(e.target.value)}
+              style={{...inp,width:"100%",padding:"7px 10px 7px 30px"}}
+              placeholder="🔎 Search learners, pages…" />
+            <span style={{position:"absolute",left:9,top:"50%",transform:"translateY(-50%)",fontSize:12,color:"#9ca3af",pointerEvents:"none"}}>🔎</span>
+            {gSearch.trim() && (
+              <div style={{position:"absolute",top:"100%",left:0,right:0,background:"white",border:"1px solid #e5e7eb",borderRadius:8,boxShadow:"0 10px 30px rgba(0,0,0,0.15)",zIndex:50,maxHeight:340,overflowY:"auto",marginTop:4}}>
+                {!gSearchHasResults && <div style={{padding:"12px",fontSize:12,color:"#9ca3af",textAlign:"center"}}>No matches for "{gSearch}".</div>}
+                {gSearchResults.pupils.length>0 && (
+                  <div>
+                    <div style={{padding:"6px 12px",fontSize:10,fontWeight:800,color:"#6b7280",background:"#f8fafc",letterSpacing:0.4}}>LEARNERS</div>
+                    {gSearchResults.pupils.map(s=>(
+                      <div key={s.id} onMouseDown={e=>e.preventDefault()} onClick={()=>{openPupilProfile(s.id);setGSearch("");}}
+                        style={{padding:"8px 12px",cursor:"pointer",fontSize:13,borderBottom:"1px solid #f3f4f6",display:"flex",justifyContent:"space-between"}}>
+                        <span><b>{s.name}</b></span>
+                        <span style={{color:"#9ca3af",fontSize:11}}>{s.className}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {gSearchResults.pages.length>0 && (
+                  <div>
+                    <div style={{padding:"6px 12px",fontSize:10,fontWeight:800,color:"#6b7280",background:"#f8fafc",letterSpacing:0.4}}>PAGES</div>
+                    {gSearchResults.pages.map(p=>(
+                      <div key={p} onMouseDown={e=>e.preventDefault()} onClick={()=>{setPage(p);setGSearch("");}}
+                        style={{padding:"8px 12px",cursor:"pointer",fontSize:13,borderBottom:"1px solid #f3f4f6"}}>
+                        {p}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {gSearchResults.requests.length>0 && (
+                  <div>
+                    <div style={{padding:"6px 12px",fontSize:10,fontWeight:800,color:"#6b7280",background:"#f8fafc",letterSpacing:0.4}}>PENDING REQUESTS</div>
+                    {gSearchResults.requests.map(r=>(
+                      <div key={r.id} onMouseDown={e=>e.preventDefault()} onClick={()=>{setPage("MANAGE REQUESTS");setGSearch("");}}
+                        style={{padding:"8px 12px",cursor:"pointer",fontSize:13,borderBottom:"1px solid #f3f4f6"}}>
+                        <b>{r.studentName||r.requestedBy||r.kind}</b> <span style={{color:"#9ca3af",fontSize:11}}>{r.cls?`— ${r.cls}`:""}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
           <div style={{marginLeft:"auto",fontSize:12,color:"#6b7280"}}>{school.name} - {school.year}</div>
         </div>
         <div style={{padding:20}}>
@@ -2466,6 +2552,7 @@ export default function App() {
           {page==="RESULT SHEETS" && <ResultSheets {...props} />}
           {page==="REPORT CARDS" && <ReportCards {...props} />}
           {page==="LEARNERS" && <Students {...props} />}
+          {page==="PUPIL PROFILE" && <PupilProfile students={students} termMarks={termMarks} monthlyMarks={monthlyMarks} bands={bands} divisions={divisions} initialStudentId={pupilProfileTargetId} onConsumeInitial={()=>setPupilProfileTargetId(null)} />}
           {page==="SWEEPING ROTA" && <SweepingRota students={students} school={school} markEditing={markEditing} />}
           {page==="MOCK INFO" && <MockInfo students={students} school={school} bands={bands} specialBands={specialBands} divisions={divisions} markEditing={markEditing} />}
           {page==="PLE INFO" && <PleInfo students={students} setStudents={setStudents} school={school} markEditing={markEditing} municipalPerf={municipalPerf} setMunicipalPerf={setMunicipalPerf} />}
@@ -2832,7 +2919,35 @@ function Dashboard({ students, school, termMarks, bands, dashboardPerfTerm: perf
   );
 }
 // ─── STUDENTS ────────────────────────────────────────────────────────────────
-function Students({ students, setStudents, addStudent, deleteStudent, promoteStudents, markEditing }) {
+// Exports the (already filtered) Learners list to a Word document -- one row
+// per pupil, matching whatever Class/Gender/Search filter is active on screen.
+function exportLearnersWord({ school, filterCls, filterGender, rows }) {
+  const th = "border:1px solid #999;padding:6px;font-size:9.5pt;background:#1e3a6e;color:white;";
+  const td = "border:1px solid #999;padding:5px;font-size:9.5pt;";
+  let head = `<tr>${["S/N","NAME","CLASS","GENDER","LIN"].map(h=>`<th style="${th}">${h}</th>`).join("")}</tr>`;
+  let body = "";
+  rows.forEach((s,i) => {
+    const rowBg = i % 2 === 0 ? "#ffffff" : "#eff6ff";
+    body += `<tr style="background:${rowBg};">`;
+    body += `<td style="${td}text-align:center;">${i+1}</td>`;
+    body += `<td style="${td}text-align:left;font-weight:600;">${escapeHtml(s.name)}</td>`;
+    body += `<td style="${td}text-align:center;">${escapeHtml(s.className)}</td>`;
+    body += `<td style="${td}text-align:center;">${s.gender==="M"?"Male":"Female"}</td>`;
+    body += `<td style="${td}text-align:center;">${escapeHtml(s.lin||"-")}</td>`;
+    body += `</tr>`;
+  });
+  const table = `<table style="border-collapse:collapse;width:100%;">${head}${body}</table>`;
+  const scopeLabel = `${filterCls==="All"?"All Classes":filterCls}${filterGender==="All"?"":` — ${filterGender==="M"?"Males":"Females"}`}`;
+  let bodyHtml = `<div style="text-align:center;">`;
+  bodyHtml += `<div class="title">${escapeHtml(school?.name||"")}</div>`;
+  if (school?.motto) bodyHtml += `<div class="motto">"${escapeHtml(school.motto)}"</div>`;
+  bodyHtml += `<div class="subtitle">LEARNERS LIST — ${escapeHtml(scopeLabel)}</div>`;
+  bodyHtml += `<div style="font-size:10pt;margin-bottom:10px;">Total: ${rows.length} learner${rows.length===1?"":"s"}</div>`;
+  bodyHtml += `</div>`;
+  bodyHtml += table;
+  downloadWordHtml(`Learners List - ${scopeLabel}`, bodyHtml, `Learners_${safeFileName(scopeLabel)}.doc`, { pageSize:"210mm 297mm" });
+}
+function Students({ students, setStudents, addStudent, deleteStudent, promoteStudents, demoteStudents, school, openPupilProfile, markEditing }) {
   const [name, setName] = useState("");
   const [cls, setCls] = useState("P1");
   const [gender, setGender] = useState("M");
@@ -2842,6 +2957,10 @@ function Students({ students, setStudents, addStudent, deleteStudent, promoteStu
   const [filterGender, setFilterGender] = useState("All");
   const [promoteClass, setPromoteClass] = useState("P1");
   const [showPromote, setShowPromote] = useState(false);
+  const [promoteSelectedIds, setPromoteSelectedIds] = useState(() => new Set());
+  const [demoteClass, setDemoteClass] = useState("P2");
+  const [showDemote, setShowDemote] = useState(false);
+  const [demoteSelectedIds, setDemoteSelectedIds] = useState(() => new Set());
   const [editId, setEditId] = useState(null);
   const [editName, setEditName] = useState("");
   const [editCls, setEditCls] = useState("P1");
@@ -2863,6 +2982,34 @@ function Students({ students, setStudents, addStudent, deleteStudent, promoteStu
     ).sort((a,b)=>a.name.localeCompare(b.name)),
     [students, filterCls, filterGender, search]
   );
+  const promoteClassStudents = useMemo(() =>
+    students.filter(s=>s.className===promoteClass).sort((a,b)=>a.name.localeCompare(b.name)),
+    [students, promoteClass]
+  );
+  const demoteClassStudents = useMemo(() =>
+    students.filter(s=>s.className===demoteClass).sort((a,b)=>a.name.localeCompare(b.name)),
+    [students, demoteClass]
+  );
+  // Default to "everyone selected" whenever the target class changes or the
+  // panel is (re)opened -- the user can then untick specific learners.
+  useEffect(() => {
+    if (showPromote) setPromoteSelectedIds(new Set(promoteClassStudents.map(s=>s.id)));
+  }, [showPromote, promoteClass, promoteClassStudents]);
+  useEffect(() => {
+    if (showDemote) setDemoteSelectedIds(new Set(demoteClassStudents.map(s=>s.id)));
+  }, [showDemote, demoteClass, demoteClassStudents]);
+  const togglePromoteId = (id) => setPromoteSelectedIds(prev => {
+    const next = new Set(prev);
+    next.has(id) ? next.delete(id) : next.add(id);
+    return next;
+  });
+  const toggleDemoteId = (id) => setDemoteSelectedIds(prev => {
+    const next = new Set(prev);
+    next.has(id) ? next.delete(id) : next.add(id);
+    return next;
+  });
+  const PROMOTE_TARGET = {"P1":"P2","P2":"P3","P3":"P4","P4":"P5","P5":"P6","P6":"P7","P7":"Completed"};
+  const DEMOTE_TARGET = {"P2":"P1","P3":"P2","P4":"P3","P5":"P4","P6":"P5","P7":"P6","Completed":"P7"};
   const handleAdd = () => {
     if (!name.trim()) return;
     addStudent(name, cls, gender, lin.trim().toUpperCase());
@@ -2955,15 +3102,80 @@ function Students({ students, setStudents, addStudent, deleteStudent, promoteStu
         <input value={search} onChange={e=>setSearch(e.target.value)} style={{...inp,width:200}} placeholder="🔍 Search student..." />
         <select value={filterCls} onChange={e=>setFilterCls(e.target.value)} style={inp}><option value="All">All Classes</option>{ALL_CLASSES.map(c=><option key={c}>{c}</option>)}</select>
         <select value={filterGender} onChange={e=>setFilterGender(e.target.value)} style={inp}><option value="All">All Genders</option><option value="M">👦 Males only</option><option value="F">👧 Females only</option></select>
-        <div style={{marginLeft:"auto"}}><button onClick={()=>setShowPromote(v=>!v)} style={btnWarning}>🎓 Promote Students</button></div>
+        <div style={{marginLeft:"auto",display:"flex",gap:8,flexWrap:"wrap"}}>
+          <button onClick={()=>exportLearnersWord({ school, filterCls, filterGender, rows: filtered })} style={btnWord}>📄 Download Word</button>
+          <button onClick={()=>{ setShowPromote(v=>!v); setShowDemote(false); }} style={btnWarning}>🎓 Promote Students</button>
+          <button onClick={()=>{ setShowDemote(v=>!v); setShowPromote(false); }} style={{...btnWarning,background:"#fee2e2",color:"#991b1b"}}>🔽 Demote Students</button>
+        </div>
       </div>
       {showPromote && (
-        <div style={{background:"#fefce8",border:"2px solid #f59e0b",borderRadius:12,padding:16,marginBottom:16,display:"flex",gap:12,alignItems:"center",flexWrap:"wrap"}}>
-          <span style={{fontWeight:700,color:"#92400e"}}>Promote class:</span>
-          <select value={promoteClass} onChange={e=>setPromoteClass(e.target.value)} style={inp}>{ALL_CLASSES.map(c=><option key={c}>{c}</option>)}</select>
-          <span style={{color:"#92400e",fontSize:13}}>➡️ {{"P1":"P2","P2":"P3","P3":"P4","P4":"P5","P5":"P6","P6":"P7","P7":"Completed"}[promoteClass]}</span>
-          <button onClick={()=>{ if(window.confirm(`Promote all ${promoteClass} students?`)){promoteStudents(promoteClass);setShowPromote(false);} }} style={btnPrimary}>Confirm Promote</button>
-          <button onClick={()=>setShowPromote(false)} style={btnGhost}>Cancel</button>
+        <div style={{background:"#fefce8",border:"2px solid #f59e0b",borderRadius:12,padding:16,marginBottom:16}}>
+          <div style={{display:"flex",gap:12,alignItems:"center",flexWrap:"wrap",marginBottom:12}}>
+            <span style={{fontWeight:700,color:"#92400e"}}>Promote class:</span>
+            <select value={promoteClass} onChange={e=>setPromoteClass(e.target.value)} style={inp}>{ALL_CLASSES.map(c=><option key={c}>{c}</option>)}</select>
+            <span style={{color:"#92400e",fontSize:13}}>➡️ {PROMOTE_TARGET[promoteClass]}</span>
+            <span style={{marginLeft:"auto",fontSize:12,color:"#92400e"}}>{promoteSelectedIds.size} of {promoteClassStudents.length} selected</span>
+          </div>
+          <div style={{display:"flex",gap:10,marginBottom:10}}>
+            <button onClick={()=>setPromoteSelectedIds(new Set(promoteClassStudents.map(s=>s.id)))} style={{...btnGhost,padding:"4px 10px",fontSize:12}}>Select All</button>
+            <button onClick={()=>setPromoteSelectedIds(new Set())} style={{...btnGhost,padding:"4px 10px",fontSize:12}}>Select None</button>
+          </div>
+          <div style={{maxHeight:260,overflowY:"auto",border:"1px solid #fde68a",borderRadius:8,marginBottom:12,background:"white"}}>
+            {promoteClassStudents.length===0
+              ? <div style={{padding:16,textAlign:"center",color:"#9ca3af",fontSize:13}}>No learners in {promoteClass}.</div>
+              : promoteClassStudents.map((s,i)=>(
+                  <label key={s.id} style={{display:"flex",alignItems:"center",gap:8,padding:"7px 12px",fontSize:13,borderBottom:"1px solid #fef3c7",background:i%2===0?"white":"#fffbeb",cursor:"pointer"}}>
+                    <input type="checkbox" checked={promoteSelectedIds.has(s.id)} onChange={()=>togglePromoteId(s.id)} />
+                    <span style={{fontWeight:600}}>{s.name}</span>
+                    <span style={{marginLeft:"auto",color:"#9ca3af",fontSize:11}}>{s.gender==="M"?"👦":"👧"}</span>
+                  </label>
+                ))
+            }
+          </div>
+          <div style={{display:"flex",gap:10}}>
+            <button
+              onClick={()=>{ if(promoteSelectedIds.size>0 && window.confirm(`Promote ${promoteSelectedIds.size} learner(s) from ${promoteClass} to ${PROMOTE_TARGET[promoteClass]}?`)){promoteStudents(promoteClass, Array.from(promoteSelectedIds));setShowPromote(false);} }}
+              disabled={promoteSelectedIds.size===0}
+              style={{...btnPrimary,opacity:promoteSelectedIds.size===0?0.5:1}}>
+              Confirm Promote ({promoteSelectedIds.size})
+            </button>
+            <button onClick={()=>setShowPromote(false)} style={btnGhost}>Cancel</button>
+          </div>
+        </div>
+      )}
+      {showDemote && (
+        <div style={{background:"#fef2f2",border:"2px solid #f87171",borderRadius:12,padding:16,marginBottom:16}}>
+          <div style={{display:"flex",gap:12,alignItems:"center",flexWrap:"wrap",marginBottom:12}}>
+            <span style={{fontWeight:700,color:"#991b1b"}}>Demote class:</span>
+            <select value={demoteClass} onChange={e=>setDemoteClass(e.target.value)} style={inp}>{ALL_CLASSES.filter(c=>c!=="P1").map(c=><option key={c}>{c}</option>)}</select>
+            <span style={{color:"#991b1b",fontSize:13}}>➡️ {DEMOTE_TARGET[demoteClass]}</span>
+            <span style={{marginLeft:"auto",fontSize:12,color:"#991b1b"}}>{demoteSelectedIds.size} of {demoteClassStudents.length} selected</span>
+          </div>
+          <div style={{display:"flex",gap:10,marginBottom:10}}>
+            <button onClick={()=>setDemoteSelectedIds(new Set(demoteClassStudents.map(s=>s.id)))} style={{...btnGhost,padding:"4px 10px",fontSize:12}}>Select All</button>
+            <button onClick={()=>setDemoteSelectedIds(new Set())} style={{...btnGhost,padding:"4px 10px",fontSize:12}}>Select None</button>
+          </div>
+          <div style={{maxHeight:260,overflowY:"auto",border:"1px solid #fecaca",borderRadius:8,marginBottom:12,background:"white"}}>
+            {demoteClassStudents.length===0
+              ? <div style={{padding:16,textAlign:"center",color:"#9ca3af",fontSize:13}}>No learners in {demoteClass}.</div>
+              : demoteClassStudents.map((s,i)=>(
+                  <label key={s.id} style={{display:"flex",alignItems:"center",gap:8,padding:"7px 12px",fontSize:13,borderBottom:"1px solid #fee2e2",background:i%2===0?"white":"#fef2f2",cursor:"pointer"}}>
+                    <input type="checkbox" checked={demoteSelectedIds.has(s.id)} onChange={()=>toggleDemoteId(s.id)} />
+                    <span style={{fontWeight:600}}>{s.name}</span>
+                    <span style={{marginLeft:"auto",color:"#9ca3af",fontSize:11}}>{s.gender==="M"?"👦":"👧"}</span>
+                  </label>
+                ))
+            }
+          </div>
+          <div style={{display:"flex",gap:10}}>
+            <button
+              onClick={()=>{ if(demoteSelectedIds.size>0 && window.confirm(`Demote ${demoteSelectedIds.size} learner(s) from ${demoteClass} to ${DEMOTE_TARGET[demoteClass]}?`)){demoteStudents(demoteClass, Array.from(demoteSelectedIds));setShowDemote(false);} }}
+              disabled={demoteSelectedIds.size===0}
+              style={{...btnDanger,opacity:demoteSelectedIds.size===0?0.5:1}}>
+              Confirm Demote ({demoteSelectedIds.size})
+            </button>
+            <button onClick={()=>setShowDemote(false)} style={btnGhost}>Cancel</button>
+          </div>
         </div>
       )}
       <div style={{background:"white",borderRadius:12,border:"1px solid #e5e7eb",overflow:"hidden"}}>
@@ -3004,7 +3216,7 @@ function Students({ students, setStudents, addStudent, deleteStudent, promoteStu
                   <td style={{padding:"9px 12px",display:"flex",gap:6}}>
                     {editId===s.id
                       ? <><button onClick={()=>handleSaveEdit(s.id)} style={{...btnPrimary,padding:"4px 10px",fontSize:12}}>Save</button><button onClick={()=>setEditId(null)} style={{...btnGhost,padding:"4px 10px",fontSize:12}}>Cancel</button></>
-                      : <><button onClick={()=>handleEdit(s)} style={{...btnGhost,padding:"4px 10px",fontSize:12}}>Edit</button><button onClick={()=>handleDelete(s.id)} style={{...btnDanger,padding:"4px 10px",fontSize:12}}>Delete</button></>
+                      : <><button onClick={()=>openPupilProfile && openPupilProfile(s.id)} style={{...btnGhost,padding:"4px 10px",fontSize:12}}>📈 Profile</button><button onClick={()=>handleEdit(s)} style={{...btnGhost,padding:"4px 10px",fontSize:12}}>Edit</button><button onClick={()=>handleDelete(s.id)} style={{...btnDanger,padding:"4px 10px",fontSize:12}}>Delete</button></>
                     }
                   </td>
                 </tr>
@@ -3026,6 +3238,195 @@ function Students({ students, setStudents, addStudent, deleteStudent, promoteStu
             </div>
           </div>
         </div>
+      )}
+    </div>
+  );
+}
+// ─── PUPIL PROFILE ────────────────────────────────────────────────────────────
+// Infers whether a stored mark-set belongs to the lower- or upper-primary
+// subject list purely from which subject keys are present in that record,
+// since a pupil's *current* class can differ from the class they were in for
+// an older term (e.g. after being promoted from P3 into P4).
+function inferIsLowerFromSubjectKeys(keys, fallback) {
+  if (keys.includes("MATHS") || keys.includes("LIT I") || keys.includes("LIT II")) return true;
+  if (keys.includes("MATH") || keys.includes("SST") || keys.includes("SCI")) return false;
+  return fallback;
+}
+function PupilProfile({ students, termMarks, monthlyMarks, bands, divisions, initialStudentId, onConsumeInitial }) {
+  const [pickerText, setPickerText] = useState("");
+  const [selectedId, setSelectedId] = useState(initialStudentId || null);
+  // Picks up a learner pushed in from Learners Area ("📈 Profile" button) or
+  // from the Global Search box in the top bar.
+  useEffect(() => {
+    if (initialStudentId) { setSelectedId(initialStudentId); onConsumeInitial && onConsumeInitial(); }
+  }, [initialStudentId]);
+  const student = useMemo(() => students.find(s=>s.id===selectedId) || null, [students, selectedId]);
+  const pickerResults = useMemo(() => {
+    if (!pickerText.trim()) return [];
+    const q = pickerText.trim().toLowerCase();
+    return students.filter(s=>s.name.toLowerCase().includes(q)).sort((a,b)=>a.name.localeCompare(b.name)).slice(0,8);
+  }, [students, pickerText]);
+  // ── Term exam history: one row per Term__Year the pupil has marks for. ──
+  const termHistory = useMemo(() => {
+    if (!student) return [];
+    const tks = Object.keys(termMarks[student.id] || {});
+    const rows = tks.map(tk => {
+      const [term, year] = tk.split("__");
+      const m = termMarks[student.id][tk] || {};
+      const subKeys = Object.keys(m);
+      const isLower = inferIsLowerFromSubjectKeys(subKeys, LOWER_CLASSES.includes(student.className));
+      const subjects = isLower ? LOWER_SUBJECTS : UPPER_SUBJECTS;
+      const perSub = subjects.map(sub => {
+        const ca = m[sub]?.ca, exam = m[sub]?.exam;
+        const isX = isLower ? (exam===undefined||exam===null) : ((ca===undefined||ca===null)&&(exam===undefined||exam===null));
+        if (isX) return { sub, av: undefined, agg: undefined, isX: true };
+        const hasBoth = typeof ca==="number" && typeof exam==="number";
+        const av = hasBoth ? Math.round((ca+exam)/2) : (typeof exam==="number"?exam:typeof ca==="number"?ca:undefined);
+        const agg = av !== undefined ? aggOf(av, bands) : undefined;
+        return { sub, av, agg, isX: false };
+      });
+      const hasX = perSub.some(p=>p.isX);
+      const totMk = perSub.reduce((a,p)=>a+(p.av??0),0);
+      const totAgg = hasX ? "X" : perSub.reduce((a,p)=>a+(p.agg||0),0);
+      const div = hasX ? "X" : (typeof totAgg==="number" ? divisionOf(totAgg, isLower?5:4, divisions) : "X");
+      const pctVals = perSub.filter(p=>!p.isX).map(p=>(p.av/(isLower?lowerSubjectMax(p.sub):100))*100);
+      const avgPct = pctVals.length ? Math.round(pctVals.reduce((a,b)=>a+b,0)/pctVals.length) : null;
+      return { tk, term, year, isLower, totMk, totAgg, div, hasX, avgPct };
+    });
+    return rows.sort((a,b)=> Number(a.year)-Number(b.year) || TERMS.indexOf(a.term)-TERMS.indexOf(b.term));
+  }, [student, termMarks, bands, divisions]);
+  // ── Monthly exam history: one row per Month the pupil has marks for. ──
+  const monthlyHistory = useMemo(() => {
+    if (!student) return [];
+    const tks = Object.keys(monthlyMarks[student.id] || {});
+    const rows = [];
+    tks.forEach(tk => {
+      const [term, year] = tk.split("__");
+      const monthsData = monthlyMarks[student.id][tk] || {};
+      Object.keys(monthsData).forEach(month => {
+        const m = monthsData[month];
+        if (!m) return;
+        const subKeys = Object.keys(m);
+        if (!subKeys.length) return;
+        const isLower = inferIsLowerFromSubjectKeys(subKeys, LOWER_CLASSES.includes(student.className));
+        const subjects = isLower ? LOWER_MONTHLY_SUBJECTS : MONTHLY_SUBJECTS;
+        const perSub = subjects.map(sub => {
+          const mk = m[sub]?.mk;
+          const isX = (mk===undefined||mk===null);
+          const agg = (!isLower && !isX) ? aggOf(mk, bands) : undefined;
+          return { sub, mk, agg, isX };
+        });
+        if (!perSub.some(p=>!p.isX)) return;
+        const hasX = !isLower && perSub.some(p=>p.isX);
+        const totMk = perSub.reduce((a,p)=>a+(p.mk??0),0);
+        const totAgg = isLower ? null : (hasX ? "X" : perSub.reduce((a,p)=>a+(p.agg??0),0));
+        const div = isLower ? null : (hasX ? "X" : divisionOf(totAgg, 4, divisions));
+        const pctVals = perSub.filter(p=>!p.isX).map(p=>(p.mk/(isLower?lowerSubjectMax(p.sub):100))*100);
+        const avgPct = pctVals.length ? Math.round(pctVals.reduce((a,b)=>a+b,0)/pctVals.length) : null;
+        rows.push({ tk, term, year, month, isLower, totMk, totAgg, div, hasX, avgPct });
+      });
+    });
+    return rows.sort((a,b)=> Number(a.year)-Number(b.year) || TERMS.indexOf(a.term)-TERMS.indexOf(b.term) ||
+      (TERM_MONTHS[a.term]||[]).indexOf(a.month)-(TERM_MONTHS[b.term]||[]).indexOf(b.month));
+  }, [student, monthlyMarks, bands, divisions]);
+  const termChartData = termHistory.filter(r=>r.avgPct!==null).map(r=>({ label:`${r.term.replace("Term ","T")}'${String(r.year).slice(-2)}`, value:r.avgPct }));
+  const monthlyChartData = monthlyHistory.filter(r=>r.avgPct!==null).map(r=>({ label:`${r.month}'${String(r.year).slice(-2)}`, value:r.avgPct }));
+  return (
+    <div>
+      <div style={{background:"white",borderRadius:12,padding:20,border:"1px solid #e5e7eb",marginBottom:16}}>
+        <h3 style={{margin:"0 0 12px",color:"#1e3a6e",fontSize:15,fontWeight:700}}>🔍 Find a Learner</h3>
+        <div style={{position:"relative",maxWidth:360}}>
+          <input value={pickerText} onChange={e=>setPickerText(e.target.value)} style={{...inp,width:"100%"}} placeholder="Type a pupil's name..." />
+          {pickerResults.length>0 && (
+            <div style={{position:"absolute",top:"100%",left:0,right:0,background:"white",border:"1px solid #e5e7eb",borderRadius:8,boxShadow:"0 8px 24px rgba(0,0,0,0.12)",zIndex:20,maxHeight:260,overflowY:"auto",marginTop:4}}>
+              {pickerResults.map(s=>(
+                <div key={s.id} onMouseDown={e=>e.preventDefault()} onClick={()=>{setSelectedId(s.id);setPickerText("");}}
+                  style={{padding:"8px 12px",cursor:"pointer",fontSize:13,borderBottom:"1px solid #f3f4f6"}}>
+                  <b>{s.name}</b> <span style={{color:"#6b7280"}}>— {s.className}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+      {!student && (
+        <div style={{background:"white",borderRadius:12,padding:40,border:"1px solid #e5e7eb",textAlign:"center",color:"#9ca3af"}}>
+          Search and select a learner above to view their performance history.
+        </div>
+      )}
+      {student && (
+        <>
+          <div style={{background:"linear-gradient(135deg,#1e3a6e,#2563eb)",color:"white",borderRadius:12,padding:20,marginBottom:16,display:"flex",alignItems:"center",gap:16,flexWrap:"wrap"}}>
+            <div style={{width:56,height:56,borderRadius:"50%",background:"rgba(255,255,255,0.15)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:24,fontWeight:800,flexShrink:0}}>
+              {student.name.charAt(0)}
+            </div>
+            <div>
+              <div style={{fontWeight:800,fontSize:18}}>{student.name}</div>
+              <div style={{fontSize:12,opacity:0.85}}>{student.className} · {student.gender==="M"?"Male":"Female"}{student.lin?` · LIN ${student.lin}`:""}</div>
+            </div>
+            <div style={{marginLeft:"auto",display:"flex",gap:20}}>
+              <div style={{textAlign:"center"}}><div style={{fontSize:20,fontWeight:800}}>{termHistory.length}</div><div style={{fontSize:10,opacity:0.8}}>TERMS RECORDED</div></div>
+              <div style={{textAlign:"center"}}><div style={{fontSize:20,fontWeight:800}}>{monthlyHistory.length}</div><div style={{fontSize:10,opacity:0.8}}>MONTHS RECORDED</div></div>
+            </div>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:16}}>
+            <div style={{background:"white",borderRadius:12,padding:16,border:"1px solid #e5e7eb"}}>
+              <h4 style={{margin:"0 0 10px",color:"#1e3a6e",fontSize:13,fontWeight:700}}>📈 Term Average % Trend</h4>
+              <BarChart data={termChartData} barColor="#2563eb" emptyMsg="No term exam marks recorded yet." />
+            </div>
+            <div style={{background:"white",borderRadius:12,padding:16,border:"1px solid #e5e7eb"}}>
+              <h4 style={{margin:"0 0 10px",color:"#1e3a6e",fontSize:13,fontWeight:700}}>📅 Monthly Average % Trend</h4>
+              <BarChart data={monthlyChartData} barColor="#0f766e" emptyMsg="No monthly exam marks recorded yet." />
+            </div>
+          </div>
+          <div style={{background:"white",borderRadius:12,border:"1px solid #e5e7eb",overflow:"hidden",marginBottom:16}}>
+            <div style={{padding:"12px 16px",background:"#1e3a6e",color:"white",fontWeight:700}}>Term Exam History</div>
+            <div style={{overflowX:"auto"}}>
+              <table style={{width:"100%",fontSize:13}}>
+                <thead><tr style={{background:"#dbeafe"}}>{["Term","Year","Total Marks","Total Agg","Division","Avg %"].map(h=>(
+                  <th key={h} style={{padding:"9px 12px",textAlign:"left",fontWeight:700,color:"#1e3a6e",whiteSpace:"nowrap"}}>{h}</th>
+                ))}</tr></thead>
+                <tbody>
+                  {termHistory.map((r,i)=>(
+                    <tr key={r.tk} style={{background:i%2===0?"white":"#f8fafc"}}>
+                      <td style={{padding:"9px 12px"}}>{r.term}</td>
+                      <td style={{padding:"9px 12px"}}>{r.year}</td>
+                      <td style={{padding:"9px 12px",fontWeight:700}}>{r.totMk||"-"}</td>
+                      <td style={{padding:"9px 12px",color:r.hasX?"#dc2626":"inherit",fontWeight:r.hasX?700:400}}>{r.hasX?"X":r.totAgg||"-"}</td>
+                      <td style={{padding:"9px 12px",fontWeight:700,color:r.hasX?"#dc2626":"#1e40af"}}>{r.hasX?"X":r.div}</td>
+                      <td style={{padding:"9px 12px"}}>{r.avgPct!==null?`${r.avgPct}%`:"-"}</td>
+                    </tr>
+                  ))}
+                  {termHistory.length===0 && <tr><td colSpan={6} style={{padding:24,textAlign:"center",color:"#9ca3af"}}>No term exam records found for this learner.</td></tr>}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div style={{background:"white",borderRadius:12,border:"1px solid #e5e7eb",overflow:"hidden"}}>
+            <div style={{padding:"12px 16px",background:"#1e3a6e",color:"white",fontWeight:700}}>Monthly Exam History</div>
+            <div style={{overflowX:"auto"}}>
+              <table style={{width:"100%",fontSize:13}}>
+                <thead><tr style={{background:"#dbeafe"}}>{["Month","Term","Year","Total Marks","Total Agg","Division","Avg %"].map(h=>(
+                  <th key={h} style={{padding:"9px 12px",textAlign:"left",fontWeight:700,color:"#1e3a6e",whiteSpace:"nowrap"}}>{h}</th>
+                ))}</tr></thead>
+                <tbody>
+                  {monthlyHistory.map((r,i)=>(
+                    <tr key={`${r.tk}_${r.month}`} style={{background:i%2===0?"white":"#f8fafc"}}>
+                      <td style={{padding:"9px 12px",fontWeight:600}}>{r.month}</td>
+                      <td style={{padding:"9px 12px"}}>{r.term}</td>
+                      <td style={{padding:"9px 12px"}}>{r.year}</td>
+                      <td style={{padding:"9px 12px",fontWeight:700}}>{r.totMk||"-"}</td>
+                      <td style={{padding:"9px 12px",color:r.hasX?"#dc2626":"inherit",fontWeight:r.hasX?700:400}}>{r.isLower?"—":(r.hasX?"X":r.totAgg||"-")}</td>
+                      <td style={{padding:"9px 12px",fontWeight:700,color:r.hasX?"#dc2626":"#1e40af"}}>{r.isLower?"—":(r.hasX?"X":r.div)}</td>
+                      <td style={{padding:"9px 12px"}}>{r.avgPct!==null?`${r.avgPct}%`:"-"}</td>
+                    </tr>
+                  ))}
+                  {monthlyHistory.length===0 && <tr><td colSpan={7} style={{padding:24,textAlign:"center",color:"#9ca3af"}}>No monthly exam records found for this learner.</td></tr>}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
       )}
     </div>
   );
@@ -4131,12 +4532,16 @@ function MonthBlock({ month, cls, classStudents, monthlyMarks, updateMonthlyMark
     }
   };
   const [sortByPos, setSortByPos] = useState(false);
+  // Each month sheet keeps its own search box (seeded from the shared filter
+  // above, if any) so a pupil can be found directly on that month's table.
+  const [localSearch, setLocalSearch] = useState(search || "");
+  useEffect(() => { setLocalSearch(search || ""); }, [search]);
   const displayRows = useMemo(() => {
     const base = sortByPos ? sortedRows : indexedRows;
-    if (!search || !search.trim()) return base;
-    const q = search.trim().toLowerCase();
+    if (!localSearch || !localSearch.trim()) return base;
+    const q = localSearch.trim().toLowerCase();
     return base.filter(r => r.s.name.toLowerCase().includes(q));
-  }, [sortByPos, sortedRows, indexedRows, search]);
+  }, [sortByPos, sortedRows, indexedRows, localSearch]);
   return (
     <div className="month-block-sheet" style={{marginBottom:24}}>
       <div style={{background:"#1e3a6e",color:"white",padding:"10px 16px",borderRadius:"8px 8px 0 0",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
@@ -4173,6 +4578,11 @@ function MonthBlock({ month, cls, classStudents, monthlyMarks, updateMonthlyMark
           )}
           <span style={{fontSize:12,opacity:0.8}}>{cls} - {classStudents.length} STUDENTS</span>
         </div>
+      </div>
+      <div className="no-print" style={{padding:"8px 16px",background:"#f1f5f9",borderBottom:"1px solid #e2e8f0",display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+        <label style={{fontSize:11,fontWeight:700,color:"#475569"}}>🔍 Search Pupil</label>
+        <input value={localSearch} onChange={e=>setLocalSearch(e.target.value)} style={{...inp,width:180,fontSize:12,padding:"4px 8px"}} placeholder="Type a name..."/>
+        {localSearch && <button onClick={()=>setLocalSearch("")} style={{...btnGhost,padding:"3px 10px",fontSize:11}}>✕ Clear</button>}
       </div>
       <div style={{overflowX:"auto"}}>
         <table style={{width:"100%",fontSize:12,minWidth:600}}>
@@ -4228,7 +4638,7 @@ function MonthBlock({ month, cls, classStudents, monthlyMarks, updateMonthlyMark
               </tr>
             ))}
             {classStudents.length===0&&<tr><td colSpan={20} style={{padding:16,textAlign:"center",color:"#9ca3af"}}>No students.</td></tr>}
-            {classStudents.length>0&&displayRows.length===0&&<tr><td colSpan={20} style={{padding:16,textAlign:"center",color:"#9ca3af"}}>No pupil matches "{search}".</td></tr>}
+            {classStudents.length>0&&displayRows.length===0&&<tr><td colSpan={20} style={{padding:16,textAlign:"center",color:"#9ca3af"}}>No pupil matches "{localSearch}".</td></tr>}
           </tbody>
         </table>
       </div>
