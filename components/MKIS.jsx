@@ -1956,18 +1956,31 @@ export default function App() {
     })(); }, 700);
     return () => clearTimeout(t);
   }, [bands, dataReady]);
-  useEffect(() => { if (dataReady) { (async () => {
-    inFlightRef.current.add("mkis_special_bands");
-    try {
-      const merged = await updateShared("mkis_special_bands", specialBands);
-      if (JSON.stringify(merged) !== JSON.stringify(specialBands)) {
-        await writeAuditEntry("mkis_special_bands", "UPDATE", lastAuditDetail.current["mkis_special_bands"] || "Special grading scale updated");
-        lastAuditDetail.current["mkis_special_bands"] = "";
-      }
-      lastSeenRef.current.mkis_special_bands = JSON.stringify(merged);
-      if (JSON.stringify(merged) !== JSON.stringify(specialBands)) setSpecialBands(merged);
-    } finally { inFlightRef.current.delete("mkis_special_bands"); }
-  })(); } }, [specialBands, dataReady]);
+  useEffect(() => {
+    if (!dataReady) return;
+    // Debounced for the same reason as mkis_bands above: the Special
+    // Grading Scale grid updates this state on every keystroke. Firing
+    // a save per keystroke let overlapping read-merge-write round trips
+    // finish out of order, so a slightly-earlier keystroke's save could
+    // land AFTER a later one and silently overwrite the figure you'd
+    // just typed -- it would flicker back to a stale value or vanish
+    // before settling. Only the LAST scheduled timer survives (cleanup
+    // below cancels every prior one), so exactly one save fires, 700ms
+    // after typing pauses.
+    const t = setTimeout(() => { (async () => {
+      inFlightRef.current.add("mkis_special_bands");
+      try {
+        const merged = await updateShared("mkis_special_bands", specialBands);
+        if (JSON.stringify(merged) !== JSON.stringify(specialBands)) {
+          await writeAuditEntry("mkis_special_bands", "UPDATE", lastAuditDetail.current["mkis_special_bands"] || "Special grading scale updated");
+          lastAuditDetail.current["mkis_special_bands"] = "";
+        }
+        lastSeenRef.current.mkis_special_bands = JSON.stringify(merged);
+        if (JSON.stringify(merged) !== JSON.stringify(specialBands)) setSpecialBands(merged);
+      } finally { inFlightRef.current.delete("mkis_special_bands"); }
+    })(); }, 700);
+    return () => clearTimeout(t);
+  }, [specialBands, dataReady]);
   useEffect(() => { if (dataReady) { (async () => {
     inFlightRef.current.add("mkis_groupwork");
     try {
@@ -4080,12 +4093,11 @@ function MockInfo({ students, school, bands: defaultBands, specialBands, divisio
   const sortedRows = useMemo(()=>[...indexedRows].sort((a,b)=>{ if(a.pos==="-") return 1; if(b.pos==="-") return -1; return a.pos-b.pos; }), [indexedRows]);
   const displayRows = sortByPos ? sortedRows : indexedRows;
 
-  const mockHeaders = ["S/N","NAME OF PUPIL",...subjects,"TOT MK",...(isLower?[]:["TOT AGG","DIV"]),"POS"];
   const exportMockWord = () => {
     const rowsHtml = displayRows.map((r,i)=>`
       <tr>
         <td>${i+1}</td><td class="name-cell">${escapeHtml(r.s.name)}</td>
-        ${r.perSub.map(p=>`<td>${showResults?escapeHtml(p.exam??""):""}</td>`).join("")}
+        ${r.perSub.map(p=>`<td>${showResults?escapeHtml(p.exam??""):""}</td><td>${showResults?escapeHtml(p.isX?"X":p.agg??""):""}</td>`).join("")}
         <td>${showResults?escapeHtml(r.totMk||""):""}</td>
         ${isLower?"":`<td>${showResults?escapeHtml(r.hasX?"X":r.totAgg||""):""}</td><td>${showResults?escapeHtml(r.hasX?"X":r.totMk?r.div:""):""}</td>`}
         <td>${showResults&&r.pos!=="-"?escapeHtml(String(r.pos)):""}</td>
@@ -4094,20 +4106,50 @@ function MockInfo({ students, school, bands: defaultBands, specialBands, divisio
       <div class="title">${escapeHtml(school.name)}</div>
       <div class="subtitle">${escapeHtml(mockType)} ${showResults?"":"— BLANK MARK SHEET"} — ${escapeHtml(cls)}, ${escapeHtml(String(year))}</div>
       <table>
-        <thead><tr>${mockHeaders.map(h=>`<th>${escapeHtml(h)}</th>`).join("")}</tr></thead>
+        <thead>
+          <tr>
+            <th rowspan="2">S/N</th>
+            <th rowspan="2">NAME OF PUPIL</th>
+            ${subjects.map(s=>`<th colspan="2">${escapeHtml(s)}</th>`).join("")}
+            <th rowspan="2">TOT MK</th>
+            ${isLower?"":`<th rowspan="2">TOT AGG</th><th rowspan="2">DIV</th>`}
+            <th rowspan="2">POS</th>
+          </tr>
+          <tr>
+            ${subjects.map(()=>`<th>MARK</th><th>AGG</th>`).join("")}
+          </tr>
+        </thead>
         <tbody>${rowsHtml}</tbody>
       </table>`;
     downloadWordHtml(`${mockType} - ${cls}`, body, `${safeFileName(cls)}_${safeFileName(mockType)}_${year}${showResults?"":"_Blank"}.doc`, { pageSize:"297mm 210mm" });
   };
   const exportMockExcel = () => {
+    const headerRow1 = ["S/N","NAME OF PUPIL",...subjects.flatMap(s=>[s,""]),"TOT MK",...(isLower?[]:["TOT AGG","DIV"]),"POS"];
+    const headerRow2 = ["","",...subjects.flatMap(()=>["MARK","AGG"]),"",...(isLower?[]:["",""]),""];
     const data = displayRows.map((r,i)=>[
       i+1, r.s.name,
-      ...r.perSub.map(p=> showResults ? (p.exam??"") : ""),
+      ...r.perSub.flatMap(p=> showResults ? [p.exam??"", p.isX?"X":(p.agg??"")] : ["",""]),
       showResults ? (r.totMk||"") : "",
       ...(isLower ? [] : [showResults?(r.hasX?"X":r.totAgg||""):"", showResults?(r.hasX?"X":r.totMk?r.div:""):""]),
       showResults && r.pos!=="-" ? r.pos : "",
     ]);
-    const ws = XLSX.utils.aoa_to_sheet([mockHeaders, ...data]);
+    const ws = XLSX.utils.aoa_to_sheet([headerRow1, headerRow2, ...data]);
+    const nonSubjCols = 2; // S/N, NAME OF PUPIL
+    ws["!merges"] = [
+      { s:{r:0,c:0}, e:{r:1,c:0} }, // S/N
+      { s:{r:0,c:1}, e:{r:1,c:1} }, // NAME OF PUPIL
+      ...subjects.map((_,idx)=>({ s:{r:0,c:nonSubjCols+idx*2}, e:{r:0,c:nonSubjCols+idx*2+1} })),
+    ];
+    let col = nonSubjCols + subjects.length*2;
+    ws["!merges"].push({ s:{r:0,c:col}, e:{r:1,c:col} }); // TOT MK
+    col++;
+    if (!isLower) {
+      ws["!merges"].push({ s:{r:0,c:col}, e:{r:1,c:col} }); // TOT AGG
+      col++;
+      ws["!merges"].push({ s:{r:0,c:col}, e:{r:1,c:col} }); // DIV
+      col++;
+    }
+    ws["!merges"].push({ s:{r:0,c:col}, e:{r:1,c:col} }); // POS
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, mockType.slice(0,28));
     XLSX.writeFile(wb, `${safeFileName(cls)}_${safeFileName(mockType)}_${year}${showResults?"":"_Blank"}.xlsx`);
@@ -4155,12 +4197,20 @@ function MockInfo({ students, school, bands: defaultBands, specialBands, divisio
         <table style={{width:"100%",fontSize:12,minWidth:900}}>
           <thead>
             <tr style={{background:"#1e3a6e",color:"white"}}>
-              <th style={th}>S/N</th>
-              <th style={{...th,textAlign:"left",minWidth:160}}>NAME OF PUPIL</th>
-              {subjects.map(s=><th key={s} style={th}>{s}{isLower&&lowerSubjectMax(s)!==100?` /${lowerSubjectMax(s)}`:""}</th>)}
-              <th style={th}>TOT MK</th>
-              {!isLower && <><th style={th}>TOT AGG</th><th style={th}>DIV</th></>}
-              <th style={th}>POS</th>
+              <th style={th} rowSpan={2}>S/N</th>
+              <th style={{...th,textAlign:"left",minWidth:160}} rowSpan={2}>NAME OF PUPIL</th>
+              {subjects.map(s=><th key={s} style={th} colSpan={2}>{s}{isLower&&lowerSubjectMax(s)!==100?` /${lowerSubjectMax(s)}`:""}</th>)}
+              <th style={th} rowSpan={2}>TOT MK</th>
+              {!isLower && <><th style={th} rowSpan={2}>TOT AGG</th><th style={th} rowSpan={2}>DIV</th></>}
+              <th style={th} rowSpan={2}>POS</th>
+            </tr>
+            <tr style={{background:"#1e3a6e",color:"white"}}>
+              {subjects.map(s=>(
+                <React.Fragment key={s}>
+                  <th style={{...th,fontSize:10}}>MARK</th>
+                  <th style={{...th,fontSize:10}}>AGG</th>
+                </React.Fragment>
+              ))}
             </tr>
           </thead>
           <tbody>
@@ -4169,13 +4219,21 @@ function MockInfo({ students, school, bands: defaultBands, specialBands, divisio
                 <td style={td}>{i+1}</td>
                 <td style={{...td,fontWeight:600,textAlign:"left"}}>{r.s.name}</td>
                 {r.perSub.map(p=>(
-                  <td key={p.sub} style={td}>
-                    {showResults
-                      ? <MarkInput value={p.exam} existingVal={p.exam} max={p.max} style={markInput}
-                          onCommit={(newVal)=>updateMockMark(r.s.id,p.sub,newVal)} />
-                      : <div style={{width:markInput.width,height:20,borderBottom:"1px solid #9ca3af",margin:"0 auto"}}/>
-                    }
-                  </td>
+                  <React.Fragment key={p.sub}>
+                    <td style={td}>
+                      {showResults
+                        ? <MarkInput value={p.exam} existingVal={p.exam} max={p.max} style={markInput}
+                            onCommit={(newVal)=>updateMockMark(r.s.id,p.sub,newVal)} />
+                        : <div style={{width:markInput.width,height:20,borderBottom:"1px solid #9ca3af",margin:"0 auto"}}/>
+                      }
+                    </td>
+                    <td style={{...td,color:p.isX?"#dc2626":"inherit"}}>
+                      {showResults
+                        ? (p.isX ? "X" : (p.agg ?? "-"))
+                        : <div style={{width:20,height:16,borderBottom:"1px solid #9ca3af",margin:"0 auto"}}/>
+                      }
+                    </td>
+                  </React.Fragment>
                 ))}
                 <td style={{...td,fontWeight:700,background:"#ede9fe"}}>{showResults ? (r.totMk||"-") : <div style={{width:30,height:16,borderBottom:"1px solid #9ca3af",margin:"0 auto"}}/>}</td>
                 {!isLower && <>
