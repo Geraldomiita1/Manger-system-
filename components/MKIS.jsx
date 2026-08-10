@@ -2657,7 +2657,7 @@ export default function App() {
           {page==="LEARNERS" && <Students {...props} />}
           {page==="PUPIL PROFILE" && <PupilProfile students={students} termMarks={termMarks} monthlyMarks={monthlyMarks} bands={bands} divisions={divisions} initialStudentId={pupilProfileTargetId} onConsumeInitial={()=>setPupilProfileTargetId(null)} />}
           {page==="SWEEPING ROTA" && <SweepingRota students={students} school={school} markEditing={markEditing} />}
-          {page==="MOCK INFO" && <MockInfo students={students} school={school} bands={bands} specialBands={specialBands} divisions={divisions} markEditing={markEditing} />}
+          {page==="MOCK INFO" && <MockInfo students={students} school={school} bands={bands} specialBands={specialBands} divisions={divisions} markEditing={markEditing} role={role} />}
           {page==="PLE INFO" && <PleInfo students={students} setStudents={setStudents} school={school} markEditing={markEditing} municipalPerf={municipalPerf} setMunicipalPerf={setMunicipalPerf} />}
           {page==="MANAGE REQUESTS" && role==="admin" && <ManageRequests {...props} />}
           {page==="SETTINGS" && role==="admin" && <Settings {...props} />}
@@ -4151,7 +4151,7 @@ function MarkEntry({ students, termMarks, setTermMarks, updateTermMark, requestO
 }
 // ─── MOCK INFO ───────────────────────────────────────────────────────────────
 const MOCK_TYPES = ["Municipal Mock", "TAEB Mock"];
-function MockInfo({ students, school, bands: defaultBands, specialBands, divisions, markEditing }) {
+function MockInfo({ students, school, bands: defaultBands, specialBands, divisions, markEditing, role }) {
   const [cls, setCls] = useState("P7");
   const [mockType, setMockType] = useState(MOCK_TYPES[0]);
   const [year, setYear] = useState(school.year || String(new Date().getFullYear()));
@@ -4190,6 +4190,23 @@ function MockInfo({ students, school, bands: defaultBands, specialBands, divisio
   const classStudents = useMemo(() =>
     students.filter(s=>s.className===cls).sort((a,b)=>a.name.localeCompare(b.name)),
   [students, cls]);
+
+  const resetMockClass = () => {
+    if (!window.confirm(`Are you sure you want to reset ALL ${mockType} ${year} results for ${cls}? This cannot be undone.`)) return;
+    markEditing && markEditing();
+    setMockMarks(prev => {
+      const next = { ...prev };
+      classStudents.forEach(s => {
+        if (next[s.id] && next[s.id][mk]) {
+          const rest = { ...next[s.id] };
+          delete rest[mk];
+          next[s.id] = rest;
+        }
+      });
+      saveShared("mkis_mock_marks", next);
+      return next;
+    });
+  };
 
   const rows = useMemo(() => classStudents.map(s => {
     const m = mockMarks[s.id]?.[mk] || {};
@@ -4383,6 +4400,9 @@ function MockInfo({ students, school, bands: defaultBands, specialBands, divisio
             finally { setPdfBusy(false); }
           }} style={pdfBusy?btnPdfBusy:btnPdf}>{pdfBusy?"⏳ Generating...":"📕 Export PDF"}</button>
           <button onClick={()=>window.print()} style={btnPrimary}>🖨️ Print</button>
+          {role==="admin" && (
+            <button onClick={resetMockClass} style={btnDanger}>♻️ Reset {mockType} — {cls}</button>
+          )}
         </div>
       </div>
       {/* Bulk Results Upload Panel */}
