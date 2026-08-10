@@ -1731,6 +1731,7 @@ export default function App() {
   const [termMarks, setTermMarks] = useState({});
   const [monthlyMarks, setMonthlyMarks] = useState({});
   const [monthlyResetBackups, setMonthlyResetBackups] = useState({});
+  const [termResetBackups, setTermResetBackups] = useState({});
   const [groupWork, setGroupWork] = useState(DEFAULT_GROUP_WORK);
   const [municipalPerf, setMunicipalPerf] = useState(DEFAULT_MUNICIPAL_PERF);
   const [examTimetable, setExamTimetable] = useState(DEFAULT_EXAM_TIMETABLE);
@@ -2216,6 +2217,54 @@ export default function App() {
   // system the main data keys use.
   useEffect(() => { loadShared("mkis_monthly_reset_backups", {}).then(b => setMonthlyResetBackups(b||{})); }, []);
   useEffect(() => { if (dataReady) saveShared("mkis_monthly_reset_backups", monthlyResetBackups); }, [monthlyResetBackups, dataReady]);
+  // Term-exam equivalent of resetMonthlyMonth/restoreMonthlyMonth above —
+  // clears a single class+term+year's term marks back to blank, with a
+  // one-step-back backup. Admin-only, mirrored from the Monthly Exams Reset
+  // button so both mark sheets behave the same way.
+  const resetTermClass = useCallback((cls, tk) => {
+    markEditing();
+    const [term, year] = tk.split("__");
+    const backupKey = `${cls}__${tk}`;
+    const snapshot = {};
+    students.filter(s=>s.className===cls).forEach(s => {
+      const m = termMarks[s.id]?.[tk];
+      if (m !== undefined) snapshot[s.id] = m;
+    });
+    setTermResetBackups(prev => ({ ...prev, [backupKey]: { snapshot, at: new Date().toISOString() } }));
+    stampAudit("mkis_termmarks", `Term marks RESET — ${cls} ${term} ${year}`);
+    setTermMarks(prev => {
+      const next = { ...prev };
+      students.filter(s=>s.className===cls).forEach(s => {
+        if (next[s.id]?.[tk] !== undefined) {
+          // Set to undefined rather than delete the key: the sync merge
+          // (deepMergeObjects) only overwrites keys that exist on the local
+          // side, even with an undefined value. Deleting the key entirely
+          // means the merge never revisits it and the old remote value
+          // silently comes right back on the next sync.
+          next[s.id] = { ...next[s.id], [tk]: undefined };
+        }
+      });
+      return next;
+    });
+  }, [students, termMarks]);
+  const restoreTermClass = useCallback((cls, tk) => {
+    const backupKey = `${cls}__${tk}`;
+    const backup = termResetBackups[backupKey];
+    if (!backup) return;
+    const [term, year] = tk.split("__");
+    markEditing();
+    stampAudit("mkis_termmarks", `Term marks RESTORED — ${cls} ${term} ${year}`);
+    setTermMarks(prev => {
+      const next = { ...prev };
+      Object.entries(backup.snapshot).forEach(([sid, markData]) => {
+        next[sid] = { ...next[sid], [tk]: markData };
+      });
+      return next;
+    });
+    setTermResetBackups(prev => ({ ...prev, [backupKey]: undefined }));
+  }, [termResetBackups]);
+  useEffect(() => { loadShared("mkis_term_reset_backups", {}).then(b => setTermResetBackups(b||{})); }, []);
+  useEffect(() => { if (dataReady) saveShared("mkis_term_reset_backups", termResetBackups); }, [termResetBackups, dataReady]);
   // ── Save & lock for Mark Entry / Monthly Exams ───────────────────────────
   const lockTermEntry = useCallback((cls, tk) => {
     markEditing();
@@ -2349,6 +2398,47 @@ export default function App() {
     stampAudit("mkis_students", `Learner DELETED — ${s?.name||id} (${s?.className||"?"})`);
     setStudents(prev => prev.filter(s => s.id !== id));
   }, [students]);
+  // Danger Zone bulk-delete actions (Settings). These are another place a
+  // whole-object overwrite is correct: the admin has explicitly confirmed a
+  // full wipe. Previously these called setStudents([]) / setTermMarks({}) /
+  // setMonthlyMarks({}) directly, which went through the normal merge save
+  // effect -- and deepMergeObjects/mergeArrayById only clear entries that
+  // are actually *present* (even as undefined/deleted-id) on the local
+  // side. An empty {} or [] has nothing to iterate, so the merge treated it
+  // as "no opinion" and quietly merged the old remote data straight back
+  // in, making the deletion appear to silently undo itself. Routing through
+  // forceWriteRef (same mechanism forceRestoreData uses below) makes the
+  // next save a plain overwrite instead of a merge, so the wipe actually
+  // sticks.
+  const dangerDeleteAllStudents = useCallback(() => {
+    markEditing();
+    forceWriteRef.current.add("mkis_students");
+    stampAudit("mkis_students", `DANGER ZONE — All students deleted (${students.length} removed)`);
+    setStudents([]);
+    deletedStudentIdsRef.current = new Set();
+  }, [students]);
+  const dangerDeleteAllResults = useCallback(() => {
+    markEditing();
+    forceWriteRef.current.add("mkis_termmarks");
+    forceWriteRef.current.add("mkis_monthlymarks");
+    stampAudit("mkis_termmarks", "DANGER ZONE — All term marks deleted");
+    stampAudit("mkis_monthlymarks", "DANGER ZONE — All monthly marks deleted");
+    setTermMarks({});
+    setMonthlyMarks({});
+  }, []);
+  const dangerResetEverything = useCallback(() => {
+    markEditing();
+    forceWriteRef.current.add("mkis_students");
+    forceWriteRef.current.add("mkis_termmarks");
+    forceWriteRef.current.add("mkis_monthlymarks");
+    stampAudit("mkis_students", `DANGER ZONE — Full reset (${students.length} students, all marks wiped)`);
+    stampAudit("mkis_termmarks", "DANGER ZONE — Full reset");
+    stampAudit("mkis_monthlymarks", "DANGER ZONE — Full reset");
+    setStudents([]);
+    setTermMarks({});
+    setMonthlyMarks({});
+    deletedStudentIdsRef.current = new Set();
+  }, [students]);
   // Applies a full-backup restore. This is the one place a whole-object
   // overwrite is correct: the person explicitly chose a backup file and
   // confirmed they want it to replace current data. forceWriteRef tells the
@@ -2469,7 +2559,7 @@ export default function App() {
       </div>
     );
   }
-  const props = { students, setStudents, termMarks, setTermMarks, monthlyMarks, setMonthlyMarks, groupWork, setGroupWork, municipalPerf, setMunicipalPerf, examTimetable, setExamTimetable, bands, setBands, specialBands, setSpecialBands, divisions, setDivisions, school, setSchool, accounts, setAccounts, initials, setInitials, updateTermMark, updateMonthlyMark, resetMonthlyMonth, restoreMonthlyMonth, monthlyResetBackups, requestOrApplyTermMark, requestOrApplyMonthlyMark, addStudent, deleteStudent, forceRestoreData, promoteStudents, demoteStudents, openPupilProfile, role, currentUser, changeRequests, submitChangeRequest, approveChangeRequest, rejectChangeRequest, lockedTerm, lockTermEntry, unlockTermEntry, lockedMonthly, lockMonthlyEntry, unlockMonthlyEntry, requestUnlockTerm, requestUnlockMonthly, markEditing, stampAudit, dashboardPerfTerm, setDashboardPerfTerm, dashboardPerfYear, setDashboardPerfYear };
+  const props = { students, setStudents, termMarks, setTermMarks, monthlyMarks, setMonthlyMarks, groupWork, setGroupWork, municipalPerf, setMunicipalPerf, examTimetable, setExamTimetable, bands, setBands, specialBands, setSpecialBands, divisions, setDivisions, school, setSchool, accounts, setAccounts, initials, setInitials, updateTermMark, updateMonthlyMark, resetMonthlyMonth, restoreMonthlyMonth, monthlyResetBackups, resetTermClass, restoreTermClass, termResetBackups, requestOrApplyTermMark, requestOrApplyMonthlyMark, addStudent, deleteStudent, dangerDeleteAllStudents, dangerDeleteAllResults, dangerResetEverything, forceRestoreData, promoteStudents, demoteStudents, openPupilProfile, role, currentUser, changeRequests, submitChangeRequest, approveChangeRequest, rejectChangeRequest, lockedTerm, lockTermEntry, unlockTermEntry, lockedMonthly, lockMonthlyEntry, unlockMonthlyEntry, requestUnlockTerm, requestUnlockMonthly, markEditing, stampAudit, dashboardPerfTerm, setDashboardPerfTerm, dashboardPerfYear, setDashboardPerfYear };
   return (
     <div className="app-shell" style={{display:"flex",minHeight:"100vh",fontFamily:"'Segoe UI',system-ui,sans-serif",background:"#f1f5f9"}}>
       {/* SIDEBAR */}
@@ -3628,7 +3718,7 @@ function SweepingRota({ students, school, markEditing }) {
   );
 }
 // ─── MARK ENTRY ──────────────────────────────────────────────────────────────
-function MarkEntry({ students, termMarks, setTermMarks, updateTermMark, requestOrApplyTermMark, role, bands: defaultBands, specialBands, divisions, school, lockedTerm, lockTermEntry, unlockTermEntry, changeRequests, requestUnlockTerm }) {
+function MarkEntry({ students, termMarks, setTermMarks, updateTermMark, requestOrApplyTermMark, role, bands: defaultBands, specialBands, divisions, school, lockedTerm, lockTermEntry, unlockTermEntry, changeRequests, requestUnlockTerm, resetTermClass, restoreTermClass, termResetBackups }) {
   const [cls, setCls] = useState("P1");
   const [term, setTerm] = useState("Term I");
   const [year, setYear] = useState(school.year||String(new Date().getFullYear()));
@@ -3684,6 +3774,20 @@ function MarkEntry({ students, termMarks, setTermMarks, updateTermMark, requestO
     setPendingToast(`Unlock request for ${cls} ${term} ${year} sent to admin.`);
     setTimeout(()=>setPendingToast(""), 3500);
   }, [requestUnlockTerm, cls, tk, term, year]);
+  // Admin-only reset/restore, mirrored from the Monthly Exams sheet: clears
+  // this class+term+year's marks back to blank, keeping a one-step backup.
+  const resetBackupKey = `${cls}__${tk}`;
+  const hasTermBackup = !!termResetBackups?.[resetBackupKey];
+  const handleReset = useCallback(() => {
+    if (window.confirm(`Are you sure you want to clear all ${cls} ${term} ${year} marks back to blank?`)) {
+      resetTermClass(cls, tk);
+    }
+  }, [resetTermClass, cls, tk, term, year]);
+  const handleRestore = useCallback(() => {
+    if (window.confirm(`Restore ${cls} ${term} ${year} marks back to what they were before the last reset?`)) {
+      restoreTermClass(cls, tk);
+    }
+  }, [restoreTermClass, cls, tk, term, year]);
   const classStudents = useMemo(()=>
     students.filter(s=>s.className===cls).sort((a,b)=>a.name.localeCompare(b.name)),
     [students, cls]
@@ -3862,6 +3966,16 @@ function MarkEntry({ students, termMarks, setTermMarks, updateTermMark, requestO
             {sortByPos ? "🔤 Show A–Z" : "📊 Sort Highest → Lowest"}
           </button>
           <button onClick={()=>setShowBulkMark(v=>!v)} style={btnWarning}>📋 Bulk Mark Sheet</button>
+          {role==="admin" && (
+            <button onClick={handleReset} style={{padding:"8px 16px",fontSize:13,background:"#fee2e2",color:"#991b1b",border:"none",borderRadius:8,fontWeight:700,cursor:"pointer"}} title={`Clear all ${term} ${year} marks for ${cls} back to blank`}>
+              ♻️ Reset
+            </button>
+          )}
+          {role==="admin" && hasTermBackup && (
+            <button onClick={handleRestore} style={{padding:"8px 16px",fontSize:13,background:"#dbeafe",color:"#1e40af",border:"none",borderRadius:8,fontWeight:700,cursor:"pointer"}} title={`Bring back ${cls} ${term} ${year} marks from before the last reset`}>
+              ⏪ Restore
+            </button>
+          )}
           <button onClick={()=>window.print()} style={btnPrimary}>🖨️ Print</button>
         </div>
       </div>
@@ -7820,7 +7934,7 @@ function AccountManager({ accounts, setAccounts, currentUser }) {
   );
 }
 // ─── SETTINGS ────────────────────────────────────────────────────────────────
-function Settings({ school, setSchool, bands, setBands, specialBands, setSpecialBands, divisions, setDivisions, accounts, setAccounts, role, currentUser, students, setStudents, setTermMarks, setMonthlyMarks, initials, setInitials, markEditing }) {
+function Settings({ school, setSchool, bands, setBands, specialBands, setSpecialBands, divisions, setDivisions, accounts, setAccounts, role, currentUser, students, setStudents, setTermMarks, setMonthlyMarks, initials, setInitials, markEditing, dangerDeleteAllStudents, dangerDeleteAllResults, dangerResetEverything }) {
   const [curPw, setCurPw] = useState("");
   const [newPw, setNewPw] = useState("");
   const [confirmPw, setConfirmPw] = useState("");
@@ -7854,7 +7968,7 @@ function Settings({ school, setSchool, bands, setBands, specialBands, setSpecial
       color: "#dc2626",
       bg: "#fef2f2",
       border: "#fca5a5",
-      action: () => { setStudents([]); },
+      action: () => { dangerDeleteAllStudents(); },
     },
     {
       key: "results",
@@ -7864,7 +7978,7 @@ function Settings({ school, setSchool, bands, setBands, specialBands, setSpecial
       color: "#b45309",
       bg: "#fffbeb",
       border: "#fcd34d",
-      action: () => { setTermMarks({}); setMonthlyMarks({}); },
+      action: () => { dangerDeleteAllResults(); },
     },
     {
       key: "everything",
@@ -7874,7 +7988,7 @@ function Settings({ school, setSchool, bands, setBands, specialBands, setSpecial
       color: "#7f1d1d",
       bg: "#fef2f2",
       border: "#ef4444",
-      action: () => { setStudents([]); setTermMarks({}); setMonthlyMarks({}); },
+      action: () => { dangerResetEverything(); },
     },
   ];
   const activeDanger = dangerOptions.find(d => d.key === dangerConfirm);
