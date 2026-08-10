@@ -4191,8 +4191,9 @@ function MockInfo({ students, school, bands: defaultBands, specialBands, divisio
     students.filter(s=>s.className===cls).sort((a,b)=>a.name.localeCompare(b.name)),
   [students, cls]);
 
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
+
   const resetMockClass = () => {
-    if (!window.confirm(`Are you sure you want to reset ALL ${mockType} ${year} results for ${cls}? This cannot be undone.`)) return;
     markEditing && markEditing();
     setMockMarks(prev => {
       const next = { ...prev };
@@ -4206,6 +4207,7 @@ function MockInfo({ students, school, bands: defaultBands, specialBands, divisio
       saveShared("mkis_mock_marks", next);
       return next;
     });
+    setShowResetConfirm(false);
   };
 
   const rows = useMemo(() => classStudents.map(s => {
@@ -4401,7 +4403,7 @@ function MockInfo({ students, school, bands: defaultBands, specialBands, divisio
           }} style={pdfBusy?btnPdfBusy:btnPdf}>{pdfBusy?"⏳ Generating...":"📕 Export PDF"}</button>
           <button onClick={()=>window.print()} style={btnPrimary}>🖨️ Print</button>
           {role==="admin" && (
-            <button onClick={resetMockClass} style={btnDanger}>♻️ Reset {mockType} — {cls}</button>
+            <button onClick={()=>setShowResetConfirm(true)} style={btnDanger}>♻️ Reset {mockType} — {cls}</button>
           )}
         </div>
       </div>
@@ -4555,6 +4557,24 @@ function MockInfo({ students, school, bands: defaultBands, specialBands, divisio
           </tbody>
         </table>
       </div>
+      {/* Reset confirmation modal */}
+      {showResetConfirm && (
+        <div className="no-print" style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.65)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:2000,padding:16}}>
+          <div style={{background:"white",borderRadius:16,padding:32,width:"100%",maxWidth:420,boxShadow:"0 24px 80px rgba(0,0,0,0.4)"}}>
+            <div style={{fontSize:36,textAlign:"center",marginBottom:8}}>♻️</div>
+            <h3 style={{margin:"0 0 8px",color:"#dc2626",fontSize:16,fontWeight:800,textAlign:"center"}}>Reset {mockType} Results</h3>
+            <div style={{background:"#fef2f2",border:"1px solid #fca5a5",borderRadius:8,padding:"10px 14px",marginBottom:16,fontSize:13,color:"#991b1b",textAlign:"center",lineHeight:1.6}}>
+              Are you sure you want to reset ALL <b>{mockType} {year}</b> results for <b>{cls}</b>? This cannot be undone.
+            </div>
+            <div style={{display:"flex",gap:10}}>
+              <button onClick={resetMockClass} style={{flex:1,padding:"11px",background:"linear-gradient(135deg,#dc2626,#ef4444)",color:"white",border:"none",borderRadius:8,fontWeight:700,fontSize:14,cursor:"pointer"}}>
+                Confirm Reset
+              </button>
+              <button onClick={()=>setShowResetConfirm(false)} style={{...btnGhost,padding:"11px 20px"}}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
