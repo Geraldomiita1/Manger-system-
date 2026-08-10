@@ -4046,6 +4046,11 @@ function MockInfo({ students, school, bands: defaultBands, specialBands, divisio
   const [sortByPos, setSortByPos] = useState(false);
   const [pdfBusy, setPdfBusy] = useState(false);
   const [showResults, setShowResults] = useState(true);
+  const [showBulkMock, setShowBulkMock] = useState(false);
+  const [bulkMockPreview, setBulkMockPreview] = useState(null);
+  const [bulkMockError, setBulkMockError] = useState("");
+  const [bulkMockPastedText, setBulkMockPastedText] = useState("");
+  const bulkMockFileRef = useRef();
   const sheetRef = useRef(null);
 
   useEffect(() => {
@@ -4155,6 +4160,86 @@ function MockInfo({ students, school, bands: defaultBands, specialBands, divisio
     XLSX.writeFile(wb, `${safeFileName(cls)}_${safeFileName(mockType)}_${year}${showResults?"":"_Blank"}.xlsx`);
   };
 
+  // Parses a pasted or uploaded marksheet (header row + one row per pupil)
+  // into a reviewable preview. Accepts comma or tab delimiting -- whichever
+  // the header row actually uses -- so it works with CSV uploads, pastes
+  // from Excel/Sheets, or OCR output.
+  const parseMockMarksheetText = useCallback((text) => {
+    const lines = text.split(/\r?\n/).filter(l=>l.trim());
+    if (lines.length < 2) throw new Error("Data must have a header row and at least one data row.");
+    const delim = lines[0].includes("\t") ? "\t" : ",";
+    const headers = lines[0].split(delim).map(h=>h.trim().toUpperCase());
+    const nameIdx = headers.findIndex(h=>h==="NAME"||h==="PUPIL"||h==="STUDENT");
+    if (nameIdx === -1) throw new Error("The header row must include a column named NAME, PUPIL, or STUDENT.");
+    const subjectCols = {};
+    subjects.forEach(sub => {
+      const idx = headers.findIndex(h=>h===sub||h===sub.replace(" ","_"));
+      if (idx !== -1) subjectCols[sub] = idx;
+    });
+    const rows = lines.slice(1).map((line, i) => {
+      const cells = line.split(delim).map(c=>c.trim());
+      const rawName = toUpper(cells[nameIdx] || "");
+      const matched = classStudents.find(s =>
+        s.name === rawName ||
+        s.name.toLowerCase().includes(rawName.toLowerCase().split(" ")[0]) ||
+        rawName.toLowerCase().includes(s.name.toLowerCase().split(" ")[0])
+      );
+      const marks = {};
+      subjects.forEach(sub => {
+        const idx = subjectCols[sub];
+        if (idx === undefined) return;
+        const v = cells[idx];
+        marks[sub] = v !== undefined && v !== "" && !isNaN(Number(v)) ? Number(v) : null;
+      });
+      return { id:`bmk_${i}`, rawName, studentId: matched?.id || null, include: true, marks };
+    }).filter(r => r.rawName);
+    if (rows.length === 0) throw new Error("No data rows found.");
+    return { rows, subjectCols, headers };
+  }, [subjects, classStudents]);
+
+  const handleBulkMockFile = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setBulkMockError("");
+    try {
+      const text = await file.text();
+      setBulkMockPreview(parseMockMarksheetText(text));
+    } catch(err) {
+      setBulkMockError(err.message || "Could not read file.");
+    }
+    if (bulkMockFileRef.current) bulkMockFileRef.current.value = "";
+  };
+  const handleLoadPastedMockMarks = () => {
+    setBulkMockError("");
+    try {
+      setBulkMockPreview(parseMockMarksheetText(bulkMockPastedText));
+    } catch(err) {
+      setBulkMockError(err.message || "Could not read the pasted/scanned text.");
+    }
+  };
+  const confirmBulkMockMarks = () => {
+    if (!bulkMockPreview) return;
+    bulkMockPreview.rows.forEach(row => {
+      if (!row.include || !row.studentId) return;
+      subjects.forEach(sub => {
+        const v = row.marks[sub];
+        if (v === null || v === undefined) return;
+        const max = isLower ? lowerSubjectMax(sub) : 100;
+        updateMockMark(row.studentId, sub, clampMark(v, max));
+      });
+    });
+    setBulkMockPreview(null);
+    setShowBulkMock(false);
+    setBulkMockPastedText("");
+  };
+  const downloadMockTemplate = () => {
+    const header = ["NAME", ...subjects].join(",");
+    const rows = classStudents.map(s => [s.name, ...subjects.map(()=>"")].join(","));
+    const csv = [header, ...rows].join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    triggerBlobDownload(blob, `${safeFileName(cls)}_${safeFileName(mockType)}_${year}_mock_template.csv`);
+  };
+
   if (!loaded) return <div style={{padding:20,color:"#9ca3af"}}>Loading…</div>;
 
   return (
@@ -4175,6 +4260,7 @@ function MockInfo({ students, school, bands: defaultBands, specialBands, divisio
           <button onClick={()=>setShowResults(v=>!v)} style={showResults?btnGhost:btnWarning}>
             {showResults ? "🙈 Hide Results (Blank Sheet)" : "👁️ Show Results"}
           </button>
+          <button onClick={()=>setShowBulkMock(v=>!v)} style={btnWarning}>📋 Bulk Upload Results</button>
           <button onClick={exportMockWord} style={btnWord}>📄 Export Word</button>
           <button onClick={exportMockExcel} style={{...btnPrimary,background:"linear-gradient(135deg,#15803d,#16a34a)"}}>📊 Export Excel</button>
           <button disabled={pdfBusy} onClick={async()=>{
@@ -4185,6 +4271,94 @@ function MockInfo({ students, school, bands: defaultBands, specialBands, divisio
           <button onClick={()=>window.print()} style={btnPrimary}>🖨️ Print</button>
         </div>
       </div>
+      {/* Bulk Results Upload Panel */}
+      {showBulkMock && (
+        <div className="no-print" style={{background:"#fff7ed",border:"2px solid #f59e0b",borderRadius:12,padding:20,marginBottom:16}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+            <h3 style={{margin:0,color:"#92400e",fontSize:14}}>📋 Bulk Upload Results - {mockType} - {cls} - {year}</h3>
+            <button onClick={()=>{setShowBulkMock(false);setBulkMockPreview(null);setBulkMockError("");}} style={{...btnGhost,padding:"4px 10px",fontSize:12}}>✕ Close</button>
+          </div>
+          <div style={{fontSize:12,color:"#78350f",marginBottom:12,lineHeight:1.6}}>
+            Upload a CSV file with results for <b>{cls}</b>. The first row must be a header. <b>Columns:</b> NAME, {subjects.join(", ")}
+          </div>
+          <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"center",marginBottom:12}}>
+            <button onClick={downloadMockTemplate} style={{...btnGhost,fontSize:12,padding:"6px 12px"}}>⬇️ Download Template CSV</button>
+            <div style={{display:"flex",alignItems:"center",gap:8}}>
+              <label style={{...lbl,margin:0}}>Upload CSV:</label>
+              <input ref={bulkMockFileRef} type="file" accept=".csv,.txt" onChange={handleBulkMockFile}
+                style={{padding:"6px",border:"1.5px solid #d1d5db",borderRadius:7,fontSize:13,background:"white"}}/>
+            </div>
+          </div>
+          <div style={{background:"white",border:"1px solid #fde68a",borderRadius:8,padding:14,marginBottom:12}}>
+            <div style={{fontWeight:700,fontSize:12,color:"#92400e",marginBottom:8}}>OR paste the results / scan a photo (OCR)</div>
+            <textarea value={bulkMockPastedText} onChange={e=>setBulkMockPastedText(e.target.value)}
+              placeholder={`NAME\t${subjects.join("\t")}\nJOHN OKELLO\t78\t65\t70\t82\t90\t88\t91`}
+              rows={3} style={{width:"100%",padding:8,border:"1.5px solid #d1d5db",borderRadius:7,fontSize:12,fontFamily:"monospace",resize:"vertical",marginBottom:8,boxSizing:"border-box"}}/>
+            <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"flex-start"}}>
+              <button onClick={handleLoadPastedMockMarks} disabled={!bulkMockPastedText.trim()} style={{...btnWarning,fontSize:12,padding:"6px 12px",opacity:bulkMockPastedText.trim()?1:0.5}}>📥 Load Pasted Data</button>
+              <OcrScanButton label="📷 Scan Marksheet Photo"
+                instructions="After scanning, check every name and mark below — camera photos of marksheets are the hardest case for OCR. Once it looks right, it drops into the paste box above so you can hit Load Pasted Data."
+                onUseText={(text)=>setBulkMockPastedText(text)}/>
+            </div>
+          </div>
+          {bulkMockError && <div style={{background:"#fef2f2",border:"1px solid #fca5a5",borderRadius:8,padding:10,marginBottom:12,color:"#dc2626",fontSize:13}}>{bulkMockError}</div>}
+          {bulkMockPreview && (() => {
+            const detected = subjects.filter(sub => bulkMockPreview.subjectCols[sub] !== undefined);
+            return (
+              <>
+                <div style={{fontSize:12,color:"#065f46",background:"#f0fdf4",borderRadius:8,padding:"8px 12px",marginBottom:10}}>
+                  ✅ Detected <b>{bulkMockPreview.rows.length} rows</b>. Subjects found: <b>{detected.join(", ") || "none"}</b>.
+                  {subjects.filter(s=>bulkMockPreview.subjectCols[s]===undefined).length > 0 && <span style={{color:"#b45309"}}> Missing: {subjects.filter(s=>bulkMockPreview.subjectCols[s]===undefined).join(", ")}.</span>}
+                </div>
+                <div style={{maxHeight:320,overflowY:"auto",marginBottom:12,border:"1px solid #fde68a",borderRadius:8}}>
+                  <table style={{width:"100%",fontSize:11,minWidth:500}}>
+                    <thead>
+                      <tr style={{background:"#fef3c7"}}>
+                        <th style={th}>✓</th>
+                        <th style={{...th,textAlign:"left"}}>PASTED NAME</th>
+                        <th style={{...th,textAlign:"left"}}>MATCHED PUPIL</th>
+                        {detected.map(sub => <th key={sub} style={th}>{sub}</th>)}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {bulkMockPreview.rows.map((row, ri) => (
+                        <tr key={row.id} style={{background:ri%2===0?"white":"#fffbeb",opacity:row.include?1:0.4}}>
+                          <td style={td}><input type="checkbox" checked={row.include} onChange={()=>setBulkMockPreview(prev=>({...prev,rows:prev.rows.map((r,i)=>i===ri?{...r,include:!r.include}:r)}))}/></td>
+                          <td style={{...td,textAlign:"left",fontWeight:600}}>{row.rawName}</td>
+                          <td style={{...td,textAlign:"left"}}>
+                            <select value={row.studentId||""}
+                              onChange={e=>setBulkMockPreview(prev=>({...prev,rows:prev.rows.map((r,i)=>i===ri?{...r,studentId:e.target.value||null}:r)}))}
+                              style={{...inp,padding:"2px 4px",fontSize:11,minWidth:0,width:150,
+                                borderColor:row.studentId?"#22c55e":"#f59e0b",
+                                background:row.studentId?"#f0fdf4":"#fefce8"}}>
+                              <option value="">- not matched -</option>
+                              {classStudents.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}
+                            </select>
+                          </td>
+                          {detected.map(sub => {
+                            const v = row.marks[sub];
+                            const subMax = isLower ? lowerSubjectMax(sub) : 100;
+                            return <td key={sub} style={td}>{v!=null ? clampMark(v, subMax) : "-"}</td>;
+                          })}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
+                  <button onClick={confirmBulkMockMarks}
+                    disabled={!bulkMockPreview.rows.some(r=>r.include&&r.studentId)}
+                    style={{...btnPrimary,opacity:bulkMockPreview.rows.some(r=>r.include&&r.studentId)?1:0.5}}>
+                    💾 Save Results for {bulkMockPreview.rows.filter(r=>r.include&&r.studentId).length} Pupils
+                  </button>
+                  <button onClick={()=>setBulkMockPreview(null)} style={btnGhost}>Clear</button>
+                  <span style={{fontSize:11,color:"#6b7280"}}>Unmatched rows will not be saved. Saved results appear immediately in the sheet below.</span>
+                </div>
+              </>
+            );
+          })()}
+        </div>
+      )}
       <div ref={sheetRef} style={{overflowX:"auto"}}>
         <div style={{textAlign:"center",marginBottom:12}}>
           {school.logo && <img src={school.logo} alt="School badge" style={{width:56,height:56,objectFit:"contain",display:"block",margin:"0 auto 6px"}}/>}
