@@ -364,14 +364,19 @@ function divisionOf(totalAgg, numSubjects, divisions, hasF9) {
   // determine F9 status for a single sitting (e.g. an average of aggregates
   // across several tests) omit it, and the raw division is returned as-is.
   if (typeof hasF9 !== "boolean") return d.name;
-  const raw = String(d.name).trim();
-  if (hasF9 && ["1", "2", "3"].includes(raw)) {
-    const bumped = String(Number(raw) + 1);
-    const target = divisions.find(dd => String(dd.name).trim() === bumped);
+  const raw = String(d.name).trim().toUpperCase();
+  // Supports both numbering styles schools use for division names:
+  // Arabic ("1".."4") and Roman ("I".."IV"), matched case-insensitively.
+  const BUMP_NEXT = { "1":"2", "2":"3", "3":"4", "I":"II", "II":"III", "III":"IV" };
+  const BOUNCE_TO_III = { "4":"3", "IV":"III" };
+  if (hasF9 && BUMP_NEXT[raw]) {
+    const bumped = BUMP_NEXT[raw];
+    const target = divisions.find(dd => String(dd.name).trim().toUpperCase() === bumped);
     return target ? target.name : d.name;
   }
-  if (!hasF9 && raw === "4") {
-    const target = divisions.find(dd => String(dd.name).trim() === "3");
+  if (!hasF9 && BOUNCE_TO_III[raw]) {
+    const bounced = BOUNCE_TO_III[raw];
+    const target = divisions.find(dd => String(dd.name).trim().toUpperCase() === bounced);
     return target ? target.name : d.name;
   }
   return d.name;
