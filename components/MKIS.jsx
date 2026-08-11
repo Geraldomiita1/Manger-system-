@@ -77,7 +77,11 @@ const DEFAULT_BANDS = [
 // Keyed by class name (e.g. "P7"); a class with no entry here just uses the
 // default DEFAULT_BANDS/bands scale as normal. Lets a school apply a
 // different grading scale to one class (commonly P7, for PLE-style grading)
-// without touching the scale every other class uses.
+// without touching the scale every other class uses. Each entry is shaped
+// { bands:[...], examTypes:[...] } where examTypes is a subset of
+// SPECIAL_SCALE_EXAM_TYPES ("End of Term", "Monthly Exams", "Municipal Mock",
+// "TAEB Mock") -- only those exam types use the special scale for that class;
+// any exam type left out keeps using the standard scale even for that class.
 const DEFAULT_SPECIAL_BANDS = {};
 const DEFAULT_DIVISIONS = [
   { name:"I",   min:4,  max:12 },
@@ -231,6 +235,11 @@ const MERGE_STRATEGIES = {
   // different class/term/month another device locked or unlocked.
   mkis_locked_term: (remote, local) => deepMergeObjects(remote, local),
   mkis_locked_monthly: (remote, local) => deepMergeObjects(remote, local),
+  // Mock/Other Exams marks -- same shape and same reasoning as mkis_termmarks/
+  // mkis_monthlymarks above: deep-merge so one device's save can never wipe
+  // out a concurrent edit (or a not-yet-locally-seen remote edit) to a
+  // DIFFERENT student/mock-type/year branch.
+  mkis_mock_marks: (remote, local) => deepMergeObjects(remote, local),
 };
 // Reads the freshest shared value, merges in the local change using the
 // strategy for that key, writes the merged result back, and returns it so
@@ -299,12 +308,30 @@ async function verifyAccountLogin(accounts, usernameInput, passwordInput) {
 }
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
 const toUpper = (s) => (s || "").toUpperCase();
-// Resolves which grading scale actually applies to a class: its Special
-// Grading Scale override if the school has set one up (and it isn't empty),
-// otherwise the normal default bands used everywhere else.
-function bandsForClass(cls, bands, specialBands) {
+// Exam types the Special Grading Scale can be scoped to. A class's special
+// scale only overrides the standard scale for the exam types checked for it
+// in Settings; any exam type left unchecked keeps using the standard scale
+// even though that class has a special scale enabled.
+const SPECIAL_SCALE_EXAM_TYPES = ["End of Term", "Monthly Exams", "Municipal Mock", "TAEB Mock"];
+// Resolves which grading scale actually applies to a class for a given exam
+// type: its Special Grading Scale override if the school has set one up for
+// that class (and it isn't empty) AND that override is scoped to include the
+// exam type in question -- otherwise the normal default bands used everywhere
+// else. specialBands[cls] can be either the legacy shape (a bare array of
+// bands, meaning "applies to every exam type", kept for backward compatibility
+// with data saved before exam-type scoping existed) or the current shape
+// ({ bands:[...], examTypes:[...] }). When examType is omitted the exam-type
+// check is skipped entirely (used by callers -- like Group Work -- that
+// aren't one of the scoped exam types and should just follow the class's
+// special scale whenever one is enabled).
+function bandsForClass(cls, bands, specialBands, examType) {
   const special = specialBands?.[cls];
-  return (Array.isArray(special) && special.length) ? special : bands;
+  if (!special) return bands;
+  const specialArr = Array.isArray(special) ? special : special.bands;
+  if (!Array.isArray(specialArr) || !specialArr.length) return bands;
+  const specialTypes = Array.isArray(special) ? SPECIAL_SCALE_EXAM_TYPES : (special.examTypes || []);
+  if (examType && !specialTypes.includes(examType)) return bands;
+  return specialArr;
 }
 function gradeFor(score, bands) {
   if (score === undefined || score === null || isNaN(score)) return null;
@@ -319,10 +346,35 @@ function gradeLabel(score, bands) {
   const g = gradeFor(score, bands);
   return g ? g.grade : "F9";
 }
-function divisionOf(totalAgg, numSubjects, divisions) {
+// hasF9: whether the learner scored F9 in any subject this sitting. Applies
+// two adjustments on top of the raw aggregate-based division, in every
+// grading scale (standard or special):
+//  - F9 present + raw division is 1, 2, or 3 -> bumped down to the next
+//    division (I->II, II->III, III->IV).
+//  - No F9 present + raw division is 4 -> pulled back up to Division III.
+// Divisions named anything other than "1"/"2"/"3"/"4" (e.g. "U", or custom
+// names) are left as-is, since the shift/bounce-back rule only applies to
+// the numbered Division I-IV bands.
+function divisionOf(totalAgg, numSubjects, divisions, hasF9) {
   if (!totalAgg || numSubjects === 0) return "U";
   const d = divisions.find(d => totalAgg >= d.min && totalAgg <= d.max);
-  return d ? d.name : "U";
+  if (!d) return "U";
+  // hasF9 must be an explicit boolean (a genuine "was there an F9 in this
+  // sitting?" answer) for the adjustment to apply. Callers that can't
+  // determine F9 status for a single sitting (e.g. an average of aggregates
+  // across several tests) omit it, and the raw division is returned as-is.
+  if (typeof hasF9 !== "boolean") return d.name;
+  const raw = String(d.name).trim();
+  if (hasF9 && ["1", "2", "3"].includes(raw)) {
+    const bumped = String(Number(raw) + 1);
+    const target = divisions.find(dd => String(dd.name).trim() === bumped);
+    return target ? target.name : d.name;
+  }
+  if (!hasF9 && raw === "4") {
+    const target = divisions.find(dd => String(dd.name).trim() === "3");
+    return target ? target.name : d.name;
+  }
+  return d.name;
 }
 function remarkFor(score) {
   if (score >= 90) return "Excellent";
@@ -1209,9 +1261,10 @@ function computeMonthRows({ month, classStudents, monthlyMarks, tk, subjects, is
       return { sub, mk, agg, isX };
     });
     const hasX = !isLower && perSub.some(p => p.isX);
+    const hasF9 = !isLower && perSub.some(p => p.agg === 9);
     const totMk = perSub.reduce((a, p) => a + (p.mk ?? 0), 0);
     const totAgg = isLower ? null : (hasX ? "X" : perSub.reduce((a, p) => a + (p.agg ?? 0), 0));
-    const div = isLower ? null : (hasX ? "X" : divisionOf(totAgg, 4, divisions));
+    const div = isLower ? null : (hasX ? "X" : divisionOf(totAgg, 4, divisions, hasF9));
     return { s, perSub, totMk, totAgg, div, hasX };
   });
   const positions = rankWithTies(rows.map(r => (r.totMk > 0 ? r.totMk : null)), rows.map(r => typeof r.totAgg === "number" ? r.totAgg : null));
@@ -3389,9 +3442,10 @@ function PupilProfile({ students, termMarks, monthlyMarks, bands, divisions, ini
         return { sub, av, agg, isX: false };
       });
       const hasX = perSub.some(p=>p.isX);
+      const hasF9 = !isLower && perSub.some(p=>p.agg===9);
       const totMk = perSub.reduce((a,p)=>a+(p.av??0),0);
       const totAgg = hasX ? "X" : perSub.reduce((a,p)=>a+(p.agg||0),0);
-      const div = hasX ? "X" : (typeof totAgg==="number" ? divisionOf(totAgg, isLower?5:4, divisions) : "X");
+      const div = hasX ? "X" : (typeof totAgg==="number" ? divisionOf(totAgg, isLower?5:4, divisions, hasF9) : "X");
       const pctVals = perSub.filter(p=>!p.isX).map(p=>(p.av/(isLower?lowerSubjectMax(p.sub):100))*100);
       const avgPct = pctVals.length ? Math.round(pctVals.reduce((a,b)=>a+b,0)/pctVals.length) : null;
       return { tk, term, year, isLower, totMk, totAgg, div, hasX, avgPct };
@@ -3421,9 +3475,10 @@ function PupilProfile({ students, termMarks, monthlyMarks, bands, divisions, ini
         });
         if (!perSub.some(p=>!p.isX)) return;
         const hasX = !isLower && perSub.some(p=>p.isX);
+        const hasF9 = !isLower && perSub.some(p=>p.agg===9);
         const totMk = perSub.reduce((a,p)=>a+(p.mk??0),0);
         const totAgg = isLower ? null : (hasX ? "X" : perSub.reduce((a,p)=>a+(p.agg??0),0));
-        const div = isLower ? null : (hasX ? "X" : divisionOf(totAgg, 4, divisions));
+        const div = isLower ? null : (hasX ? "X" : divisionOf(totAgg, 4, divisions, hasF9));
         const pctVals = perSub.filter(p=>!p.isX).map(p=>(p.mk/(isLower?lowerSubjectMax(p.sub):100))*100);
         const avgPct = pctVals.length ? Math.round(pctVals.reduce((a,b)=>a+b,0)/pctVals.length) : null;
         rows.push({ tk, term, year, month, isLower, totMk, totAgg, div, hasX, avgPct });
@@ -3733,7 +3788,7 @@ function MarkEntry({ students, termMarks, setTermMarks, updateTermMark, requestO
   // Grading Scale override if one's been set up for it, otherwise the
   // school's normal default bands. Named `bands` so nothing below needs to
   // change to pick this up.
-  const bands = useMemo(() => bandsForClass(cls, defaultBands, specialBands), [cls, defaultBands, specialBands]);
+  const bands = useMemo(() => bandsForClass(cls, defaultBands, specialBands, "End of Term"), [cls, defaultBands, specialBands]);
   // Wraps requestOrApplyTermMark to surface a brief toast whenever an edit
   // was filed for admin approval rather than saved immediately, so teachers
   // aren't left wondering why a number they typed doesn't show up yet.
@@ -3805,9 +3860,10 @@ function MarkEntry({ students, termMarks, setTermMarks, updateTermMark, requestO
       return { sub, ca, exam, av, agg, isX: false };
     });
     const hasX = perSub.some(p => p.isX);
+    const hasF9 = !isLower && perSub.some(p => p.agg === 9);
     const totMk = perSub.reduce((a,p)=>a+(p.av??0),0);
     const totAgg = hasX ? "X" : perSub.reduce((a,p)=>a+(p.agg||0),0);
-    const div = hasX ? "X" : (typeof totAgg==="number" ? divisionOf(totAgg, isLower?5:4, divisions) : "X");
+    const div = hasX ? "X" : (typeof totAgg==="number" ? divisionOf(totAgg, isLower?5:4, divisions, hasF9) : "X");
     return { s, perSub, totMk, totAgg, div, hasX };
   }), [classStudents, termMarks, tk, subjects, bands, divisions, isLower]);
   const positions = useMemo(()=> rankWithTies(rows.map(r=>r.totMk>0?r.totMk:null), rows.map(r=>typeof r.totAgg==="number"?r.totAgg:null)), [rows]);
@@ -4167,22 +4223,61 @@ function MockInfo({ students, school, bands: defaultBands, specialBands, divisio
   const bulkMockFileRef = useRef();
   const sheetRef = useRef(null);
 
+  // Guards the background refresh below from yanking a value out from under
+  // someone who is actively typing -- same 2.5s "I'm mid-edit" pattern used
+  // by the top-level poll loop for termMarks/monthlyMarks.
+  const mockEditingUntilRef = useRef(0);
+  const lastSeenMockRef = useRef("");
+
   useEffect(() => {
     let alive = true;
-    loadShared("mkis_mock_marks", {}).then(m => { if (alive) { setMockMarks(m||{}); setLoaded(true); } });
+    loadShared("mkis_mock_marks", {}).then(m => {
+      if (!alive) return;
+      const val = m || {};
+      lastSeenMockRef.current = JSON.stringify(val);
+      setMockMarks(val);
+      setLoaded(true);
+    });
     return () => { alive = false; };
   }, []);
 
-  const bands = useMemo(() => bandsForClass(cls, defaultBands, specialBands), [cls, defaultBands, specialBands]);
+  // Background refresh: pick up marks another device/tab has saved while
+  // this page stays open, the same way the rest of the app auto-syncs.
+  // Previously this page only ever loaded once on mount, so a stale local
+  // snapshot could silently overwrite a co-worker's newer entries the next
+  // time anything here was saved -- that's what made entered marks appear
+  // to "disappear".
+  useEffect(() => {
+    const POLL_MS = 4000;
+    let stopped = false;
+    const id = setInterval(async () => {
+      if (stopped) return;
+      if (Date.now() < mockEditingUntilRef.current) return; // mid-edit, don't disturb
+      const remote = await loadShared("mkis_mock_marks", undefined);
+      if (stopped || remote === undefined) return;
+      const remoteStr = JSON.stringify(remote);
+      if (remoteStr !== lastSeenMockRef.current) {
+        lastSeenMockRef.current = remoteStr;
+        setMockMarks(remote);
+      }
+    }, POLL_MS);
+    return () => { stopped = true; clearInterval(id); };
+  }, []);
+
+  const bands = useMemo(() => bandsForClass(cls, defaultBands, specialBands, mockType), [cls, defaultBands, specialBands, mockType]);
   const isLower = LOWER_CLASSES.includes(cls);
   const subjects = isLower ? LOWER_SUBJECTS : UPPER_SUBJECTS;
   const mk = `${mockType}__${year}`;
 
   const updateMockMark = (sid, sub, val) => {
     markEditing && markEditing();
+    mockEditingUntilRef.current = Date.now() + 2500;
     setMockMarks(prev => {
       const next = { ...prev, [sid]: { ...prev[sid], [mk]: { ...prev[sid]?.[mk], [sub]: val } } };
-      saveShared("mkis_mock_marks", next);
+      updateShared("mkis_mock_marks", next).then(merged => {
+        lastSeenMockRef.current = JSON.stringify(merged);
+        setMockMarks(merged);
+      });
       return next;
     });
   };
@@ -4195,16 +4290,23 @@ function MockInfo({ students, school, bands: defaultBands, specialBands, divisio
 
   const resetMockClass = () => {
     markEditing && markEditing();
+    mockEditingUntilRef.current = Date.now() + 2500;
     setMockMarks(prev => {
       const next = { ...prev };
       classStudents.forEach(s => {
         if (next[s.id] && next[s.id][mk]) {
-          const rest = { ...next[s.id] };
-          delete rest[mk];
-          next[s.id] = rest;
+          // Set to null (not delete the key) so the deep-merge below sees an
+          // explicit "cleared" leaf for this branch and actually removes it
+          // remotely too, instead of the key being absent from `local` and
+          // deepMergeObjects leaving whatever the remote still had in place
+          // (which is what made reset marks reappear).
+          next[s.id] = { ...next[s.id], [mk]: null };
         }
       });
-      saveShared("mkis_mock_marks", next);
+      updateShared("mkis_mock_marks", next).then(merged => {
+        lastSeenMockRef.current = JSON.stringify(merged);
+        setMockMarks(merged);
+      });
       return next;
     });
     setShowResetConfirm(false);
@@ -4220,9 +4322,10 @@ function MockInfo({ students, school, bands: defaultBands, specialBands, divisio
       return { sub, exam, agg, isX, max };
     });
     const hasX = perSub.some(p=>p.isX);
+    const hasF9 = !isLower && perSub.some(p=>p.agg===9);
     const totMk = perSub.reduce((a,p)=>a+(p.exam??0),0);
     const totAgg = hasX ? "X" : perSub.reduce((a,p)=>a+(p.agg||0),0);
-    const div = hasX ? "X" : (typeof totAgg==="number" ? divisionOf(totAgg, isLower?5:4, divisions) : "X");
+    const div = hasX ? "X" : (typeof totAgg==="number" ? divisionOf(totAgg, isLower?5:4, divisions, hasF9) : "X");
     return { s, perSub, totMk, totAgg, div, hasX };
   }), [classStudents, mockMarks, mk, subjects, bands, divisions, isLower]);
 
@@ -4591,8 +4694,9 @@ function MonthlyExams({ students, monthlyMarks, updateMonthlyMark, resetMonthlyM
   const tk = `${term}__${year}`;
   const isLower = LOWER_CLASSES.includes(cls);
   const subjects = isLower ? LOWER_MONTHLY_SUBJECTS : MONTHLY_SUBJECTS;
-  // Special Grading Scale override for the selected class, if any.
-  const bands = useMemo(() => bandsForClass(cls, defaultBands, specialBands), [cls, defaultBands, specialBands]);
+  // Special Grading Scale override for the selected class, if any (scoped to
+  // the "Monthly Exams" exam type).
+  const bands = useMemo(() => bandsForClass(cls, defaultBands, specialBands, "Monthly Exams"), [cls, defaultBands, specialBands]);
   // ── Bulk Mark Sheet import: accepts either an uploaded CSV file or a
   // marksheet pasted straight from Excel/Sheets (tab-separated) into a
   // textarea. Both paths flow through the same parser below. ──────────────
@@ -4878,9 +4982,10 @@ function MonthBlock({ month, cls, classStudents, monthlyMarks, updateMonthlyMark
     });
     // X rule: any blank required paper → row is incomplete (aggregates + division = X)
     const hasX = !isLower && perSub.some(p => p.isX);
+    const hasF9 = !isLower && perSub.some(p => p.agg === 9);
     const totMk = perSub.reduce((a,p)=>a+(p.mk??0),0);
     const totAgg = isLower ? null : (hasX ? "X" : perSub.reduce((a,p)=>a+(p.agg??0),0));
-    const div = isLower ? null : (hasX ? "X" : divisionOf(totAgg, 4, divisions));
+    const div = isLower ? null : (hasX ? "X" : divisionOf(totAgg, 4, divisions, hasF9));
     return { s, perSub, totMk, totAgg, div, hasX };
   }), [classStudents, monthlyMarks, tk, month, bands, divisions, subjects, isLower]);
   const positions = useMemo(()=> rankWithTies(rows.map(r=>r.totMk>0?r.totMk:null), rows.map(r=>typeof r.totAgg==="number"?r.totAgg:null)), [rows]);
@@ -5132,9 +5237,10 @@ function GroupWork({ students, groupWork, setGroupWork, bands: defaultBands, spe
       return { sub, mk, agg, isX };
     });
     const hasX = !isLower && perSub.some(p=>p.isX);
+    const hasF9 = !isLower && perSub.some(p=>p.agg===9);
     const totMk = perSub.reduce((a,p)=>a+(p.mk??0),0);
     const totAgg = isLower ? null : (hasX ? "X" : perSub.reduce((a,p)=>a+(p.agg??0),0));
-    const div = isLower ? null : (hasX ? "X" : divisionOf(totAgg, subjects.length, divisions));
+    const div = isLower ? null : (hasX ? "X" : divisionOf(totAgg, subjects.length, divisions, hasF9));
     const memberNames = g.members.map(mid => classStudents.find(s=>s.id===mid)?.name).filter(Boolean);
     return { g, perSub, totMk, totAgg, div, hasX, memberNames };
   }), [groups, testMarks, subjects, isLower, bands, divisions, classStudents]);
@@ -5533,7 +5639,7 @@ function MonthlyCards({ students, monthlyMarks, bands: defaultBands, specialBand
   const isLower = LOWER_CLASSES.includes(cls);
   const subjects = isLower ? LOWER_MONTHLY_SUBJECTS : MONTHLY_SUBJECTS;
   // Special Grading Scale override for the selected class, if any.
-  const bands = useMemo(() => bandsForClass(cls, defaultBands, specialBands), [cls, defaultBands, specialBands]);
+  const bands = useMemo(() => bandsForClass(cls, defaultBands, specialBands, "Monthly Exams"), [cls, defaultBands, specialBands]);
   const tk = `${term}__${year}`;
   const months = TERM_MONTHS[term] || [];
   const classStudents = useMemo(()=>
@@ -5577,9 +5683,10 @@ function MonthlyCards({ students, monthlyMarks, bands: defaultBands, specialBand
       // hasX only meaningful once at least one mark exists for the month
       const anyEntered = perSub.some(p => !p.isX);
       const hasX = !isLower && anyEntered && perSub.some(p => p.isX);
+      const hasF9 = !isLower && anyEntered && perSub.some(p => p.agg === 9);
       const totMk = perSub.reduce((a,p)=>a+(p.mk??0),0);
       const totAgg = isLower ? null : (hasX ? "X" : perSub.reduce((a,p)=>a+(p.agg??0),0));
-      const div = (!isLower && !hasX && totAgg!==null) ? divisionOf(totAgg, 4, divisions) : (hasX ? "X" : null);
+      const div = (!isLower && !hasX && totAgg!==null) ? divisionOf(totAgg, 4, divisions, hasF9) : (hasX ? "X" : null);
       const pos = allMonthPositions[month]?.[s.id];
       return { month, perSub, totMk, totAgg, div, pos, hasX };
     });
@@ -5715,7 +5822,7 @@ function MonthlySlips({ students, monthlyMarks, bands: defaultBands, specialBand
   const isLower = LOWER_CLASSES.includes(cls);
   const subjects = isLower ? LOWER_MONTHLY_SUBJECTS : MONTHLY_SUBJECTS;
   // Special Grading Scale override for the selected class, if any.
-  const bands = useMemo(() => bandsForClass(cls, defaultBands, specialBands), [cls, defaultBands, specialBands]);
+  const bands = useMemo(() => bandsForClass(cls, defaultBands, specialBands, "Monthly Exams"), [cls, defaultBands, specialBands]);
   const tk = `${term}__${year}`;
   const months = TERM_MONTHS[term] || [];
   const classStudents = useMemo(()=>
@@ -5760,9 +5867,10 @@ function MonthlySlips({ students, monthlyMarks, bands: defaultBands, specialBand
       });
       const anyEntered = perSub.some(p => !p.isX);
       const hasX = !isLower && anyEntered && perSub.some(p => p.isX);
+      const hasF9 = !isLower && anyEntered && perSub.some(p => p.agg === 9);
       const totMk = perSub.reduce((a,p)=>a+(p.mk??0),0);
       const totAgg = isLower ? null : (hasX ? "X" : perSub.reduce((a,p)=>a+(p.agg??0),0));
-      const div = (!isLower && !hasX && totAgg!==null) ? divisionOf(totAgg, 4, divisions) : (hasX ? "X" : null);
+      const div = (!isLower && !hasX && totAgg!==null) ? divisionOf(totAgg, 4, divisions, hasF9) : (hasX ? "X" : null);
       const pos = allMonthPositions[month]?.[s.id];
       return { month, perSub, totMk, totAgg, div, pos, hasX };
     });
@@ -7258,7 +7366,7 @@ function ResultSheets({ students, termMarks, bands: defaultBands, specialBands, 
   const isLower = LOWER_CLASSES.includes(cls);
   const subjects = isLower ? LOWER_SUBJECTS : UPPER_SUBJECTS;
   // Special Grading Scale override for the selected class, if any.
-  const bands = useMemo(() => bandsForClass(cls, defaultBands, specialBands), [cls, defaultBands, specialBands]);
+  const bands = useMemo(() => bandsForClass(cls, defaultBands, specialBands, "End of Term"), [cls, defaultBands, specialBands]);
   const tk = `${term}__${year}`;
   const classStudents = useMemo(()=>
     students.filter(s=>s.className===cls).sort((a,b)=>a.name.localeCompare(b.name)),
@@ -7277,9 +7385,10 @@ function ResultSheets({ students, termMarks, bands: defaultBands, specialBands, 
       return {sub,ca,exam,av,agg,isX:false,gradeLabel:gl};
     });
     const hasX=perSub.some(p=>p.isX);
+    const hasF9=!isLower&&perSub.some(p=>p.agg===9);
     const totMk=perSub.reduce((a,p)=>a+(p.av??0),0);
     const totAgg=hasX?"X":perSub.reduce((a,p)=>a+(p.agg||0),0);
-    const div=hasX?"X":(typeof totAgg==="number"?divisionOf(totAgg,isLower?5:4,divisions):"X");
+    const div=hasX?"X":(typeof totAgg==="number"?divisionOf(totAgg,isLower?5:4,divisions,hasF9):"X");
     return {s,perSub,totMk,totAgg,div,hasX};
   }).filter(r=>r.perSub.some(p=>!p.isX)),[classStudents,termMarks,tk,subjects,bands,divisions,isLower]);
   const positions = useMemo(()=>rankWithTies(rows.map(r=>r.totMk>0?r.totMk:null), rows.map(r=>typeof r.totAgg==="number"?r.totAgg:null)),[rows]);
@@ -7459,7 +7568,7 @@ function ReportCards({ students, termMarks, bands: defaultBands, specialBands, d
   const isLower = LOWER_CLASSES.includes(cls);
   const subjects = isLower ? LOWER_SUBJECTS : UPPER_SUBJECTS;
   // Special Grading Scale override for the selected class, if any.
-  const bands = useMemo(() => bandsForClass(cls, defaultBands, specialBands), [cls, defaultBands, specialBands]);
+  const bands = useMemo(() => bandsForClass(cls, defaultBands, specialBands, "End of Term"), [cls, defaultBands, specialBands]);
   const tk = `${term}__${year}`;
   const classStudents = useMemo(()=>
     students.filter(s=>s.className===cls&&s.name.toLowerCase().includes(search.toLowerCase())).sort((a,b)=>a.name.localeCompare(b.name)),
@@ -7477,9 +7586,10 @@ function ReportCards({ students, termMarks, bands: defaultBands, specialBands, d
       return {sub,ca,exam,av,agg,isX:false};
     });
     const hasX=perSub.some(p=>p.isX);
+    const hasF9=!isLower&&perSub.some(p=>p.agg===9);
     const totMk=perSub.reduce((a,p)=>a+(p.av??0),0);
     const totAgg=hasX?"X":perSub.reduce((a,p)=>a+(p.agg||0),0);
-    const div=hasX?"X":(typeof totAgg==="number"?divisionOf(totAgg,isLower?5:4,divisions):"X");
+    const div=hasX?"X":(typeof totAgg==="number"?divisionOf(totAgg,isLower?5:4,divisions,hasF9):"X");
     return {s,perSub,totMk,totAgg,div,hasX};
   }).filter(r=>r.perSub.some(p=>!p.isX)),[classStudents,termMarks,tk,subjects,bands,divisions,isLower]);
   const allClassStudents=useMemo(()=>students.filter(s=>s.className===cls),[students,cls]);
@@ -7982,7 +8092,35 @@ function Settings({ school, setSchool, bands, setBands, specialBands, setSpecial
   const [dangerConfirm, setDangerConfirm] = useState(null); // null | 'students' | 'results' | 'everything'
   const [dangerInput, setDangerInput] = useState("");
   const [specialCls, setSpecialCls] = useState(ALL_CLASSES[0]);
-  const specialScaleActive = Array.isArray(specialBands?.[specialCls]) && specialBands[specialCls].length > 0;
+  // specialBands[cls] can be the legacy bare-array shape (applies to every
+  // exam type) or the current { bands, examTypes } shape -- normalize both
+  // into plain arrays here so the rest of the UI below doesn't need to care.
+  const specialEntry = specialBands?.[specialCls];
+  const specialBandsArr = Array.isArray(specialEntry) ? specialEntry : (specialEntry?.bands || []);
+  const specialExamTypesArr = Array.isArray(specialEntry) ? SPECIAL_SCALE_EXAM_TYPES : (specialEntry?.examTypes || []);
+  const specialScaleActive = Array.isArray(specialBandsArr) && specialBandsArr.length > 0;
+  // Updates just the bands list for the selected class's special scale,
+  // preserving whichever exam types it's currently scoped to.
+  const updateSpecialBands = (updater) => {
+    setSpecialBands(prev => {
+      const cur = prev[specialCls];
+      const curArr = Array.isArray(cur) ? cur : (cur?.bands || []);
+      const curTypes = Array.isArray(cur) ? SPECIAL_SCALE_EXAM_TYPES : (cur?.examTypes || []);
+      return { ...prev, [specialCls]: { bands: updater(curArr), examTypes: curTypes } };
+    });
+  };
+  // Toggles whether one exam type (End of Term / Monthly Exams / Municipal
+  // Mock / TAEB Mock) is covered by the selected class's special scale.
+  const toggleSpecialExamType = (examType) => {
+    markEditing();
+    setSpecialBands(prev => {
+      const cur = prev[specialCls];
+      const curArr = Array.isArray(cur) ? cur : (cur?.bands || []);
+      const curTypes = Array.isArray(cur) ? SPECIAL_SCALE_EXAM_TYPES : (cur?.examTypes || []);
+      const nextTypes = curTypes.includes(examType) ? curTypes.filter(t => t !== examType) : [...curTypes, examType];
+      return { ...prev, [specialCls]: { bands: curArr, examTypes: nextTypes } };
+    });
+  };
   const handlePwChange = () => {
     if (!curPw) { setPwMsg("Enter your current password."); return; }
     if (!newPw) { setPwMsg("Enter new password."); return; }
@@ -8105,36 +8243,52 @@ function Settings({ school, setSchool, bands, setBands, specialBands, setSpecial
       <AccountManager accounts={accounts} setAccounts={setAccounts} currentUser={currentUser} />
       <div style={{background:"white",borderRadius:12,padding:20,border:"1px solid #e5e7eb"}}>
         <h3 style={{margin:"0 0 6px",color:"#1e3a6e",fontSize:15,fontWeight:700}}>🌟 Special Grading Scale</h3>
-        <div style={{fontSize:12,color:"#6b7280",marginBottom:14}}>An optional alternate grading scale for a single class. Pick a class below — if it has a special scale enabled, it's used everywhere for that class (Mark Entry, Monthly Exams, Result Sheets, Report Cards, and their downloads) instead of the standard Grade Bands. Every other class keeps using the standard scale below untouched.</div>
+        <div style={{fontSize:12,color:"#6b7280",marginBottom:14}}>An optional alternate grading scale for a single class. Pick a class below — if it has a special scale enabled, tick which exam types it should apply to. Only those exam types use the special scale for this class; every exam type left unticked (and every other class) keeps using the standard Grade Bands below.</div>
         <div style={{display:"flex",gap:10,alignItems:"flex-end",marginBottom:14,flexWrap:"wrap"}}>
           <Sel label="Class" value={specialCls} onChange={setSpecialCls} opts={ALL_CLASSES}/>
           {specialScaleActive
             ? <button onClick={()=>{ markEditing(); setSpecialBands(prev=>({...prev,[specialCls]:undefined})); }} style={{...btnDanger,padding:"8px 14px",fontSize:12,alignSelf:"flex-end"}}>✕ Disable for {specialCls}</button>
-            : <button onClick={()=>{ markEditing(); setSpecialBands(prev=>({...prev,[specialCls]: bands.map(b=>({...b}))})); }} style={{...btnPrimary,padding:"8px 14px",fontSize:12,alignSelf:"flex-end"}}>+ Enable Special Grading Scale for {specialCls}</button>
+            : <button onClick={()=>{ markEditing(); setSpecialBands(prev=>({...prev,[specialCls]: { bands: bands.map(b=>({...b})), examTypes: [...SPECIAL_SCALE_EXAM_TYPES] } })); }} style={{...btnPrimary,padding:"8px 14px",fontSize:12,alignSelf:"flex-end"}}>+ Enable Special Grading Scale for {specialCls}</button>
           }
         </div>
         {specialScaleActive ? (
-          <div style={{overflowX:"auto"}}>
-            <table style={{width:"100%",fontSize:13}}>
-              <thead><tr style={{background:"#fef3c7"}}>{["Min","Max","Grade","Label",""].map(h=><th key={h} style={{padding:"8px 10px",textAlign:"left",color:"#92400e",fontWeight:700}}>{h}</th>)}</tr></thead>
-              <tbody>
-                {specialBands[specialCls].map((b,i)=>(
-                  <tr key={i} style={{background:i%2===0?"white":"#fffbeb"}}>
-                    {["min","max","grade","label"].map(f=>(
-                      <td key={f} style={{padding:"4px 6px"}}>
-                        <input value={b[f]} onChange={e=>{
-                          const val = f==="min"||f==="max" ? Number(e.target.value) : e.target.value;
-                          setSpecialBands(prev=>({...prev,[specialCls]: prev[specialCls].map((x,j)=>j===i?{...x,[f]:val}:x)}));
-                        }} style={{...inp,width:f==="label"?120:70,padding:"4px 6px",fontSize:12}}/>
-                      </td>
-                    ))}
-                    <td style={{padding:"4px 6px"}}><button onClick={()=>setSpecialBands(prev=>({...prev,[specialCls]: prev[specialCls].filter((_,j)=>j!==i)}))} style={{...btnDanger,padding:"3px 8px",fontSize:11}}>✕</button></td>
-                  </tr>
+          <>
+            <div style={{marginBottom:14}}>
+              <div style={{fontSize:12,fontWeight:700,color:"#92400e",marginBottom:6}}>Applies to these exam types for {specialCls}:</div>
+              <div style={{display:"flex",gap:14,flexWrap:"wrap"}}>
+                {SPECIAL_SCALE_EXAM_TYPES.map(et=>(
+                  <label key={et} style={{display:"flex",alignItems:"center",gap:6,fontSize:13,cursor:"pointer"}}>
+                    <input type="checkbox" checked={specialExamTypesArr.includes(et)} onChange={()=>toggleSpecialExamType(et)}/>
+                    {et}
+                  </label>
                 ))}
-              </tbody>
-            </table>
-            <button onClick={()=>setSpecialBands(prev=>({...prev,[specialCls]: [...prev[specialCls],{min:0,max:0,grade:"",label:""}]}))} style={{...btnGhost,marginTop:8,fontSize:12}}>+ Add Band</button>
-          </div>
+              </div>
+              {specialExamTypesArr.length===0 && (
+                <div style={{fontSize:12,color:"#dc2626",marginTop:6}}>No exam types selected — {specialCls} will use the standard Grade Bands everywhere until at least one is ticked.</div>
+              )}
+            </div>
+            <div style={{overflowX:"auto"}}>
+              <table style={{width:"100%",fontSize:13}}>
+                <thead><tr style={{background:"#fef3c7"}}>{["Min","Max","Grade","Label",""].map(h=><th key={h} style={{padding:"8px 10px",textAlign:"left",color:"#92400e",fontWeight:700}}>{h}</th>)}</tr></thead>
+                <tbody>
+                  {specialBandsArr.map((b,i)=>(
+                    <tr key={i} style={{background:i%2===0?"white":"#fffbeb"}}>
+                      {["min","max","grade","label"].map(f=>(
+                        <td key={f} style={{padding:"4px 6px"}}>
+                          <input value={b[f]} onChange={e=>{
+                            const val = f==="min"||f==="max" ? Number(e.target.value) : e.target.value;
+                            updateSpecialBands(arr => arr.map((x,j)=>j===i?{...x,[f]:val}:x));
+                          }} style={{...inp,width:f==="label"?120:70,padding:"4px 6px",fontSize:12}}/>
+                        </td>
+                      ))}
+                      <td style={{padding:"4px 6px"}}><button onClick={()=>updateSpecialBands(arr => arr.filter((_,j)=>j!==i))} style={{...btnDanger,padding:"3px 8px",fontSize:11}}>✕</button></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <button onClick={()=>updateSpecialBands(arr => [...arr,{min:0,max:0,grade:"",label:""}])} style={{...btnGhost,marginTop:8,fontSize:12}}>+ Add Band</button>
+            </div>
+          </>
         ) : (
           <div style={{fontSize:12,color:"#9ca3af",fontStyle:"italic",padding:"10px 12px",background:"#f9fafb",borderRadius:8}}>No special grading scale set for {specialCls}. It currently follows the standard Grade Bands below.</div>
         )}
