@@ -1646,6 +1646,82 @@ function PositionBadge({ pos, color = "#dc2626", size = 15 }) {
     </span>
   );
 }
+// ── Transfer Result modal ────────────────────────────────────────────────
+// Reusable "From ➜ To" picker used by Mark Entry, Monthly Exams, Group Work
+// and Mock Info to copy one class's saved results from one period into
+// another (e.g. Term I 2026 into Term II 2026, or FEB into JUL). `fields`
+// describes each period picker: [{ key, label, type:"select"|"text", options
+// (array OR a function of the current from/to values, for dependent fields
+// like Month depending on Term) }]. Values are plain objects keyed by field
+// key; initialFrom/initialTo seed the two sides. onConfirm(fromValues,
+// toValues) performs the actual copy and is expected to close the modal.
+function normalizeTransferValues(vals, fields) {
+  const v = { ...vals };
+  fields.forEach(f => {
+    if (f.type === "text") return;
+    const opts = typeof f.options === "function" ? f.options(v) : f.options;
+    if (opts && opts.length && !opts.includes(v[f.key])) v[f.key] = opts[0];
+  });
+  return v;
+}
+function TransferResultModal({ title, note, fields, initialFrom, initialTo, onConfirm, onClose }) {
+  const [from, setFrom] = useState(() => normalizeTransferValues(initialFrom, fields));
+  const [to, setTo] = useState(() => normalizeTransferValues(initialTo, fields));
+  const [confirming, setConfirming] = useState(false);
+  const sameSelection = JSON.stringify(from) === JSON.stringify(to);
+  const renderField = (f, vals, setVals) => (
+    <div key={f.key} style={{marginBottom:10}}>
+      <label style={lbl}>{f.label}</label>
+      {f.type === "text"
+        ? <input value={vals[f.key]} onChange={e=>setVals(v=>normalizeTransferValues({...v,[f.key]:e.target.value}, fields))} style={{...inp,width:"100%",boxSizing:"border-box"}}/>
+        : <select value={vals[f.key]} onChange={e=>setVals(v=>normalizeTransferValues({...v,[f.key]:e.target.value}, fields))} style={{...inp,width:"100%",boxSizing:"border-box"}}>
+            {(typeof f.options==="function" ? f.options(vals) : f.options).map(o=><option key={o} value={o}>{o}</option>)}
+          </select>}
+    </div>
+  );
+  return (
+    <div style={{position:"fixed",inset:0,background:"rgba(15,23,42,0.55)",zIndex:4000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={onClose}>
+      <div onClick={e=>e.stopPropagation()} style={{background:"white",borderRadius:14,padding:22,maxWidth:460,width:"100%",boxShadow:"0 20px 60px rgba(0,0,0,0.35)",maxHeight:"90vh",overflowY:"auto"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:4}}>
+          <h3 style={{margin:0,color:"#1e3a6e",fontSize:16}}>🔀 {title}</h3>
+          <button onClick={onClose} style={{...btnGhost,padding:"4px 10px",fontSize:12}}>✕</button>
+        </div>
+        {note && <div style={{fontSize:12,color:"#6b7280",margin:"6px 0 16px",lineHeight:1.5}}>{note}</div>}
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
+          <div>
+            <div style={{fontWeight:700,fontSize:11,color:"#374151",marginBottom:8,textTransform:"uppercase",letterSpacing:0.5}}>From</div>
+            {fields.map(f=>renderField(f, from, setFrom))}
+          </div>
+          <div>
+            <div style={{fontWeight:700,fontSize:11,color:"#374151",marginBottom:8,textTransform:"uppercase",letterSpacing:0.5}}>To</div>
+            {fields.map(f=>renderField(f, to, setTo))}
+          </div>
+        </div>
+        {sameSelection && (
+          <div style={{fontSize:12,color:"#b45309",background:"#fffbeb",border:"1px solid #fde68a",borderRadius:8,padding:"8px 10px",marginTop:4,marginBottom:4}}>
+            ⚠️ "From" and "To" are the same — pick a different destination.
+          </div>
+        )}
+        {!confirming ? (
+          <div style={{display:"flex",gap:10,justifyContent:"flex-end",marginTop:16}}>
+            <button onClick={onClose} style={btnGhost}>Cancel</button>
+            <button disabled={sameSelection} onClick={()=>setConfirming(true)} style={{...btnPrimary,opacity:sameSelection?0.5:1}}>🔀 Transfer Result</button>
+          </div>
+        ) : (
+          <div style={{marginTop:16,background:"#fef2f2",border:"1px solid #fca5a5",borderRadius:8,padding:12}}>
+            <div style={{fontSize:12,color:"#991b1b",marginBottom:10,lineHeight:1.5}}>
+              This will overwrite any existing results at the destination with the results being copied from the source. This can't be undone. Continue?
+            </div>
+            <div style={{display:"flex",gap:8}}>
+              <button onClick={()=>onConfirm(from, to)} style={btnDanger}>Yes, Transfer</button>
+              <button onClick={()=>setConfirming(false)} style={btnGhost}>Back</button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 // ─── OCR (Optical Character Recognition) ────────────────────────────────────
 // Tesseract.js is loaded lazily from a CDN the first time OCR is actually
 // used, instead of being bundled -- most sessions never touch OCR, so this
@@ -2225,6 +2301,42 @@ export default function App() {
       [sid]: { ...prev[sid], [tk]: { ...prev[sid]?.[tk], [month]: { ...prev[sid]?.[tk]?.[month], [sub]: { ...prev[sid]?.[tk]?.[month]?.[sub], [field]: val } } } }
     }));
   }, [students]);
+  // ── Transfer Result: copies one class's marks from a source period into a
+  // destination period, overwriting whatever's already there at the
+  // destination. Used to move results between terms/years/months (e.g. Feb
+  // marks copied into July, or one term's exam marks copied into another).
+  const transferTermMarks = useCallback((cls, fromTk, toTk) => {
+    markEditing();
+    const [fTerm, fYear] = fromTk.split("__");
+    const [tTerm, tYear] = toTk.split("__");
+    stampAudit("mkis_termmarks", `Term marks TRANSFERRED — ${cls} ${fTerm} ${fYear} → ${tTerm} ${tYear}`);
+    setTermMarks(prev => {
+      const next = { ...prev };
+      students.filter(s=>s.className===cls).forEach(s => {
+        const src = prev[s.id]?.[fromTk];
+        if (src !== undefined) {
+          next[s.id] = { ...next[s.id], [toTk]: src };
+        }
+      });
+      return next;
+    });
+  }, [students]);
+  const transferMonthlyMarks = useCallback((cls, fromTk, fromMonth, toTk, toMonth) => {
+    markEditing();
+    const [fTerm, fYear] = fromTk.split("__");
+    const [tTerm, tYear] = toTk.split("__");
+    stampAudit("mkis_monthlymarks", `Monthly marks TRANSFERRED — ${cls} ${fromMonth} ${fTerm} ${fYear} → ${toMonth} ${tTerm} ${tYear}`);
+    setMonthlyMarks(prev => {
+      const next = { ...prev };
+      students.filter(s=>s.className===cls).forEach(s => {
+        const src = prev[s.id]?.[fromTk]?.[fromMonth];
+        if (src !== undefined) {
+          next[s.id] = { ...next[s.id], [toTk]: { ...next[s.id]?.[toTk], [toMonth]: src } };
+        }
+      });
+      return next;
+    });
+  }, [students]);
   const resetMonthlyMonth = useCallback((cls, tk, month) => {
     markEditing();
     const [term, year] = tk.split("__");
@@ -2617,7 +2729,7 @@ export default function App() {
       </div>
     );
   }
-  const props = { students, setStudents, termMarks, setTermMarks, monthlyMarks, setMonthlyMarks, groupWork, setGroupWork, municipalPerf, setMunicipalPerf, examTimetable, setExamTimetable, bands, setBands, specialBands, setSpecialBands, divisions, setDivisions, school, setSchool, accounts, setAccounts, initials, setInitials, updateTermMark, updateMonthlyMark, resetMonthlyMonth, restoreMonthlyMonth, monthlyResetBackups, resetTermClass, restoreTermClass, termResetBackups, requestOrApplyTermMark, requestOrApplyMonthlyMark, addStudent, deleteStudent, dangerDeleteAllStudents, dangerDeleteAllResults, dangerResetEverything, forceRestoreData, promoteStudents, demoteStudents, openPupilProfile, role, currentUser, changeRequests, submitChangeRequest, approveChangeRequest, rejectChangeRequest, lockedTerm, lockTermEntry, unlockTermEntry, lockedMonthly, lockMonthlyEntry, unlockMonthlyEntry, requestUnlockTerm, requestUnlockMonthly, markEditing, stampAudit, dashboardPerfTerm, setDashboardPerfTerm, dashboardPerfYear, setDashboardPerfYear };
+  const props = { students, setStudents, termMarks, setTermMarks, monthlyMarks, setMonthlyMarks, groupWork, setGroupWork, municipalPerf, setMunicipalPerf, examTimetable, setExamTimetable, bands, setBands, specialBands, setSpecialBands, divisions, setDivisions, school, setSchool, accounts, setAccounts, initials, setInitials, updateTermMark, updateMonthlyMark, transferTermMarks, transferMonthlyMarks, resetMonthlyMonth, restoreMonthlyMonth, monthlyResetBackups, resetTermClass, restoreTermClass, termResetBackups, requestOrApplyTermMark, requestOrApplyMonthlyMark, addStudent, deleteStudent, dangerDeleteAllStudents, dangerDeleteAllResults, dangerResetEverything, forceRestoreData, promoteStudents, demoteStudents, openPupilProfile, role, currentUser, changeRequests, submitChangeRequest, approveChangeRequest, rejectChangeRequest, lockedTerm, lockTermEntry, unlockTermEntry, lockedMonthly, lockMonthlyEntry, unlockMonthlyEntry, requestUnlockTerm, requestUnlockMonthly, markEditing, stampAudit, dashboardPerfTerm, setDashboardPerfTerm, dashboardPerfYear, setDashboardPerfYear };
   return (
     <div className="app-shell" style={{display:"flex",minHeight:"100vh",fontFamily:"'Segoe UI',system-ui,sans-serif",background:"#f1f5f9"}}>
       {/* SIDEBAR */}
@@ -3778,11 +3890,12 @@ function SweepingRota({ students, school, markEditing }) {
   );
 }
 // ─── MARK ENTRY ──────────────────────────────────────────────────────────────
-function MarkEntry({ students, termMarks, setTermMarks, updateTermMark, requestOrApplyTermMark, role, bands: defaultBands, specialBands, divisions, school, lockedTerm, lockTermEntry, unlockTermEntry, changeRequests, requestUnlockTerm, resetTermClass, restoreTermClass, termResetBackups }) {
+function MarkEntry({ students, termMarks, setTermMarks, updateTermMark, transferTermMarks, requestOrApplyTermMark, role, bands: defaultBands, specialBands, divisions, school, lockedTerm, lockTermEntry, unlockTermEntry, changeRequests, requestUnlockTerm, resetTermClass, restoreTermClass, termResetBackups }) {
   const [cls, setCls] = useState("P1");
   const [term, setTerm] = useState("Term I");
   const [year, setYear] = useState(school.year||String(new Date().getFullYear()));
   const [showBulkMark, setShowBulkMark] = useState(false);
+  const [showTransfer, setShowTransfer] = useState(false);
   const [bulkMarkPreview, setBulkMarkPreview] = useState(null);
   const [bulkMarkError, setBulkMarkError] = useState("");
   const [pendingToast, setPendingToast] = useState("");
@@ -4027,6 +4140,7 @@ function MarkEntry({ students, termMarks, setTermMarks, updateTermMark, requestO
             {sortByPos ? "🔤 Show A–Z" : "📊 Sort Highest → Lowest"}
           </button>
           <button onClick={()=>setShowBulkMark(v=>!v)} style={btnWarning}>📋 Bulk Mark Sheet</button>
+          <button onClick={()=>setShowTransfer(true)} style={btnGhost} title={`Copy ${cls}'s saved results from one term/year into another`}>🔀 Transfer Result</button>
           {role==="admin" && (
             <button onClick={handleReset} style={{padding:"8px 16px",fontSize:13,background:"#fee2e2",color:"#991b1b",border:"none",borderRadius:8,fontWeight:700,cursor:"pointer"}} title={`Clear all ${term} ${year} marks for ${cls} back to blank`}>
               ♻️ Reset
@@ -4207,6 +4321,25 @@ function MarkEntry({ students, termMarks, setTermMarks, updateTermMark, requestO
           </tbody>
         </table>
       </div>
+      {showTransfer && (
+        <TransferResultModal
+          title={`Transfer Result — ${cls}`}
+          note={`Copies every ${cls} pupil's saved marks from the "From" term/year into the "To" term/year, overwriting anything already there.`}
+          fields={[
+            { key:"term", label:"Term", options: TERMS },
+            { key:"year", label:"Year", type:"text" },
+          ]}
+          initialFrom={{ term, year }}
+          initialTo={{ term, year }}
+          onClose={()=>setShowTransfer(false)}
+          onConfirm={(from, to)=>{
+            transferTermMarks(cls, `${from.term}__${from.year}`, `${to.term}__${to.year}`);
+            setShowTransfer(false);
+            setPendingToast(`${cls} marks transferred from ${from.term} ${from.year} to ${to.term} ${to.year}.`);
+            setTimeout(()=>setPendingToast(""), 4000);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -4222,6 +4355,7 @@ function MockInfo({ students, school, bands: defaultBands, specialBands, divisio
   const [pdfBusy, setPdfBusy] = useState(false);
   const [showResults, setShowResults] = useState(true);
   const [showBulkMock, setShowBulkMock] = useState(false);
+  const [showTransfer, setShowTransfer] = useState(false);
   const [bulkMockPreview, setBulkMockPreview] = useState(null);
   const [bulkMockError, setBulkMockError] = useState("");
   const [bulkMockPastedText, setBulkMockPastedText] = useState("");
@@ -4315,6 +4449,29 @@ function MockInfo({ students, school, bands: defaultBands, specialBands, divisio
       return next;
     });
     setShowResetConfirm(false);
+  };
+
+  // Copies one mock exam/year's saved marks for the current class into a
+  // different mock exam type and/or year, overwriting anything already
+  // saved at the destination (e.g. copying TAEB Mock into Municipal Mock,
+  // or last year's mock into this year's).
+  const transferMockMarks = (fromMk, toMk) => {
+    markEditing && markEditing();
+    mockEditingUntilRef.current = Date.now() + 2500;
+    setMockMarks(prev => {
+      const next = { ...prev };
+      classStudents.forEach(s => {
+        const src = prev[s.id]?.[fromMk];
+        if (src !== undefined && src !== null) {
+          next[s.id] = { ...next[s.id], [toMk]: src };
+        }
+      });
+      updateShared("mkis_mock_marks", next).then(merged => {
+        lastSeenMockRef.current = JSON.stringify(merged);
+        setMockMarks(merged);
+      });
+      return next;
+    });
   };
 
   const rows = useMemo(() => classStudents.map(s => {
@@ -4502,6 +4659,7 @@ function MockInfo({ students, school, bands: defaultBands, specialBands, divisio
             {showResults ? "🙈 Hide Results (Blank Sheet)" : "👁️ Show Results"}
           </button>
           <button onClick={()=>setShowBulkMock(v=>!v)} style={btnWarning}>📋 Bulk Upload Results</button>
+          <button onClick={()=>setShowTransfer(true)} style={btnGhost} title={`Copy ${cls}'s saved mock results from one mock/year into another`}>🔀 Transfer Result</button>
           <button onClick={exportMockWord} style={btnWord}>📄 Export Word</button>
           <button onClick={exportMockExcel} style={{...btnPrimary,background:"linear-gradient(135deg,#15803d,#16a34a)"}}>📊 Export Excel</button>
           <button disabled={pdfBusy} onClick={async()=>{
@@ -4683,15 +4841,33 @@ function MockInfo({ students, school, bands: defaultBands, specialBands, divisio
           </div>
         </div>
       )}
+      {showTransfer && (
+        <TransferResultModal
+          title={`Transfer Result — ${cls}`}
+          note={`Copies every ${cls} pupil's saved results from the "From" mock exam/year into the "To" mock exam/year, overwriting anything already there.`}
+          fields={[
+            { key:"mockType", label:"Mock Exam", options: MOCK_TYPES },
+            { key:"year", label:"Year", type:"text" },
+          ]}
+          initialFrom={{ mockType, year }}
+          initialTo={{ mockType, year }}
+          onClose={()=>setShowTransfer(false)}
+          onConfirm={(from, to)=>{
+            transferMockMarks(`${from.mockType}__${from.year}`, `${to.mockType}__${to.year}`);
+            setShowTransfer(false);
+          }}
+        />
+      )}
     </div>
   );
 }
 // ─── MONTHLY EXAMS ───────────────────────────────────────────────────────────
-function MonthlyExams({ students, monthlyMarks, updateMonthlyMark, resetMonthlyMonth, restoreMonthlyMonth, monthlyResetBackups, requestOrApplyMonthlyMark, role, bands: defaultBands, specialBands, divisions, school, lockedMonthly, lockMonthlyEntry, unlockMonthlyEntry, changeRequests, requestUnlockMonthly }) {
+function MonthlyExams({ students, monthlyMarks, updateMonthlyMark, transferMonthlyMarks, resetMonthlyMonth, restoreMonthlyMonth, monthlyResetBackups, requestOrApplyMonthlyMark, role, bands: defaultBands, specialBands, divisions, school, lockedMonthly, lockMonthlyEntry, unlockMonthlyEntry, changeRequests, requestUnlockMonthly }) {
   const [cls, setCls] = useState("P4");
   const [term, setTerm] = useState("Term I");
   const [year, setYear] = useState(school.year||String(new Date().getFullYear()));
   const [pendingToast, setPendingToast] = useState("");
+  const [showTransfer, setShowTransfer] = useState(false);
   const [pdfBusy, setPdfBusy] = useState(false);
   const [search, setSearch] = useState("");
   const monthBlocksRef = useRef(null);
@@ -4848,6 +5024,7 @@ function MonthlyExams({ students, monthlyMarks, updateMonthlyMark, resetMonthlyM
         <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
           <span style={{background:"#dbeafe",color:"#1e40af",borderRadius:20,padding:"4px 12px",fontSize:12,fontWeight:700,alignSelf:"center"}}>{cls} - {classStudents.length} students</span>
           <button onClick={()=>setShowBulkMonthly(v=>!v)} style={btnWarning}>📋 Bulk Mark Sheet</button>
+          <button onClick={()=>setShowTransfer(true)} style={btnGhost} title={`Copy ${cls}'s saved results from one month/term/year into another`}>🔀 Transfer Result</button>
           <button onClick={()=>exportMonthlyExcel({ school, cls, term, year, isLower, subjects, monthsData: getMonthsData() })} style={btnExcel}>📊 Download Excel</button>
           <button onClick={()=>exportMonthlyWord({ school, cls, term, year, isLower, subjects, monthsData: getMonthsData() })} style={btnWord}>📄 Download Word</button>
           <button disabled={pdfBusy} onClick={async()=>{
@@ -4971,6 +5148,26 @@ function MonthlyExams({ students, monthlyMarks, updateMonthlyMark, resetMonthlyM
             changeRequests={changeRequests} requestUnlockMonthly={requestUnlockMonthly} />
         ))}
       </div>
+      {showTransfer && (
+        <TransferResultModal
+          title={`Transfer Result — ${cls}`}
+          note={`Copies every ${cls} pupil's saved monthly-exam marks from the "From" month into the "To" month, overwriting anything already there. Works across different terms and years too — e.g. FEB into JUL.`}
+          fields={[
+            { key:"term", label:"Term", options: TERMS },
+            { key:"month", label:"Month", options: (v)=>TERM_MONTHS[v.term]||[] },
+            { key:"year", label:"Year", type:"text" },
+          ]}
+          initialFrom={{ term, month: months[0], year }}
+          initialTo={{ term, month: months[0], year }}
+          onClose={()=>setShowTransfer(false)}
+          onConfirm={(from, to)=>{
+            transferMonthlyMarks(cls, `${from.term}__${from.year}`, from.month, `${to.term}__${to.year}`, to.month);
+            setShowTransfer(false);
+            setPendingToast(`${cls} marks transferred from ${from.month} ${from.term} ${from.year} to ${to.month} ${to.term} ${to.year}.`);
+            setTimeout(()=>setPendingToast(""), 4000);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -5175,6 +5372,7 @@ function GroupWork({ students, groupWork, setGroupWork, bands: defaultBands, spe
   const [year, setYear] = useState(school.year||String(new Date().getFullYear()));
   const [testNo, setTestNo] = useState(GROUP_TEST_OPTIONS[0]);
   const [viewMode, setViewMode] = useState("single"); // single | analysis
+  const [showTransfer, setShowTransfer] = useState(false);
   const [pdfBusy, setPdfBusy] = useState(false);
   const [analysisPdfBusy, setAnalysisPdfBusy] = useState(false);
   const cardRef = useRef(null);
@@ -5233,6 +5431,22 @@ function GroupWork({ students, groupWork, setGroupWork, bands: defaultBands, spe
     }));
   };
 
+  // Copies one Test No.'s group marks from a source term/year into a
+  // destination term/year+test slot. If the destination period doesn't have
+  // its own groups set up yet, the source period's group roster is carried
+  // over too, so the copied marks (keyed by group id) line up correctly.
+  const transferGroupWork = useCallback((fromTk, fromTestNo, toTk, toTestNo) => {
+    markEditing();
+    setGroupWork(prev => {
+      const clsData = prev[cls] || {};
+      const srcPeriod = clsData[fromTk] || { groups: [], marks: {} };
+      const srcMarks = srcPeriod.marks?.[fromTestNo] || {};
+      const destPeriod = clsData[toTk] || { groups: [], marks: {} };
+      const destGroups = (destPeriod.groups && destPeriod.groups.length > 0) ? destPeriod.groups : srcPeriod.groups;
+      const newPeriod = { ...destPeriod, groups: destGroups, marks: { ...(destPeriod.marks||{}), [toTestNo]: srcMarks } };
+      return { ...prev, [cls]: { ...clsData, [toTk]: newPeriod } };
+    });
+  }, [cls, markEditing, setGroupWork]);
   const rows = useMemo(()=> groups.map(g => {
     const m = testMarks[g.id] || {};
     const perSub = subjects.map(sub => {
@@ -5307,6 +5521,7 @@ function GroupWork({ students, groupWork, setGroupWork, bands: defaultBands, spe
         </div>
         <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
           <button onClick={addGroup} style={btnPrimary}>+ Add Group</button>
+          <button onClick={()=>setShowTransfer(true)} style={btnGhost} title={`Copy ${cls}'s saved group-work results from one test/term/year into another`}>🔀 Transfer Result</button>
           {viewMode==="single" ? (
             <>
               <button onClick={()=>exportGroupWorkWord({ school, cls, term, year, testNo, isLower, subjects, sortedRows })} style={btnWord}>📄 Download Word</button>
@@ -5440,6 +5655,24 @@ function GroupWork({ students, groupWork, setGroupWork, bands: defaultBands, spe
             </table>
           </div>
         </div>
+      )}
+      {showTransfer && (
+        <TransferResultModal
+          title={`Transfer Result — ${cls}`}
+          note={`Copies every ${cls} group's saved marks for the "From" test/term/year into the "To" test/term/year, overwriting anything already there. If the destination term/year has no groups set up yet, the source's group roster is copied over too.`}
+          fields={[
+            { key:"testNo", label:"Test No.", options: GROUP_TEST_OPTIONS },
+            { key:"term", label:"Term", options: TERMS },
+            { key:"year", label:"Year", type:"text" },
+          ]}
+          initialFrom={{ testNo, term, year }}
+          initialTo={{ testNo, term, year }}
+          onClose={()=>setShowTransfer(false)}
+          onConfirm={(from, to)=>{
+            transferGroupWork(`${from.term}__${from.year}`, from.testNo, `${to.term}__${to.year}`, to.testNo);
+            setShowTransfer(false);
+          }}
+        />
       )}
     </div>
   );
