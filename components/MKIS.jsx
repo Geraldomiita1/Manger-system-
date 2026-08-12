@@ -1646,6 +1646,26 @@ function PositionBadge({ pos, color = "#dc2626", size = 15 }) {
     </span>
   );
 }
+// ── Generic in-app confirmation modal ────────────────────────────────────
+// Used in place of window.confirm() everywhere in the app: the browser's
+// native confirm() always prefixes its popup with "<site address> says",
+// which can't be customized or removed by any JS in the page. This modal
+// looks and behaves the same (message + Cancel/Confirm) but is drawn by the
+// app itself, so no browser chrome or site address ever appears in it.
+function ConfirmModal({ title, message, confirmLabel = "Confirm", danger = true, onConfirm, onCancel }) {
+  return (
+    <div style={{position:"fixed",inset:0,background:"rgba(15,23,42,0.55)",zIndex:4000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={onCancel}>
+      <div onClick={e=>e.stopPropagation()} style={{background:"white",borderRadius:14,padding:24,maxWidth:400,width:"100%",boxShadow:"0 20px 60px rgba(0,0,0,0.35)"}}>
+        {title && <h3 style={{margin:"0 0 10px",color:danger?"#dc2626":"#1e3a6e",fontSize:16}}>{title}</h3>}
+        <div style={{fontSize:13,color:"#374151",lineHeight:1.6,marginBottom:20}}>{message}</div>
+        <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}>
+          <button onClick={onCancel} style={btnGhost}>Cancel</button>
+          <button onClick={onConfirm} style={danger?btnDanger:btnPrimary}>{confirmLabel}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
 // ── Transfer Result modal ────────────────────────────────────────────────
 // Reusable "From ➜ To" picker used by Mark Entry, Monthly Exams, Group Work
 // and Mock Info to copy one class's saved results from one period into
@@ -3234,6 +3254,8 @@ function Students({ students, setStudents, addStudent, deleteStudent, promoteStu
   const [demoteClass, setDemoteClass] = useState("P2");
   const [showDemote, setShowDemote] = useState(false);
   const [demoteSelectedIds, setDemoteSelectedIds] = useState(() => new Set());
+  const [confirmPromote, setConfirmPromote] = useState(false);
+  const [confirmDemote, setConfirmDemote] = useState(false);
   const [editId, setEditId] = useState(null);
   const [editName, setEditName] = useState("");
   const [editCls, setEditCls] = useState("P1");
@@ -3407,7 +3429,7 @@ function Students({ students, setStudents, addStudent, deleteStudent, promoteStu
           </div>
           <div style={{display:"flex",gap:10}}>
             <button
-              onClick={()=>{ if(promoteSelectedIds.size>0 && window.confirm(`Promote ${promoteSelectedIds.size} learner(s) from ${promoteClass} to ${PROMOTE_TARGET[promoteClass]}?`)){promoteStudents(promoteClass, Array.from(promoteSelectedIds));setShowPromote(false);} }}
+              onClick={()=>{ if(promoteSelectedIds.size>0) setConfirmPromote(true); }}
               disabled={promoteSelectedIds.size===0}
               style={{...btnPrimary,opacity:promoteSelectedIds.size===0?0.5:1}}>
               Confirm Promote ({promoteSelectedIds.size})
@@ -3442,7 +3464,7 @@ function Students({ students, setStudents, addStudent, deleteStudent, promoteStu
           </div>
           <div style={{display:"flex",gap:10}}>
             <button
-              onClick={()=>{ if(demoteSelectedIds.size>0 && window.confirm(`Demote ${demoteSelectedIds.size} learner(s) from ${demoteClass} to ${DEMOTE_TARGET[demoteClass]}?`)){demoteStudents(demoteClass, Array.from(demoteSelectedIds));setShowDemote(false);} }}
+              onClick={()=>{ if(demoteSelectedIds.size>0) setConfirmDemote(true); }}
               disabled={demoteSelectedIds.size===0}
               style={{...btnDanger,opacity:demoteSelectedIds.size===0?0.5:1}}>
               Confirm Demote ({demoteSelectedIds.size})
@@ -3511,6 +3533,25 @@ function Students({ students, setStudents, addStudent, deleteStudent, promoteStu
             </div>
           </div>
         </div>
+      )}
+      {confirmPromote && (
+        <ConfirmModal
+          title="Promote Learners"
+          message={`Promote ${promoteSelectedIds.size} learner(s) from ${promoteClass} to ${PROMOTE_TARGET[promoteClass]}?`}
+          confirmLabel={`Promote (${promoteSelectedIds.size})`}
+          danger={false}
+          onCancel={()=>setConfirmPromote(false)}
+          onConfirm={()=>{ promoteStudents(promoteClass, Array.from(promoteSelectedIds)); setShowPromote(false); setConfirmPromote(false); }}
+        />
+      )}
+      {confirmDemote && (
+        <ConfirmModal
+          title="Demote Learners"
+          message={`Demote ${demoteSelectedIds.size} learner(s) from ${demoteClass} to ${DEMOTE_TARGET[demoteClass]}?`}
+          confirmLabel={`Demote (${demoteSelectedIds.size})`}
+          onCancel={()=>setConfirmDemote(false)}
+          onConfirm={()=>{ demoteStudents(demoteClass, Array.from(demoteSelectedIds)); setShowDemote(false); setConfirmDemote(false); }}
+        />
       )}
     </div>
   );
@@ -3771,8 +3812,11 @@ function SweepingRota({ students, school, markEditing }) {
     persist({ ...rotas, [rotaId]: { ...current, schedule, updatedAt:new Date().toISOString() } });
   };
 
-  const deleteRota = (id) => {
-    if (!window.confirm("Delete this sweeping rota? This cannot be undone.")) return;
+  const [confirmDeleteRotaId, setConfirmDeleteRotaId] = useState(null);
+  const deleteRota = (id) => setConfirmDeleteRotaId(id);
+  const confirmDeleteRota = () => {
+    const id = confirmDeleteRotaId;
+    setConfirmDeleteRotaId(null);
     const next = { ...rotas };
     delete next[id];
     persist(next);
@@ -3886,6 +3930,15 @@ function SweepingRota({ students, school, markEditing }) {
           </div>
         ))}
       </div>
+      {confirmDeleteRotaId && (
+        <ConfirmModal
+          title="Delete Sweeping Rota"
+          message="Delete this sweeping rota? This cannot be undone."
+          confirmLabel="Delete"
+          onCancel={()=>setConfirmDeleteRotaId(null)}
+          onConfirm={confirmDeleteRota}
+        />
+      )}
     </div>
   );
 }
@@ -3896,6 +3949,7 @@ function MarkEntry({ students, termMarks, setTermMarks, updateTermMark, transfer
   const [year, setYear] = useState(school.year||String(new Date().getFullYear()));
   const [showBulkMark, setShowBulkMark] = useState(false);
   const [showTransfer, setShowTransfer] = useState(false);
+  const [confirmDialog, setConfirmDialog] = useState(null); // "reset" | "restore" | null
   const [bulkMarkPreview, setBulkMarkPreview] = useState(null);
   const [bulkMarkError, setBulkMarkError] = useState("");
   const [pendingToast, setPendingToast] = useState("");
@@ -3951,16 +4005,8 @@ function MarkEntry({ students, termMarks, setTermMarks, updateTermMark, transfer
   // this class+term+year's marks back to blank, keeping a one-step backup.
   const resetBackupKey = `${cls}__${tk}`;
   const hasTermBackup = !!termResetBackups?.[resetBackupKey];
-  const handleReset = useCallback(() => {
-    if (window.confirm(`Are you sure you want to clear all ${cls} ${term} ${year} marks back to blank?`)) {
-      resetTermClass(cls, tk);
-    }
-  }, [resetTermClass, cls, tk, term, year]);
-  const handleRestore = useCallback(() => {
-    if (window.confirm(`Restore ${cls} ${term} ${year} marks back to what they were before the last reset?`)) {
-      restoreTermClass(cls, tk);
-    }
-  }, [restoreTermClass, cls, tk, term, year]);
+  const handleReset = useCallback(() => setConfirmDialog("reset"), []);
+  const handleRestore = useCallback(() => setConfirmDialog("restore"), []);
   const classStudents = useMemo(()=>
     students.filter(s=>s.className===cls).sort((a,b)=>a.name.localeCompare(b.name)),
     [students, cls]
@@ -4337,6 +4383,22 @@ function MarkEntry({ students, termMarks, setTermMarks, updateTermMark, transfer
             setShowTransfer(false);
             setPendingToast(`${cls} marks transferred from ${from.term} ${from.year} to ${to.term} ${to.year}.`);
             setTimeout(()=>setPendingToast(""), 4000);
+          }}
+        />
+      )}
+      {confirmDialog && (
+        <ConfirmModal
+          title={confirmDialog==="reset" ? "Clear Results" : "Restore Results"}
+          message={confirmDialog==="reset"
+            ? `Are you sure you want to clear all ${cls} ${term} ${year} marks back to blank?`
+            : `Restore ${cls} ${term} ${year} marks back to what they were before the last reset?`}
+          confirmLabel={confirmDialog==="reset" ? "Clear Results" : "Restore Results"}
+          danger={confirmDialog==="reset"}
+          onCancel={()=>setConfirmDialog(null)}
+          onConfirm={()=>{
+            if (confirmDialog==="reset") resetTermClass(cls, tk);
+            else restoreTermClass(cls, tk);
+            setConfirmDialog(null);
           }}
         />
       )}
@@ -5212,19 +5274,12 @@ function MonthBlock({ month, cls, classStudents, monthlyMarks, updateMonthlyMark
   const handleSave = () => lockMonthlyEntry(cls, tk, month);
   const handleUnlock = () => unlockMonthlyEntry(cls, tk, month);
   const handleRequestUnlock = () => requestUnlockMonthly(cls, tk, month);
-  const handleReset = () => {
-    if (window.confirm(`Are you sure you want to restore ${month} Results to original state?`)) {
-      resetMonthlyMonth(cls, tk, month);
-    }
-  };
+  const handleReset = () => setConfirmDialog("reset");
   const backupKey = `${cls}__${tk}__${month}`;
   const hasBackup = !!monthlyResetBackups?.[backupKey];
-  const handleRestore = () => {
-    if (window.confirm(`Restore ${month} Results back to what they were before the last reset?`)) {
-      restoreMonthlyMonth(cls, tk, month);
-    }
-  };
+  const handleRestore = () => setConfirmDialog("restore");
   const [sortByPos, setSortByPos] = useState(false);
+  const [confirmDialog, setConfirmDialog] = useState(null); // "reset" | "restore" | null
   // Each month sheet keeps its own search box (seeded from the shared filter
   // above, if any) so a pupil can be found directly on that month's table.
   const [localSearch, setLocalSearch] = useState(search || "");
@@ -5362,6 +5417,22 @@ function MonthBlock({ month, cls, classStudents, monthlyMarks, updateMonthlyMark
           </div>
         </div>
       )}
+      {confirmDialog && (
+        <ConfirmModal
+          title={confirmDialog==="reset" ? `Clear ${month} Results` : `Restore ${month} Results`}
+          message={confirmDialog==="reset"
+            ? `Are you sure you want to clear all ${month} ${term} ${year} marks for ${cls} back to blank?`
+            : `Restore ${month} ${term} ${year} marks for ${cls} back to what they were before the last reset?`}
+          confirmLabel={confirmDialog==="reset" ? "Clear Results" : "Restore Results"}
+          danger={confirmDialog==="reset"}
+          onCancel={()=>setConfirmDialog(null)}
+          onConfirm={()=>{
+            if (confirmDialog==="reset") resetMonthlyMonth(cls, tk, month);
+            else restoreMonthlyMonth(cls, tk, month);
+            setConfirmDialog(null);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -5373,6 +5444,7 @@ function GroupWork({ students, groupWork, setGroupWork, bands: defaultBands, spe
   const [testNo, setTestNo] = useState(GROUP_TEST_OPTIONS[0]);
   const [viewMode, setViewMode] = useState("single"); // single | analysis
   const [showTransfer, setShowTransfer] = useState(false);
+  const [removeGroupId, setRemoveGroupId] = useState(null);
   const [pdfBusy, setPdfBusy] = useState(false);
   const [analysisPdfBusy, setAnalysisPdfBusy] = useState(false);
   const cardRef = useRef(null);
@@ -5407,8 +5479,10 @@ function GroupWork({ students, groupWork, setGroupWork, bands: defaultBands, spe
     ...cur,
     groups: [...(cur.groups||[]), { id: `g${Date.now()}${Math.random().toString(36).slice(2,6)}`, name: (()=>{ const n=(cur.groups||[]).length+1; const nick=GROUP_WORK_NICKNAMES[n-1]; return nick?`Group ${n} (${nick})`:`Group ${n}`; })(), members: [] }],
   }));
-  const removeGroup = (gid) => {
-    if (!window.confirm("Remove this group and its marks for this term? This can't be undone.")) return;
+  const removeGroup = (gid) => setRemoveGroupId(gid);
+  const confirmRemoveGroup = () => {
+    const gid = removeGroupId;
+    setRemoveGroupId(null);
     updatePeriod(cur => ({
       groups: (cur.groups||[]).filter(g=>g.id!==gid),
       marks: Object.fromEntries(Object.entries(cur.marks||{}).map(([tn,gm])=>[tn, Object.fromEntries(Object.entries(gm||{}).filter(([k])=>k!==gid))])),
@@ -5672,6 +5746,15 @@ function GroupWork({ students, groupWork, setGroupWork, bands: defaultBands, spe
             transferGroupWork(`${from.term}__${from.year}`, from.testNo, `${to.term}__${to.year}`, to.testNo);
             setShowTransfer(false);
           }}
+        />
+      )}
+      {removeGroupId && (
+        <ConfirmModal
+          title="Remove Group"
+          message="Remove this group and its marks for this term? This can't be undone."
+          confirmLabel="Remove Group"
+          onCancel={()=>setRemoveGroupId(null)}
+          onConfirm={confirmRemoveGroup}
         />
       )}
     </div>
