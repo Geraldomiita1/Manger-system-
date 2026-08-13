@@ -4312,6 +4312,7 @@ function MockInfo({ students, school, bands: defaultBands, specialBands, divisio
   const [bulkMockPastedText, setBulkMockPastedText] = useState("");
   const bulkMockFileRef = useRef();
   const sheetRef = useRef(null);
+  const analysisCardRef = useRef(null);
 
   // Guards the background refresh below from yanking a value out from under
   // someone who is actively typing -- same 2.5s "I'm mid-edit" pattern used
@@ -4432,7 +4433,8 @@ function MockInfo({ students, school, bands: defaultBands, specialBands, divisio
       const isX = exam===undefined || exam===null;
       const max = isLower ? lowerSubjectMax(sub) : 100;
       const agg = isX ? undefined : aggOf(exam, bands);
-      return { sub, exam, agg, isX, max };
+      const gl = (!isLower && !isX) ? gradeLabel(exam, bands) : undefined;
+      return { sub, exam, agg, isX, max, gradeLabel: gl };
     });
     const hasX = perSub.some(p=>p.isX);
     const hasF9 = !isLower && perSub.some(p=>p.agg===9);
@@ -4447,6 +4449,19 @@ function MockInfo({ students, school, bands: defaultBands, specialBands, divisio
   const sortedRows = useMemo(()=>[...indexedRows].sort((a,b)=>{ if(a.pos==="-") return 1; if(b.pos==="-") return -1; return a.pos-b.pos; }), [indexedRows]);
   const displayRows = sortByPos ? sortedRows : indexedRows;
 
+  // Performance Analysis (Subject + General) -- same shape as the End of
+  // Term Result Sheet's analysis section, computed for this class/mock/year.
+  const gradeKeys = bands.map(b=>b.grade);
+  const subjectAnalysis = !isLower ? subjects.map(sub=>{
+    const gradeCounts={};
+    gradeKeys.forEach(g=>{ gradeCounts[g]=0; });
+    let xCount=0;
+    rows.forEach(r=>{ const p=r.perSub.find(p=>p.sub===sub); if(p&&p.isX){xCount++;}else if(p&&p.gradeLabel){gradeCounts[p.gradeLabel]=(gradeCounts[p.gradeLabel]||0)+1;} });
+    return {sub,gradeCounts,xCount,total:rows.length};
+  }) : [];
+  const divCounts = {I:0,II:0,III:0,IV:0,U:0,X:0};
+  sortedRows.forEach(r=>{ const d=r.hasX?"X":r.div; if(d==="X")divCounts.X++;else if(divCounts[d]!==undefined)divCounts[d]++;else divCounts.U++; });
+
   const exportMockWord = () => {
     const rowsHtml = displayRows.map((r,i)=>`
       <tr>
@@ -4456,7 +4471,7 @@ function MockInfo({ students, school, bands: defaultBands, specialBands, divisio
         ${isLower?"":`<td>${showResults?escapeHtml(r.hasX?"X":r.totAgg||""):""}</td><td>${showResults?escapeHtml(r.hasX?"X":r.totMk?r.div:""):""}</td>`}
         <td>${showResults&&r.pos!=="-"?escapeHtml(String(r.pos)):""}</td>
       </tr>`).join("");
-    const body = `
+    let body = `
       <div class="title">${escapeHtml(school.name)}</div>
       <div class="subtitle">${escapeHtml(mockType)} ${showResults?"":"— BLANK MARK SHEET"} — ${escapeHtml(cls)}, ${escapeHtml(String(year))}</div>
       <table>
@@ -4475,6 +4490,14 @@ function MockInfo({ students, school, bands: defaultBands, specialBands, divisio
         </thead>
         <tbody>${rowsHtml}</tbody>
       </table>`;
+    if (showResults && !isLower && subjectAnalysis?.length) {
+      const aHead = ["SUBJECT", ...gradeKeys, "X", "TOTAL"];
+      const aRows = subjectAnalysis.map(sa => [sa.sub, ...gradeKeys.map(g => sa.gradeCounts[g] || 0), sa.xCount || 0, sa.total]);
+      const gHead = ["NO. OF PUPILS", "DIV I", "DIV II", "DIV III", "DIV IV", "U", "X"];
+      const gRow = [classStudents.length, divCounts.I, divCounts.II, divCounts.III, divCounts.IV, divCounts.U, divCounts.X];
+      body += `<div class="section-title">A. Subject Performance Analysis</div>${htmlTable(aHead, aRows)}`;
+      body += `<div class="section-title">B. General Performance Analysis</div>${htmlTable(gHead, [gRow])}`;
+    }
     downloadWordHtml(`${mockType} - ${cls}`, body, `${safeFileName(cls)}_${safeFileName(mockType)}_${year}${showResults?"":"_Blank"}.doc`, { pageSize:"297mm 210mm" });
   };
   const exportMockExcel = () => {
@@ -4506,6 +4529,15 @@ function MockInfo({ students, school, bands: defaultBands, specialBands, divisio
     ws["!merges"].push({ s:{r:0,c:col}, e:{r:1,c:col} }); // POS
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, mockType.slice(0,28));
+    if (showResults && !isLower && subjectAnalysis?.length) {
+      const aHead = ["SUBJECT", ...gradeKeys, "X", "TOTAL"];
+      const aRows = subjectAnalysis.map(sa => [sa.sub, ...gradeKeys.map(g => sa.gradeCounts[g] || 0), sa.xCount || 0, sa.total]);
+      const gHead = ["NO. OF PUPILS", "DIV I", "DIV II", "DIV III", "DIV IV", "U", "X"];
+      const gRow = [classStudents.length, divCounts.I, divCounts.II, divCounts.III, divCounts.IV, divCounts.U, divCounts.X];
+      const aoa2 = [["A. SUBJECT PERFORMANCE ANALYSIS"], aHead, ...aRows, [], ["B. GENERAL PERFORMANCE ANALYSIS"], gHead, gRow];
+      const ws2 = XLSX.utils.aoa_to_sheet(aoa2);
+      XLSX.utils.book_append_sheet(wb, ws2, "Analysis");
+    }
     XLSX.writeFile(wb, `${safeFileName(cls)}_${safeFileName(mockType)}_${year}${showResults?"":"_Blank"}.xlsx`);
   };
 
@@ -4615,7 +4647,7 @@ function MockInfo({ students, school, bands: defaultBands, specialBands, divisio
           <button onClick={exportMockExcel} style={{...btnPrimary,background:"linear-gradient(135deg,#15803d,#16a34a)"}}>📊 Export Excel</button>
           <button disabled={pdfBusy} onClick={async()=>{
             setPdfBusy(true);
-            try { await downloadNodesAsPdf([sheetRef.current], `${safeFileName(cls)}_${safeFileName(mockType)}_${year}${showResults?"":"_Blank"}.pdf`, "landscape"); }
+            try { await downloadNodesAsPdf([sheetRef.current, (showResults && !isLower) ? analysisCardRef.current : null], `${safeFileName(cls)}_${safeFileName(mockType)}_${year}${showResults?"":"_Blank"}.pdf`, "landscape"); }
             finally { setPdfBusy(false); }
           }} style={pdfBusy?btnPdfBusy:btnPdf}>{pdfBusy?"⏳ Generating...":"📕 Export PDF"}</button>
           <button onClick={()=>window.print()} style={btnPrimary}>🖨️ Print</button>
@@ -4774,6 +4806,46 @@ function MockInfo({ students, school, bands: defaultBands, specialBands, divisio
           </tbody>
         </table>
       </div>
+      {showResults && !isLower && (
+        <div ref={analysisCardRef} style={{background:"white",borderRadius:12,border:"1px solid #e5e7eb",overflow:"hidden",marginBottom:24}}>
+          <div style={{background:"#0f766e",color:"white",padding:"10px 16px",fontWeight:700}}>📊 Performance Analysis - {mockType} - {cls} {year}</div>
+          <div style={{padding:16}}>
+            <h4 style={{margin:"0 0 8px",color:"#0f766e",fontSize:13}}>A. Subject Performance Analysis</h4>
+            <div style={{overflowX:"auto",marginBottom:20}}>
+              <table style={{width:"100%",fontSize:12}}>
+                <thead><tr style={{background:"#ccfbf1"}}><th style={{...th,textAlign:"left",padding:"8px 10px",color:"#0f766e"}}>Subject</th>{gradeKeys.map(g=><th key={g} style={{...th,padding:"8px 10px",color:"#0f766e"}}>{g}</th>)}<th style={{...th,padding:"8px 10px",color:"#dc2626"}}>X</th><th style={{...th,padding:"8px 10px",color:"#0f766e"}}>Total</th></tr></thead>
+                <tbody>
+                  {subjectAnalysis.map((sa,i)=>(
+                    <tr key={sa.sub} style={{background:i%2===0?"white":"#f0fdfa"}}>
+                      <td style={{...td,fontWeight:700,textAlign:"left"}}>{sa.sub}</td>
+                      {gradeKeys.map(g=><td key={g} style={td}>{sa.gradeCounts[g]||0}</td>)}
+                      <td style={{...td,fontWeight:700,color:"#dc2626"}}>{sa.xCount||0}</td>
+                      <td style={{...td,fontWeight:700}}>{sa.total}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <h4 style={{margin:"0 0 8px",color:"#0f766e",fontSize:13}}>B. General Performance Analysis</h4>
+            <div style={{overflowX:"auto"}}>
+              <table style={{width:"100%",fontSize:12}}>
+                <thead><tr style={{background:"#ccfbf1"}}>{["No. of Pupils","Div I","Div II","Div III","Div IV","U","X"].map(h=><th key={h} style={{...th,padding:"8px 10px",color:"#0f766e"}}>{h}</th>)}</tr></thead>
+                <tbody>
+                  <tr>
+                    <td style={{...td,fontWeight:700}}>{classStudents.length}</td>
+                    <td style={{...td,fontWeight:700,color:"#166534"}}>{divCounts.I}</td>
+                    <td style={{...td,fontWeight:700,color:"#1e40af"}}>{divCounts.II}</td>
+                    <td style={{...td,fontWeight:700,color:"#92400e"}}>{divCounts.III}</td>
+                    <td style={{...td,fontWeight:700,color:"#7c2d12"}}>{divCounts.IV}</td>
+                    <td style={{...td,fontWeight:700,color:"#6b7280"}}>{divCounts.U}</td>
+                    <td style={{...td,fontWeight:700,color:"#dc2626"}}>{divCounts.X}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
       {/* Reset confirmation modal */}
       {showResetConfirm && (
         <div className="no-print" style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.65)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:2000,padding:16}}>
