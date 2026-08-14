@@ -2175,10 +2175,16 @@ export default function App() {
     let stopped = false;
     const tick = async () => {
       if (stopped) return;
-      const isEditing = Date.now() < editingUntilRef.current;
       try {
         setSyncing(true);
         const results = await Promise.all(STORAGE_KEYS.map(key => loadShared(key, undefined)));
+        // Re-check the editing guard AFTER the network round trip, not
+        // before it. A fetch that started just before someone clicked
+        // "+ Add Scale" (or edited anything else) would otherwise resolve
+        // holding a now-stale "not editing" snapshot taken before that
+        // click ever happened, and go on to apply old remote data over
+        // the fresh local edit below.
+        const isEditing = Date.now() < editingUntilRef.current;
         if (!stopped && !isEditing) {
           STORAGE_KEYS.forEach((key, i) => {
             // Skip any key whose save effect is still mid read-merge-write
@@ -2188,6 +2194,15 @@ export default function App() {
             // poll tick, once the save has finished and lastSeenRef is
             // accurate again, will pick up any genuinely new remote data.
             if (inFlightRef.current.has(key)) return;
+            // Skip any key whose LOCAL state has already moved past what
+            // we last saved (i.e. there's an edit sitting in the ~700ms
+            // debounce window, or otherwise not yet queued/in-flight).
+            // Applying a remote read fetched before that edit happened
+            // would silently erase it the instant this tick resolves --
+            // exactly the "I added something and it vanished a few
+            // seconds later" bug. The debounced save effect (or the next
+            // queueKeySave) will pick it up and reconcile shortly.
+            if (JSON.stringify(stateRef.current[key]) !== lastSeenRef.current[key]) return;
             const remoteVal = results[i];
             if (remoteVal === undefined) return;
             const remoteStr = JSON.stringify(remoteVal);
