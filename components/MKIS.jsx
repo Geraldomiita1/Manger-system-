@@ -339,14 +339,31 @@ const SPECIAL_SCALE_EXAM_TYPES = ["End of Term", "Monthly Exams", "Municipal Moc
 function scalesForClassYear(specialBands, cls, year) {
   const entry = specialBands?.[cls];
   if (!entry) return [];
+  // Check the current Year-keyed shape FIRST, even though it's an "if
+  // legacy shape absent" fallback below on paper. Reason: the sync merge
+  // (deepMergeObjects, see updateShared) only ever ADDS/overwrites keys
+  // that are present locally -- it never deletes a key that's missing
+  // locally but still present on the remote copy. So right after a class
+  // is migrated off the legacy shape (adding a 2nd Scale to a class that
+  // already had one, say), a stray old `bands`/`examTypes` pair can end up
+  // merged back in alongside the brand-new `[year]` key instead of being
+  // replaced by it. If the legacy check ran first here, that leftover
+  // pair would make this function report only a single reconstructed
+  // "Scale 1" and silently hide every real Scale sitting right there in
+  // `entry[year].scales` -- which is exactly the bug where a newly added
+  // Scale "disappears" a moment after being added to a class that already
+  // had one. Preferring the Year-keyed data whenever it exists closes
+  // that gap regardless of whatever legacy keys are still hanging around.
+  if (year && entry[year] && Array.isArray(entry[year].scales)) {
+    return entry[year].scales;
+  }
   if (Array.isArray(entry)) {
     return entry.length ? [{ name: "Scale 1", bands: entry, examTypes: [...SPECIAL_SCALE_EXAM_TYPES] }] : [];
   }
   if (Array.isArray(entry.bands)) {
     return entry.bands.length ? [{ name: "Scale 1", bands: entry.bands, examTypes: entry.examTypes || [...SPECIAL_SCALE_EXAM_TYPES] }] : [];
   }
-  // Current shape: keyed by Year.
-  return (year && entry[year]?.scales) || [];
+  return [];
 }
 // Resolves which grading scale actually applies to a class for a given Year
 // and exam type: the first of that class/Year's Special Grading Scales (see
@@ -8480,8 +8497,21 @@ function Settings({ school, setSchool, bands, setBands, specialBands, setSpecial
     setSpecialBands(prev => {
       const curScales = scalesForClassYear(prev, specialCls, specialYear);
       const prevEntry = prev[specialCls];
-      const prevYearMap = (prevEntry && !Array.isArray(prevEntry) && !Array.isArray(prevEntry.bands)) ? prevEntry : {};
-      return { ...prev, [specialCls]: { ...prevYearMap, [specialYear]: { scales: updater(curScales) } } };
+      const isLegacy = Array.isArray(prevEntry) || Array.isArray(prevEntry?.bands);
+      const prevYearMap = (prevEntry && !isLegacy) ? prevEntry : {};
+      const nextEntry = { ...prevYearMap, [specialYear]: { scales: updater(curScales) } };
+      if (isLegacy) {
+        // Explicitly null out the old bands/examTypes keys (rather than
+        // just not carrying them forward) so the sync merge on save
+        // (deepMergeObjects, which only overwrites keys present locally
+        // and otherwise leaves whatever remote storage already has) drops
+        // them from storage instead of merging them back in alongside the
+        // new [year] key -- leftover legacy keys are what made a newly
+        // added Scale silently disappear on a class that already had one.
+        nextEntry.bands = undefined;
+        nextEntry.examTypes = undefined;
+      }
+      return { ...prev, [specialCls]: nextEntry };
     });
   };
   // Adds a new Scale, auto-named "Scale N" (N = one more than however many
