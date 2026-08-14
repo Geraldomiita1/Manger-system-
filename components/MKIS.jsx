@@ -163,9 +163,16 @@ async function writeAuditEntry(key, action, detail) {
   } catch {}
 }
 async function saveShared(key, val) {
-  try {
-    await window.storage.set(key, JSON.stringify(val), true);
-  } catch {}
+  // IMPORTANT: do not swallow the error here. A caller (queueKeySave) uses
+  // whether this resolves or rejects to decide whether it's safe to mark
+  // this value as "confirmed saved" (lastSeenRef). If a transient failure
+  // here (network blip, storage rate limit, etc.) were hidden, the caller
+  // would wrongly believe the write landed, the next background sync would
+  // then see real storage still holding the OLD value, conclude "someone
+  // else changed this", and revert the screen back to it -- which is
+  // exactly the bug where something you just added/changed silently
+  // vanishes a few seconds later even though nothing else touched it.
+  await window.storage.set(key, JSON.stringify(val), true);
 }
 // Friendly key → section label map
 const KEY_LABEL = {
@@ -2035,6 +2042,22 @@ export default function App() {
         if (JSON.stringify(stateRef.current[key]) === JSON.stringify(localVal) && JSON.stringify(merged) !== JSON.stringify(localVal)) {
           setters[key](merged);
         }
+      } catch (err) {
+        // The write to shared storage itself failed (network blip, storage
+        // rate limit, etc.). Deliberately do NOT advance lastSeenRef here.
+        // Advancing it as if the save had succeeded is what used to make
+        // an edit vanish a few seconds later: the next background poll
+        // would compare storage's still-OLD value against a lastSeenRef
+        // that already (wrongly) matched the new value, conclude "someone
+        // else changed this", and revert the screen right back to the old
+        // data even though nothing else touched it -- the write to
+        // storage had simply never landed. Leaving lastSeenRef untouched
+        // keeps this key looking "dirty" (local state != lastSeenRef), so
+        // the poll's freshness guard leaves it alone and what's on screen
+        // stays put. Retry shortly so the edit still gets persisted once
+        // the hiccup passes, instead of only retrying whenever this key
+        // happens to change again.
+        setTimeout(() => { queueKeySave(key, ctx); }, 3000);
       } finally {
         inFlightRef.current.delete(key);
       }
@@ -4408,6 +4431,15 @@ function MockInfo({ students, school, bands: defaultBands, specialBands, divisio
       updateShared("mkis_mock_marks", next).then(merged => {
         lastSeenMockRef.current = JSON.stringify(merged);
         setMockMarks(merged);
+      }).catch(() => {
+        // Write failed (network blip, etc.) -- leave lastSeenMockRef and
+        // local state alone rather than advancing lastSeenMockRef as if it
+        // had saved. Advancing it here is what could make a just-entered
+        // mock mark vanish a few seconds later: the next poll would see
+        // storage still holding the old value, wrongly conclude someone
+        // else changed it, and revert the screen. `next` (already applied
+        // above) stays authoritative locally; the debounced flow above
+        // will simply try again on the next edit.
       });
       return next;
     });
@@ -4437,6 +4469,15 @@ function MockInfo({ students, school, bands: defaultBands, specialBands, divisio
       updateShared("mkis_mock_marks", next).then(merged => {
         lastSeenMockRef.current = JSON.stringify(merged);
         setMockMarks(merged);
+      }).catch(() => {
+        // Write failed (network blip, etc.) -- leave lastSeenMockRef and
+        // local state alone rather than advancing lastSeenMockRef as if it
+        // had saved. Advancing it here is what could make a just-entered
+        // mock mark vanish a few seconds later: the next poll would see
+        // storage still holding the old value, wrongly conclude someone
+        // else changed it, and revert the screen. `next` (already applied
+        // above) stays authoritative locally; the debounced flow above
+        // will simply try again on the next edit.
       });
       return next;
     });
@@ -4461,6 +4502,15 @@ function MockInfo({ students, school, bands: defaultBands, specialBands, divisio
       updateShared("mkis_mock_marks", next).then(merged => {
         lastSeenMockRef.current = JSON.stringify(merged);
         setMockMarks(merged);
+      }).catch(() => {
+        // Write failed (network blip, etc.) -- leave lastSeenMockRef and
+        // local state alone rather than advancing lastSeenMockRef as if it
+        // had saved. Advancing it here is what could make a just-entered
+        // mock mark vanish a few seconds later: the next poll would see
+        // storage still holding the old value, wrongly conclude someone
+        // else changed it, and revert the screen. `next` (already applied
+        // above) stays authoritative locally; the debounced flow above
+        // will simply try again on the next edit.
       });
       return next;
     });
