@@ -74,14 +74,18 @@ const DEFAULT_BANDS = [
   { min:0,  max:24,  grade:"F9", label:"Fail" },
 ];
 // Special Grading Scale: an optional, per-class override of the bands above.
-// Keyed by class name (e.g. "P7"); a class with no entry here just uses the
-// default DEFAULT_BANDS/bands scale as normal. Lets a school apply a
-// different grading scale to one class (commonly P7, for PLE-style grading)
-// without touching the scale every other class uses. Each entry is shaped
-// { bands:[...], examTypes:[...] } where examTypes is a subset of
-// SPECIAL_SCALE_EXAM_TYPES ("End of Term", "Monthly Exams", "Municipal Mock",
-// "TAEB Mock") -- only those exam types use the special scale for that class;
-// any exam type left out keeps using the standard scale even for that class.
+// Keyed by class name (e.g. "P7"), then by academic Year, then by a list of
+// named Scales; a class/Year with no entry here just uses the default
+// DEFAULT_BANDS/bands scale as normal. Lets a school apply a different
+// grading scale to one class (commonly P7, for PLE-style grading) in a
+// particular year, without touching the scale every other class/year uses.
+// Shape: { [cls]: { [year]: { scales:[ { name, bands:[...], examTypes:[...] }, ... ] } } }
+// Scales are auto-named "Scale 1", "Scale 2", etc. as more are added within
+// the same class/Year -- a school might, say, use one scale for End of Term
+// and a different one for Monthly Exams in the same year. examTypes is a
+// subset of SPECIAL_SCALE_EXAM_TYPES ("End of Term", "Monthly Exams",
+// "Municipal Mock", "TAEB Mock") -- only those exam types use that scale;
+// any exam type left out of every scale keeps using the standard scale.
 const DEFAULT_SPECIAL_BANDS = {};
 const DEFAULT_DIVISIONS = [
   { name:"I",   min:4,  max:12 },
@@ -313,25 +317,46 @@ const toUpper = (s) => (s || "").toUpperCase();
 // in Settings; any exam type left unchecked keeps using the standard scale
 // even though that class has a special scale enabled.
 const SPECIAL_SCALE_EXAM_TYPES = ["End of Term", "Monthly Exams", "Municipal Mock", "TAEB Mock"];
-// Resolves which grading scale actually applies to a class for a given exam
-// type: its Special Grading Scale override if the school has set one up for
-// that class (and it isn't empty) AND that override is scoped to include the
-// exam type in question -- otherwise the normal default bands used everywhere
-// else. specialBands[cls] can be either the legacy shape (a bare array of
-// bands, meaning "applies to every exam type", kept for backward compatibility
-// with data saved before exam-type scoping existed) or the current shape
-// ({ bands:[...], examTypes:[...] }). When examType is omitted the exam-type
-// check is skipped entirely (used by callers -- like Group Work -- that
-// aren't one of the scoped exam types and should just follow the class's
-// special scale whenever one is enabled).
-function bandsForClass(cls, bands, specialBands, examType) {
-  const special = specialBands?.[cls];
-  if (!special) return bands;
-  const specialArr = Array.isArray(special) ? special : special.bands;
-  if (!Array.isArray(specialArr) || !specialArr.length) return bands;
-  const specialTypes = Array.isArray(special) ? SPECIAL_SCALE_EXAM_TYPES : (special.examTypes || []);
-  if (examType && !specialTypes.includes(examType)) return bands;
-  return specialArr;
+// Reads the list of named Scales configured for a class in a given academic
+// Year. specialBands[cls] is keyed by Year, e.g.
+//   { [year]: { scales:[ {name:"Scale 1",bands:[...],examTypes:[...]}, ... ] } }
+// so the same class can have a completely different Special Grading Scale
+// set up in different years without one year's edits overwriting another's.
+// Backward compatibility: data saved before Year/multi-Scale support existed
+// stored specialBands[cls] as either a bare array of bands (applies to every
+// exam type, every year) or { bands:[...], examTypes:[...] } (applies to
+// every year). Either legacy shape is treated as a single "Scale 1" that
+// applies regardless of which Year is selected, so old data keeps working
+// until it's next edited in Settings (at which point it's saved in the
+// current Year-keyed shape).
+function scalesForClassYear(specialBands, cls, year) {
+  const entry = specialBands?.[cls];
+  if (!entry) return [];
+  if (Array.isArray(entry)) {
+    return entry.length ? [{ name: "Scale 1", bands: entry, examTypes: [...SPECIAL_SCALE_EXAM_TYPES] }] : [];
+  }
+  if (Array.isArray(entry.bands)) {
+    return entry.bands.length ? [{ name: "Scale 1", bands: entry.bands, examTypes: entry.examTypes || [...SPECIAL_SCALE_EXAM_TYPES] }] : [];
+  }
+  // Current shape: keyed by Year.
+  return (year && entry[year]?.scales) || [];
+}
+// Resolves which grading scale actually applies to a class for a given Year
+// and exam type: the first of that class/Year's Special Grading Scales (see
+// scalesForClassYear above) whose exam-type list includes the exam type in
+// question -- otherwise the normal default bands used everywhere else. When
+// examType is omitted the exam-type check is skipped entirely (used by
+// callers -- like Group Work -- that aren't one of the scoped exam types and
+// should just follow the class/Year's first configured special scale).
+function bandsForClass(cls, bands, specialBands, examType, year) {
+  const scales = scalesForClassYear(specialBands, cls, year);
+  for (const scale of scales) {
+    const arr = scale?.bands;
+    if (!Array.isArray(arr) || !arr.length) continue;
+    const types = scale.examTypes || [];
+    if (!examType || types.includes(examType)) return arr;
+  }
+  return bands;
 }
 function gradeFor(score, bands) {
   if (score === undefined || score === null || isNaN(score)) return null;
@@ -3849,7 +3874,7 @@ function MarkEntry({ students, termMarks, setTermMarks, updateTermMark, transfer
   // Grading Scale override if one's been set up for it, otherwise the
   // school's normal default bands. Named `bands` so nothing below needs to
   // change to pick this up.
-  const bands = useMemo(() => bandsForClass(cls, defaultBands, specialBands, "End of Term"), [cls, defaultBands, specialBands]);
+  const bands = useMemo(() => bandsForClass(cls, defaultBands, specialBands, "End of Term", year), [cls, defaultBands, specialBands, year]);
   // Wraps requestOrApplyTermMark to surface a brief toast whenever an edit
   // was filed for admin approval rather than saved immediately, so teachers
   // aren't left wondering why a number they typed doesn't show up yet.
@@ -4355,7 +4380,7 @@ function MockInfo({ students, school, bands: defaultBands, specialBands, divisio
     return () => { stopped = true; clearInterval(id); };
   }, []);
 
-  const bands = useMemo(() => bandsForClass(cls, defaultBands, specialBands, mockType), [cls, defaultBands, specialBands, mockType]);
+  const bands = useMemo(() => bandsForClass(cls, defaultBands, specialBands, mockType, year), [cls, defaultBands, specialBands, mockType, year]);
   const isLower = LOWER_CLASSES.includes(cls);
   const subjects = isLower ? LOWER_SUBJECTS : UPPER_SUBJECTS;
   const mk = `${mockType}__${year}`;
@@ -4900,7 +4925,7 @@ function MonthlyExams({ students, monthlyMarks, updateMonthlyMark, transferMonth
   const subjects = isLower ? LOWER_MONTHLY_SUBJECTS : MONTHLY_SUBJECTS;
   // Special Grading Scale override for the selected class, if any (scoped to
   // the "Monthly Exams" exam type).
-  const bands = useMemo(() => bandsForClass(cls, defaultBands, specialBands, "Monthly Exams"), [cls, defaultBands, specialBands]);
+  const bands = useMemo(() => bandsForClass(cls, defaultBands, specialBands, "Monthly Exams", year), [cls, defaultBands, specialBands, year]);
   // ── Bulk Mark Sheet import: accepts either an uploaded CSV file or a
   // marksheet pasted straight from Excel/Sheets (tab-separated) into a
   // textarea. Both paths flow through the same parser below. ──────────────
@@ -5414,7 +5439,7 @@ function GroupWork({ students, groupWork, setGroupWork, bands: defaultBands, spe
   const subjects = isLower ? LOWER_SUBJECTS : UPPER_SUBJECTS;
   const tk = `${term}__${year}`;
   // Special Grading Scale override for the selected class, if any.
-  const bands = useMemo(() => bandsForClass(cls, defaultBands, specialBands), [cls, defaultBands, specialBands]);
+  const bands = useMemo(() => bandsForClass(cls, defaultBands, specialBands, undefined, year), [cls, defaultBands, specialBands, year]);
 
   const classStudents = useMemo(()=>
     students.filter(s=>s.className===cls).sort((a,b)=>a.name.localeCompare(b.name)),
@@ -5921,7 +5946,7 @@ function MonthlyCards({ students, monthlyMarks, bands: defaultBands, specialBand
   const isLower = LOWER_CLASSES.includes(cls);
   const subjects = isLower ? LOWER_MONTHLY_SUBJECTS : MONTHLY_SUBJECTS;
   // Special Grading Scale override for the selected class, if any.
-  const bands = useMemo(() => bandsForClass(cls, defaultBands, specialBands, "Monthly Exams"), [cls, defaultBands, specialBands]);
+  const bands = useMemo(() => bandsForClass(cls, defaultBands, specialBands, "Monthly Exams", year), [cls, defaultBands, specialBands, year]);
   const tk = `${term}__${year}`;
   const months = TERM_MONTHS[term] || [];
   const classStudents = useMemo(()=>
@@ -6104,7 +6129,7 @@ function MonthlySlips({ students, monthlyMarks, bands: defaultBands, specialBand
   const isLower = LOWER_CLASSES.includes(cls);
   const subjects = isLower ? LOWER_MONTHLY_SUBJECTS : MONTHLY_SUBJECTS;
   // Special Grading Scale override for the selected class, if any.
-  const bands = useMemo(() => bandsForClass(cls, defaultBands, specialBands, "Monthly Exams"), [cls, defaultBands, specialBands]);
+  const bands = useMemo(() => bandsForClass(cls, defaultBands, specialBands, "Monthly Exams", year), [cls, defaultBands, specialBands, year]);
   const tk = `${term}__${year}`;
   const months = TERM_MONTHS[term] || [];
   const classStudents = useMemo(()=>
@@ -7648,7 +7673,7 @@ function ResultSheets({ students, termMarks, bands: defaultBands, specialBands, 
   const isLower = LOWER_CLASSES.includes(cls);
   const subjects = isLower ? LOWER_SUBJECTS : UPPER_SUBJECTS;
   // Special Grading Scale override for the selected class, if any.
-  const bands = useMemo(() => bandsForClass(cls, defaultBands, specialBands, "End of Term"), [cls, defaultBands, specialBands]);
+  const bands = useMemo(() => bandsForClass(cls, defaultBands, specialBands, "End of Term", year), [cls, defaultBands, specialBands, year]);
   const tk = `${term}__${year}`;
   const classStudents = useMemo(()=>
     students.filter(s=>s.className===cls).sort((a,b)=>a.name.localeCompare(b.name)),
@@ -7850,7 +7875,7 @@ function ReportCards({ students, termMarks, bands: defaultBands, specialBands, d
   const isLower = LOWER_CLASSES.includes(cls);
   const subjects = isLower ? LOWER_SUBJECTS : UPPER_SUBJECTS;
   // Special Grading Scale override for the selected class, if any.
-  const bands = useMemo(() => bandsForClass(cls, defaultBands, specialBands, "End of Term"), [cls, defaultBands, specialBands]);
+  const bands = useMemo(() => bandsForClass(cls, defaultBands, specialBands, "End of Term", year), [cls, defaultBands, specialBands, year]);
   const tk = `${term}__${year}`;
   const classStudents = useMemo(()=>
     students.filter(s=>s.className===cls&&s.name.toLowerCase().includes(search.toLowerCase())).sort((a,b)=>a.name.localeCompare(b.name)),
@@ -8374,34 +8399,60 @@ function Settings({ school, setSchool, bands, setBands, specialBands, setSpecial
   const [dangerConfirm, setDangerConfirm] = useState(null); // null | 'students' | 'results' | 'everything'
   const [dangerInput, setDangerInput] = useState("");
   const [specialCls, setSpecialCls] = useState(ALL_CLASSES[0]);
-  // specialBands[cls] can be the legacy bare-array shape (applies to every
-  // exam type) or the current { bands, examTypes } shape -- normalize both
-  // into plain arrays here so the rest of the UI below doesn't need to care.
-  const specialEntry = specialBands?.[specialCls];
-  const specialBandsArr = Array.isArray(specialEntry) ? specialEntry : (specialEntry?.bands || []);
-  const specialExamTypesArr = Array.isArray(specialEntry) ? SPECIAL_SCALE_EXAM_TYPES : (specialEntry?.examTypes || []);
-  const specialScaleActive = Array.isArray(specialBandsArr) && specialBandsArr.length > 0;
-  // Updates just the bands list for the selected class's special scale,
-  // preserving whichever exam types it's currently scoped to.
-  const updateSpecialBands = (updater) => {
-    setSpecialBands(prev => {
-      const cur = prev[specialCls];
-      const curArr = Array.isArray(cur) ? cur : (cur?.bands || []);
-      const curTypes = Array.isArray(cur) ? SPECIAL_SCALE_EXAM_TYPES : (cur?.examTypes || []);
-      return { ...prev, [specialCls]: { bands: updater(curArr), examTypes: curTypes } };
-    });
-  };
-  // Toggles whether one exam type (End of Term / Monthly Exams / Municipal
-  // Mock / TAEB Mock) is covered by the selected class's special scale.
-  const toggleSpecialExamType = (examType) => {
+  // Which academic Year the Special Grading Scale below is being configured
+  // for -- a class can have entirely different scales set up in different
+  // years (e.g. this year's P7 special scale vs. next year's).
+  const [specialYear, setSpecialYear] = useState(school.year || String(new Date().getFullYear()));
+  // The named Scales ("Scale 1", "Scale 2", ...) configured for the selected
+  // class in the selected Year. Handles the legacy pre-Year/pre-multi-Scale
+  // shapes internally -- see scalesForClassYear.
+  const specialScales = scalesForClassYear(specialBands, specialCls, specialYear);
+  // Rewrites the list of Scales for the selected class/Year, always saving
+  // in the current Year-keyed shape (this is also how legacy data gets
+  // migrated the first time it's touched here).
+  const updateScales = (updater) => {
     markEditing();
     setSpecialBands(prev => {
-      const cur = prev[specialCls];
-      const curArr = Array.isArray(cur) ? cur : (cur?.bands || []);
-      const curTypes = Array.isArray(cur) ? SPECIAL_SCALE_EXAM_TYPES : (cur?.examTypes || []);
-      const nextTypes = curTypes.includes(examType) ? curTypes.filter(t => t !== examType) : [...curTypes, examType];
-      return { ...prev, [specialCls]: { bands: curArr, examTypes: nextTypes } };
+      const curScales = scalesForClassYear(prev, specialCls, specialYear);
+      const prevEntry = prev[specialCls];
+      const prevYearMap = (prevEntry && !Array.isArray(prevEntry) && !Array.isArray(prevEntry.bands)) ? prevEntry : {};
+      return { ...prev, [specialCls]: { ...prevYearMap, [specialYear]: { scales: updater(curScales) } } };
     });
+  };
+  // Adds a new Scale, auto-named "Scale N" (N = one more than however many
+  // Scales already exist for this class/Year).
+  const addScale = () => {
+    updateScales(scales => [...scales, {
+      name: `Scale ${scales.length + 1}`,
+      bands: bands.map(b => ({ ...b })),
+      examTypes: [],
+    }]);
+  };
+  // Removes one Scale, then renumbers any still-default-named "Scale N"
+  // entries so the sequence stays clean (a Scale the user renamed to
+  // something custom is left alone).
+  const removeScale = (idx) => {
+    updateScales(scales => {
+      const remaining = scales.filter((_, i) => i !== idx);
+      let n = 0;
+      return remaining.map(sc => /^Scale \d+$/.test(sc.name) ? { ...sc, name: `Scale ${++n}` } : sc);
+    });
+  };
+  const renameScale = (idx, name) => {
+    updateScales(scales => scales.map((sc, i) => i === idx ? { ...sc, name } : sc));
+  };
+  const updateScaleBands = (idx, bandsUpdater) => {
+    updateScales(scales => scales.map((sc, i) => i === idx ? { ...sc, bands: bandsUpdater(sc.bands || []) } : sc));
+  };
+  // Toggles whether one exam type (End of Term / Monthly Exams / Municipal
+  // Mock / TAEB Mock) is covered by one Scale.
+  const toggleScaleExamType = (idx, examType) => {
+    updateScales(scales => scales.map((sc, i) => {
+      if (i !== idx) return sc;
+      const curTypes = sc.examTypes || [];
+      const nextTypes = curTypes.includes(examType) ? curTypes.filter(t => t !== examType) : [...curTypes, examType];
+      return { ...sc, examTypes: nextTypes };
+    }));
   };
   const handlePwChange = () => {
     if (!curPw) { setPwMsg("Enter your current password."); return; }
@@ -8525,54 +8576,62 @@ function Settings({ school, setSchool, bands, setBands, specialBands, setSpecial
       <AccountManager accounts={accounts} setAccounts={setAccounts} currentUser={currentUser} />
       <div style={{background:"white",borderRadius:12,padding:20,border:"1px solid #e5e7eb"}}>
         <h3 style={{margin:"0 0 6px",color:"#1e3a6e",fontSize:15,fontWeight:700}}>🌟 Special Grading Scale</h3>
-        <div style={{fontSize:12,color:"#6b7280",marginBottom:14}}>An optional alternate grading scale for a single class. Pick a class below — if it has a special scale enabled, tick which exam types it should apply to. Only those exam types use the special scale for this class; every exam type left unticked (and every other class) keeps using the standard Grade Bands below.</div>
-        <div style={{display:"flex",gap:10,alignItems:"flex-end",marginBottom:14,flexWrap:"wrap"}}>
+        <div style={{fontSize:12,color:"#6b7280",marginBottom:14}}>An optional alternate grading scale for a single class in a single academic Year. Pick a class and Year below, then add one or more Scales — each named "Scale 1", "Scale 2" etc. automatically — and tick which exam types each Scale should apply to. Only those exam types use that Scale; every exam type left unticked (and every other class or Year) keeps using the standard Grade Bands below.</div>
+        <div style={{display:"flex",gap:10,alignItems:"flex-end",marginBottom:16,flexWrap:"wrap"}}>
           <Sel label="Class" value={specialCls} onChange={setSpecialCls} opts={ALL_CLASSES}/>
-          {specialScaleActive
-            ? <button onClick={()=>{ markEditing(); setSpecialBands(prev=>({...prev,[specialCls]:undefined})); }} style={{...btnDanger,padding:"8px 14px",fontSize:12,alignSelf:"flex-end"}}>✕ Disable for {specialCls}</button>
-            : <button onClick={()=>{ markEditing(); setSpecialBands(prev=>({...prev,[specialCls]: { bands: bands.map(b=>({...b})), examTypes: [...SPECIAL_SCALE_EXAM_TYPES] } })); }} style={{...btnPrimary,padding:"8px 14px",fontSize:12,alignSelf:"flex-end"}}>+ Enable Special Grading Scale for {specialCls}</button>
-          }
+          <div><label style={lbl}>Year</label><input type="number" value={specialYear} onChange={e=>setSpecialYear(e.target.value)} style={{...inp,width:100}}/></div>
+          <button onClick={addScale} style={{...btnPrimary,padding:"8px 14px",fontSize:12,alignSelf:"flex-end"}}>+ Add Scale</button>
         </div>
-        {specialScaleActive ? (
-          <>
-            <div style={{marginBottom:14}}>
-              <div style={{fontSize:12,fontWeight:700,color:"#92400e",marginBottom:6}}>Applies to these exam types for {specialCls}:</div>
-              <div style={{display:"flex",gap:14,flexWrap:"wrap"}}>
-                {SPECIAL_SCALE_EXAM_TYPES.map(et=>(
-                  <label key={et} style={{display:"flex",alignItems:"center",gap:6,fontSize:13,cursor:"pointer"}}>
-                    <input type="checkbox" checked={specialExamTypesArr.includes(et)} onChange={()=>toggleSpecialExamType(et)}/>
-                    {et}
-                  </label>
-                ))}
-              </div>
-              {specialExamTypesArr.length===0 && (
-                <div style={{fontSize:12,color:"#dc2626",marginTop:6}}>No exam types selected — {specialCls} will use the standard Grade Bands everywhere until at least one is ticked.</div>
-              )}
-            </div>
-            <div style={{overflowX:"auto"}}>
-              <table style={{width:"100%",fontSize:13}}>
-                <thead><tr style={{background:"#fef3c7"}}>{["Min","Max","Grade","Label",""].map(h=><th key={h} style={{padding:"8px 10px",textAlign:"left",color:"#92400e",fontWeight:700}}>{h}</th>)}</tr></thead>
-                <tbody>
-                  {specialBandsArr.map((b,i)=>(
-                    <tr key={i} style={{background:i%2===0?"white":"#fffbeb"}}>
-                      {["min","max","grade","label"].map(f=>(
-                        <td key={f} style={{padding:"4px 6px"}}>
-                          <input value={b[f]} onChange={e=>{
-                            const val = f==="min"||f==="max" ? Number(e.target.value) : e.target.value;
-                            updateSpecialBands(arr => arr.map((x,j)=>j===i?{...x,[f]:val}:x));
-                          }} style={{...inp,width:f==="label"?120:70,padding:"4px 6px",fontSize:12}}/>
-                        </td>
+        {specialScales.length > 0 ? (
+          <div style={{display:"flex",flexDirection:"column",gap:16}}>
+            {specialScales.map((scale, idx) => (
+              <div key={idx} style={{border:"1px solid #fde68a",borderRadius:10,padding:14,background:"#fffbeb"}}>
+                <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10,flexWrap:"wrap"}}>
+                  <input value={scale.name||""} onChange={e=>renameScale(idx, e.target.value)}
+                    style={{...inp,fontWeight:700,color:"#92400e",width:140,padding:"6px 8px",fontSize:13}}/>
+                  <span style={{fontSize:11,color:"#92400e"}}>for {specialCls} · {specialYear}</span>
+                  <button onClick={()=>removeScale(idx)} style={{...btnDanger,padding:"5px 12px",fontSize:11,marginLeft:"auto"}}>✕ Remove Scale</button>
+                </div>
+                <div style={{marginBottom:12}}>
+                  <div style={{fontSize:12,fontWeight:700,color:"#92400e",marginBottom:6}}>Applies to these exam types:</div>
+                  <div style={{display:"flex",gap:14,flexWrap:"wrap"}}>
+                    {SPECIAL_SCALE_EXAM_TYPES.map(et=>(
+                      <label key={et} style={{display:"flex",alignItems:"center",gap:6,fontSize:13,cursor:"pointer"}}>
+                        <input type="checkbox" checked={(scale.examTypes||[]).includes(et)} onChange={()=>toggleScaleExamType(idx, et)}/>
+                        {et}
+                      </label>
+                    ))}
+                  </div>
+                  {(scale.examTypes||[]).length===0 && (
+                    <div style={{fontSize:12,color:"#dc2626",marginTop:6}}>No exam types selected — {scale.name} won't be used anywhere until at least one is ticked.</div>
+                  )}
+                </div>
+                <div style={{overflowX:"auto"}}>
+                  <table style={{width:"100%",fontSize:13}}>
+                    <thead><tr style={{background:"#fef3c7"}}>{["Min","Max","Grade","Label",""].map(h=><th key={h} style={{padding:"8px 10px",textAlign:"left",color:"#92400e",fontWeight:700}}>{h}</th>)}</tr></thead>
+                    <tbody>
+                      {(scale.bands||[]).map((b,i)=>(
+                        <tr key={i} style={{background:i%2===0?"white":"#fffbeb"}}>
+                          {["min","max","grade","label"].map(f=>(
+                            <td key={f} style={{padding:"4px 6px"}}>
+                              <input value={b[f]} onChange={e=>{
+                                const val = f==="min"||f==="max" ? Number(e.target.value) : e.target.value;
+                                updateScaleBands(idx, arr => arr.map((x,j)=>j===i?{...x,[f]:val}:x));
+                              }} style={{...inp,width:f==="label"?120:70,padding:"4px 6px",fontSize:12}}/>
+                            </td>
+                          ))}
+                          <td style={{padding:"4px 6px"}}><button onClick={()=>updateScaleBands(idx, arr => arr.filter((_,j)=>j!==i))} style={{...btnDanger,padding:"3px 8px",fontSize:11}}>✕</button></td>
+                        </tr>
                       ))}
-                      <td style={{padding:"4px 6px"}}><button onClick={()=>updateSpecialBands(arr => arr.filter((_,j)=>j!==i))} style={{...btnDanger,padding:"3px 8px",fontSize:11}}>✕</button></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              <button onClick={()=>updateSpecialBands(arr => [...arr,{min:0,max:0,grade:"",label:""}])} style={{...btnGhost,marginTop:8,fontSize:12}}>+ Add Band</button>
-            </div>
-          </>
+                    </tbody>
+                  </table>
+                  <button onClick={()=>updateScaleBands(idx, arr => [...arr,{min:0,max:0,grade:"",label:""}])} style={{...btnGhost,marginTop:8,fontSize:12}}>+ Add Band</button>
+                </div>
+              </div>
+            ))}
+          </div>
         ) : (
-          <div style={{fontSize:12,color:"#9ca3af",fontStyle:"italic",padding:"10px 12px",background:"#f9fafb",borderRadius:8}}>No special grading scale set for {specialCls}. It currently follows the standard Grade Bands below.</div>
+          <div style={{fontSize:12,color:"#9ca3af",fontStyle:"italic",padding:"10px 12px",background:"#f9fafb",borderRadius:8}}>No special grading scale set for {specialCls} in {specialYear}. It currently follows the standard Grade Bands below. Click "+ Add Scale" above to create one.</div>
         )}
       </div>
       <div style={{background:"white",borderRadius:12,padding:20,border:"1px solid #e5e7eb"}}>
