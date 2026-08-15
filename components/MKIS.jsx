@@ -1,5 +1,12 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import * as XLSX from "xlsx";
+// The plain "xlsx" package can only READ cell colors, not write them --
+// XLSX.writeFile silently strips any style you set. "xlsx-js-style" is a
+// drop-in replacement with the exact same API that DOES write cell colors,
+// used below just for the Municipal Performance Excel export so its
+// downloaded file actually keeps the colored rows.
+// Run: npm install xlsx-js-style
+import * as XLSXStyle from "xlsx-js-style";
 import JSZip from "jszip";
 import { jsPDF } from "jspdf";
 import html2canvas from "html2canvas";
@@ -223,6 +230,36 @@ function deepMergeObjects(remote, local) {
   for (const k of Object.keys(local)) out[k] = deepMergeObjects(remote[k], local[k]);
   return out;
 }
+// Municipal Performance's shape is { [examType]: { [year]: { schools:[...], inspector } } }.
+// Plain deepMergeObjects treats "schools" as a leaf (it's an array) and lets
+// whichever device saves LAST replace the whole array -- so if one device
+// adds School A while another device (or the periodic background poll)
+// concurrently adds School B to the same exam/year, only one of those two
+// additions survives the next save and the other silently vanishes. This
+// merges "schools" the same id-aware way mergeArrayById already does for
+// the pupil roster, so two people adding/editing different schools in the
+// same table at the same time never wipes out each other's entries.
+function mergeMunicipalPerf(remote, local) {
+  const remoteObj = remote && typeof remote === "object" ? remote : {};
+  const localObj = local && typeof local === "object" ? local : {};
+  const out = { ...remoteObj };
+  for (const examType of Object.keys(localObj)) {
+    const remoteYears = (remoteObj[examType] && typeof remoteObj[examType] === "object") ? remoteObj[examType] : {};
+    const localYears = (localObj[examType] && typeof localObj[examType] === "object") ? localObj[examType] : {};
+    const yearsOut = { ...remoteYears };
+    for (const yr of Object.keys(localYears)) {
+      const remoteRec = remoteYears[yr] || { schools: [], inspector: "" };
+      const localRec = localYears[yr] || { schools: [], inspector: "" };
+      yearsOut[yr] = {
+        schools: mergeArrayById(remoteRec.schools, localRec.schools, null),
+        // inspector is a single typed line for this exam/year -- local intent wins, like mkis_school.
+        inspector: localRec.inspector !== undefined ? localRec.inspector : (remoteRec.inspector || ""),
+      };
+    }
+    out[examType] = yearsOut;
+  }
+  return out;
+}
 // Merge strategy per storage key. "leaf" keys (school/bands/divisions/password)
 // are small, whole-object settings a person edits deliberately on one screen,
 // so local intent simply wins there -- but we still merge them via this same
@@ -239,7 +276,7 @@ const MERGE_STRATEGIES = {
   mkis_changerequests: (remote, local, ctx) => mergeArrayById(remote, local, ctx?.deletedRequestIds),
   mkis_initials: (remote, local) => local,
   mkis_groupwork: (remote, local) => deepMergeObjects(remote, local),
-  mkis_municipalperf: (remote, local) => deepMergeObjects(remote, local),
+  mkis_municipalperf: (remote, local) => mergeMunicipalPerf(remote, local),
   mkis_examtimetable: (remote, local) => deepMergeObjects(remote, local),
   // Locked-entry maps are { "CLASS__TERM__YEAR" (or "...__MONTH" for monthly): true|false }.
   // Deep-merged key-by-key so a Save/Unlock on one device never clobbers a
@@ -1148,6 +1185,53 @@ function exportMunicipalPerfWord({ school, examType, year, fundingLabel, rows, i
   body += `<div style="margin-top:30px;font-size:11pt;">PREPARED BY</div>`;
   body += `<div style="margin-top:26px;font-size:11pt;font-weight:700;">${escapeHtml(inspector||"")}</div>`;
   downloadWordHtml(`${examType} ${year} Municipal Performance`, body, `${safeFileName(examType)}_${year}_Municipal_Performance_${safeFileName(fundingLabel)}.doc`, { pageSize:"297mm 210mm" });
+}
+// Excel export with the same alternating row colors as the Word/PDF
+// versions, written with "xlsx-js-style" (see import above) so the colors
+// actually make it into the downloaded .xlsx file.
+const MP_HEADER_FILL = { patternType: "solid", fgColor: { rgb: "1E40AF" } };
+const MP_ROW_FILL_EVEN = { patternType: "solid", fgColor: { rgb: "FFFFFF" } };
+const MP_ROW_FILL_ODD  = { patternType: "solid", fgColor: { rgb: "EFF6FF" } };
+function exportMunicipalPerfExcel({ school, examType, year, fundingLabel, rows, inspector }) {
+  const headerRow = ["S/N","CENTRE NAME","FUNDING","DIV 1","DIV 1 %","DIV 2","DIV 2 %","DIV 3","DIV 3 %","DIV 4","DIV 4 %","DIV U","DIV U %","ABSENT","TOTAL","CUM. DIV.","BEST AGG.","AVERAGE DIVISION"];
+  const dataRows = rows.map(r => [
+    r.s.name||"-", r.s.funding||"-",
+    r.s.div1||0, `${r.pct1}%`, r.s.div2||0, `${r.pct2}%`, r.s.div3||0, `${r.pct3}%`,
+    r.s.div4||0, `${r.pct4}%`, r.s.divU||0, `${r.pctU}%`, r.s.absent||0, r.total, r.cumDiv,
+    r.s.bestAgg||"-", r.avgDiv!==null?Number(r.avgDiv.toFixed(4)):"-",
+  ]);
+  const numCols = headerRow.length;
+  const aoa = [
+    ["TORORO MUNICIPAL COUNCIL"],
+    ["EDUCATION DEPARTMENT"],
+    [`${year} ${examType.toUpperCase()} ANALYSIS AND OVERALL RANKING OF ${fundingLabel.toUpperCase()} SCHOOLS BASED ON AVERAGE DIVISION`],
+    [],
+    headerRow,
+    ...dataRows.map((row,i) => [i+1, ...row]),
+    [],
+    ["PREPARED BY"],
+    [inspector||""],
+  ];
+  const ws = XLSXStyle.utils.aoa_to_sheet(aoa);
+  ws["!merges"] = [
+    { s:{r:0,c:0}, e:{r:0,c:numCols-1} },
+    { s:{r:1,c:0}, e:{r:1,c:numCols-1} },
+    { s:{r:2,c:0}, e:{r:2,c:numCols-1} },
+  ];
+  ws["!cols"] = headerRow.map((h,i) => (i===1 ? { wch: 26 } : { wch: 11 }));
+  const HEAD_ROW_IDX = 4; // 0-indexed row of headerRow within aoa
+  for (let c = 0; c < numCols; c++) {
+    const headCell = ws[XLSXStyle.utils.encode_cell({ r: HEAD_ROW_IDX, c })];
+    if (headCell) headCell.s = { fill: MP_HEADER_FILL, font: { color: { rgb: "FFFFFF" }, bold: true }, alignment: { horizontal: "center" } };
+    rows.forEach((_, i) => {
+      const cellRef = XLSXStyle.utils.encode_cell({ r: HEAD_ROW_IDX + 1 + i, c });
+      const cell = ws[cellRef];
+      if (cell) cell.s = { fill: i % 2 === 0 ? MP_ROW_FILL_EVEN : MP_ROW_FILL_ODD, alignment: { horizontal: "center" } };
+    });
+  }
+  const wb = XLSXStyle.utils.book_new();
+  XLSXStyle.utils.book_append_sheet(wb, ws, "Municipal Performance");
+  XLSXStyle.writeFile(wb, `${safeFileName(examType)}_${year}_Municipal_Performance_${safeFileName(fundingLabel)}.xlsx`);
 }
 // ─── EXAM TIMETABLE ──────────────────────────────────────────────────────────
 function examTimetableHtmlTable(rows) {
@@ -7020,17 +7104,26 @@ function PleInfo({ students, setStudents, school, markEditing, municipalPerf, se
   const mpSetInspector = (val) => updateMpRecord(cur => ({ ...cur, inspector: val }));
   const mpFilterLabel = mpFilter==="private" ? "Private" : mpFilter==="government" ? "Government" : "General";
   const mpFilteredSchools = mpAllSchools.filter(s => mpFilter==="general" || (s.funding||"Private").toLowerCase()===mpFilter);
-  const mpRows = useMemo(() => {
-    const computed = mpFilteredSchools.map(computeMunicipalRow);
-    // Rank by average division ascending (lower = better); schools with no
-    // data entered yet (avgDiv null) sort to the bottom instead of the top.
-    return [...computed].sort((a,b) => {
-      if (a.avgDiv===null && b.avgDiv===null) return 0;
-      if (a.avgDiv===null) return 1;
-      if (b.avgDiv===null) return -1;
-      return a.avgDiv - b.avgDiv;
-    });
-  }, [mpFilteredSchools]);
+  // IMPORTANT: rows stay in whatever order the schools are stored in --
+  // deliberately NOT re-sorted on every render. This used to sort by
+  // Average Division live, which meant a row could jump to a new position
+  // the instant a teacher typed a single digit into a Div field (its
+  // avgDiv changed, so it re-ranked mid-keystroke). Losing that row from
+  // under the cursor mid-type is what made entered results look like they
+  // "disappeared" -- the digit was typed into a cell that had just moved.
+  // Ranking is now a deliberate, explicit action (see mpRankNow / the
+  // "Rank" button below) instead of something that happens silently while
+  // someone is still entering data.
+  const mpRows = useMemo(() => mpFilteredSchools.map(computeMunicipalRow), [mpFilteredSchools]);
+  // Explicit ranking mechanism: sorts the stored schools list itself by
+  // Average Division ascending (lower = better; schools with no data yet
+  // sink to the bottom) and PERSISTS that as the new order. Only runs when
+  // the user clicks the button below -- never automatically -- so typing
+  // into a Div field never reorders the table out from under them.
+  const mpRankNow = () => updateMpRecord(cur => {
+    const rank = (s) => { const a = computeMunicipalRow(s).avgDiv; return a===null ? Infinity : a; };
+    return { ...cur, schools: [...(cur.schools||[])].sort((a,b) => rank(a) - rank(b)) };
+  });
   const [analyserCounts, setAnalyserCounts] = useState(null); // {I,II,III,IV,U}
   const [analyserMeta, setAnalyserMeta] = useState(null); // {matchedRows, skippedRows}
   const [analyserSchoolName, setAnalyserSchoolName] = useState("");
@@ -7624,12 +7717,17 @@ function PleInfo({ students, setStudents, school, markEditing, municipalPerf, se
                 onChange={(v)=>setMpFilter(v==="General"?"general":v==="Private Only"?"private":"government")}
                 opts={["General","Private Only","Government Only"]}/>
               <button onClick={mpAddSchool} style={btnPrimary}>+ Add School</button>
+              <button onClick={mpRankNow} title="Sorts the table by Average Division, lowest (best) to highest -- runs only when you click it, so it never disturbs you while entering data." style={btnPrimary}>🏆 Rank (Lowest → Highest)</button>
               <button onClick={()=>exportMunicipalPerfWord({ school, examType:mpExamType, year:mpYear, fundingLabel:mpFilterLabel, rows:mpRows, inspector:mpRecord.inspector })} style={btnWord}>📄 Download Word</button>
+              <button onClick={()=>exportMunicipalPerfExcel({ school, examType:mpExamType, year:mpYear, fundingLabel:mpFilterLabel, rows:mpRows, inspector:mpRecord.inspector })} style={btnExcel}>📊 Download Excel</button>
               <button disabled={mpPdfBusy} onClick={async()=>{
                 setMpPdfBusy(true);
                 try { await downloadNodesAsPdf([mpCardRef.current], `${safeFileName(mpExamType)}_${mpYear}_Municipal_Performance_${safeFileName(mpFilterLabel)}.pdf`, "landscape"); }
                 finally { setMpPdfBusy(false); }
               }} style={mpPdfBusy?btnPdfBusy:btnPdf}>{mpPdfBusy?"⏳ Generating...":"📕 Download PDF"}</button>
+            </div>
+            <div style={{fontSize:11,color:"#9ca3af",marginTop:-10,marginBottom:16}}>
+              Schools stay in the order you enter them until you click <b>Rank</b> -- the table won't reorder itself while you're typing.
             </div>
 
             {mpAllSchools.length===0 ? (
