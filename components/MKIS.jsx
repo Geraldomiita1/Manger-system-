@@ -7209,13 +7209,29 @@ function PleInfo({ students, setStudents, school, markEditing, municipalPerf, se
   const mpRows = useMemo(() => mpFilteredSchools.map(computeMunicipalRow), [mpFilteredSchools]);
   // Explicit ranking mechanism: sorts the stored schools list itself by
   // Average Division ascending (lower = better; schools with no data yet
-  // sink to the bottom) and PERSISTS that as the new order. Only runs when
-  // the user clicks the button below -- never automatically -- so typing
-  // into a Div field never reorders the table out from under them.
-  const mpRankNow = () => updateMpRecord(cur => {
+  // sink to the bottom) and PERSISTS that as the new order. This runs when
+  // the "Rank" button is clicked, and also automatically the instant any
+  // download (Word/PDF/Excel) is triggered -- so downloads always come out
+  // ranked even if nobody clicked "Rank" first -- but it never runs on its
+  // own while someone is just typing into a Div field.
+  const mpRankSchools = (schools) => {
     const rank = (s) => { const a = computeMunicipalRow(s).avgDiv; return a===null ? Infinity : a; };
-    return { ...cur, schools: [...(cur.schools||[])].sort((a,b) => rank(a) - rank(b)) };
-  });
+    return [...(schools||[])].sort((a,b) => rank(a) - rank(b));
+  };
+  const mpRankNow = () => updateMpRecord(cur => ({ ...cur, schools: mpRankSchools(cur.schools) }));
+  // Computes ranked rows synchronously for the CURRENT data, for use inside
+  // a download handler. Doesn't wait on React state/re-render timing, so
+  // Word/Excel always export the correct rank order immediately -- it also
+  // calls mpRankNow() alongside it so the on-screen table (and, in turn,
+  // the PDF screenshot of that table) settles into the same ranked order.
+  const mpGetRankedRowsForDownload = () => {
+    const filtered = mpRankSchools(mpAllSchools).filter(s => mpFilter==="general" || (s.funding||"Private").toLowerCase()===mpFilter);
+    return filtered.map(computeMunicipalRow);
+  };
+  // Waits for the next two animation frames -- i.e. until the browser has
+  // actually painted -- so a PDF screenshot taken right after mpRankNow()
+  // captures the newly-ranked table instead of the frame before it reordered.
+  const waitForPaint = () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
   const [analyserCounts, setAnalyserCounts] = useState(null); // {I,II,III,IV,U}
   const [analyserMeta, setAnalyserMeta] = useState(null); // {matchedRows, skippedRows}
   const [analyserSchoolName, setAnalyserSchoolName] = useState("");
@@ -7810,16 +7826,19 @@ function PleInfo({ students, setStudents, school, markEditing, municipalPerf, se
                 opts={["General","Private Only","Government Only"]}/>
               <button onClick={mpAddSchool} style={btnPrimary}>+ Add School</button>
               <button onClick={mpRankNow} title="Sorts the table by Average Division, lowest (best) to highest -- runs only when you click it, so it never disturbs you while entering data." style={btnPrimary}>🏆 Rank (Lowest → Highest)</button>
-              <button onClick={()=>exportMunicipalPerfWord({ school, examType:mpExamType, year:mpYear, fundingLabel:mpFilterLabel, rows:mpRows, inspector:mpRecord.inspector })} style={btnWord}>📄 Download Word</button>
-              <button onClick={()=>exportMunicipalPerfExcel({ school, examType:mpExamType, year:mpYear, fundingLabel:mpFilterLabel, rows:mpRows, inspector:mpRecord.inspector })} style={btnExcel}>📊 Download Excel</button>
+              <button onClick={()=>{ mpRankNow(); exportMunicipalPerfWord({ school, examType:mpExamType, year:mpYear, fundingLabel:mpFilterLabel, rows:mpGetRankedRowsForDownload(), inspector:mpRecord.inspector }); }} style={btnWord}>📄 Download Word</button>
+              <button onClick={()=>{ mpRankNow(); exportMunicipalPerfExcel({ school, examType:mpExamType, year:mpYear, fundingLabel:mpFilterLabel, rows:mpGetRankedRowsForDownload(), inspector:mpRecord.inspector }); }} style={btnExcel}>📊 Download Excel</button>
               <button disabled={mpPdfBusy} onClick={async()=>{
                 setMpPdfBusy(true);
-                try { await downloadNodesAsPdf([mpCardRef.current], `${safeFileName(mpExamType)}_${mpYear}_Municipal_Performance_${safeFileName(mpFilterLabel)}.pdf`, "landscape"); }
-                finally { setMpPdfBusy(false); }
+                try {
+                  mpRankNow();
+                  await waitForPaint(); // let the table finish re-rendering in ranked order before we screenshot it
+                  await downloadNodesAsPdf([mpCardRef.current], `${safeFileName(mpExamType)}_${mpYear}_Municipal_Performance_${safeFileName(mpFilterLabel)}.pdf`, "landscape");
+                } finally { setMpPdfBusy(false); }
               }} style={mpPdfBusy?btnPdfBusy:btnPdf}>{mpPdfBusy?"⏳ Generating...":"📕 Download PDF"}</button>
             </div>
             <div style={{fontSize:11,color:"#9ca3af",marginTop:-10,marginBottom:16}}>
-              Schools stay in the order you enter them until you click <b>Rank</b> -- the table won't reorder itself while you're typing.
+              Schools stay in the order you enter them until you download or click <b>Rank</b> -- the table won't reorder itself while you're typing.
             </div>
 
             {mpAllSchools.length===0 ? (
