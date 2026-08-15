@@ -1,12 +1,5 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import * as XLSX from "xlsx";
-// The plain "xlsx" package can only READ cell colors, not write them --
-// XLSX.writeFile silently strips any style you set. "xlsx-js-style" is a
-// drop-in replacement with the exact same API that DOES write cell colors,
-// used below just for the Municipal Performance Excel export so its
-// downloaded file actually keeps the colored rows.
-// Run: npm install xlsx-js-style
-import * as XLSXStyle from "xlsx-js-style";
 import JSZip from "jszip";
 import { jsPDF } from "jspdf";
 import html2canvas from "html2canvas";
@@ -1186,52 +1179,151 @@ function exportMunicipalPerfWord({ school, examType, year, fundingLabel, rows, i
   body += `<div style="margin-top:26px;font-size:11pt;font-weight:700;">${escapeHtml(inspector||"")}</div>`;
   downloadWordHtml(`${examType} ${year} Municipal Performance`, body, `${safeFileName(examType)}_${year}_Municipal_Performance_${safeFileName(fundingLabel)}.doc`, { pageSize:"297mm 210mm" });
 }
-// Excel export with the same alternating row colors as the Word/PDF
-// versions, written with "xlsx-js-style" (see import above) so the colors
-// actually make it into the downloaded .xlsx file.
-const MP_HEADER_FILL = { patternType: "solid", fgColor: { rgb: "1E40AF" } };
-const MP_ROW_FILL_EVEN = { patternType: "solid", fgColor: { rgb: "FFFFFF" } };
-const MP_ROW_FILL_ODD  = { patternType: "solid", fgColor: { rgb: "EFF6FF" } };
-function exportMunicipalPerfExcel({ school, examType, year, fundingLabel, rows, inspector }) {
-  const headerRow = ["S/N","CENTRE NAME","FUNDING","DIV 1","DIV 1 %","DIV 2","DIV 2 %","DIV 3","DIV 3 %","DIV 4","DIV 4 %","DIV U","DIV U %","ABSENT","TOTAL","CUM. DIV.","BEST AGG.","AVERAGE DIVISION"];
-  const dataRows = rows.map(r => [
-    r.s.name||"-", r.s.funding||"-",
-    r.s.div1||0, `${r.pct1}%`, r.s.div2||0, `${r.pct2}%`, r.s.div3||0, `${r.pct3}%`,
-    r.s.div4||0, `${r.pct4}%`, r.s.divU||0, `${r.pctU}%`, r.s.absent||0, r.total, r.cumDiv,
-    r.s.bestAgg||"-", r.avgDiv!==null?Number(r.avgDiv.toFixed(4)):"-",
-  ]);
-  const numCols = headerRow.length;
-  const aoa = [
-    ["TORORO MUNICIPAL COUNCIL"],
-    ["EDUCATION DEPARTMENT"],
-    [`${year} ${examType.toUpperCase()} ANALYSIS AND OVERALL RANKING OF ${fundingLabel.toUpperCase()} SCHOOLS BASED ON AVERAGE DIVISION`],
-    [],
-    headerRow,
-    ...dataRows.map((row,i) => [i+1, ...row]),
-    [],
-    ["PREPARED BY"],
-    [inspector||""],
+// ─── Colored .xlsx writer (no extra dependency) ─────────────────────────────
+// The "xlsx" package this app already uses (SheetJS community edition) can
+// only READ cell colors, never WRITE them -- that's a Pro-only feature of
+// that library, so XLSX.writeFile silently drops any fill color you set on
+// a cell. Rather than depend on an extra package (which isn't installed in
+// every build of this project and breaks the build when it's missing),
+// this builds a real, valid .xlsx file by hand -- a .xlsx is just a zip of
+// a few small XML parts -- using JSZip, which this app already depends on
+// for other features. That gives genuine colored rows with zero new
+// dependencies.
+function xlsxColLetter(n) {
+  let s = "", i = n + 1;
+  while (i > 0) { const rem = (i - 1) % 26; s = String.fromCharCode(65 + rem) + s; i = Math.floor((i - 1) / 26); }
+  return s;
+}
+function xlsxXmlEscape(s) {
+  return String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
+}
+// Style ids referenced by cells below (see styles.xml built in buildColoredXlsxBlob):
+// 0 default | 1 title (bold, center) | 2 header (bold white on blue) |
+// 3 even row, center | 4 odd row, center | 5 bold label (Prepared By) |
+// 6 even row, left-aligned (names) | 7 odd row, left-aligned (names)
+async function buildColoredXlsxBlob({ sheetName, rows, merges = [], colWidths = [] }) {
+  // rows: array of arrays of { v, s, num? }. num:true => numeric <v>, else inline string.
+  const numCols = Math.max(...rows.map(r => r.length), 1);
+  const rowsXml = rows.map((row, ri) => {
+    const cellsXml = row.map((cell, ci) => {
+      if (cell == null || cell.v === undefined || cell.v === "") {
+        return cell && cell.s ? `<c r="${xlsxColLetter(ci)}${ri + 1}" s="${cell.s}"/>` : "";
+      }
+      const ref = `${xlsxColLetter(ci)}${ri + 1}`;
+      const s = cell.s || 0;
+      if (cell.num) return `<c r="${ref}" s="${s}"><v>${Number(cell.v)}</v></c>`;
+      return `<c r="${ref}" s="${s}" t="inlineStr"><is><t xml:space="preserve">${xlsxXmlEscape(cell.v)}</t></is></c>`;
+    }).join("");
+    return `<row r="${ri + 1}">${cellsXml}</row>`;
+  }).join("");
+  const mergeXml = merges.length
+    ? `<mergeCells count="${merges.length}">${merges.map(m => `<mergeCell ref="${m}"/>`).join("")}</mergeCells>`
+    : "";
+  const colsXml = colWidths.length
+    ? `<cols>${colWidths.map((w, i) => `<col min="${i + 1}" max="${i + 1}" width="${w}" customWidth="1"/>`).join("")}</cols>`
+    : "";
+  const sheetXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">${colsXml}<sheetData>${rowsXml}</sheetData>${mergeXml}</worksheet>`;
+  const stylesXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<fonts count="3">
+<font><sz val="11"/><name val="Calibri"/></font>
+<font><b/><sz val="11"/><name val="Calibri"/></font>
+<font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font>
+</fonts>
+<fills count="5">
+<fill><patternFill patternType="none"/></fill>
+<fill><patternFill patternType="gray125"/></fill>
+<fill><patternFill patternType="solid"><fgColor rgb="FF1E40AF"/><bgColor indexed="64"/></patternFill></fill>
+<fill><patternFill patternType="solid"><fgColor rgb="FFFFFFFF"/><bgColor indexed="64"/></patternFill></fill>
+<fill><patternFill patternType="solid"><fgColor rgb="FFEFF6FF"/><bgColor indexed="64"/></patternFill></fill>
+</fills>
+<borders count="2">
+<border><left/><right/><top/><bottom/><diagonal/></border>
+<border><left style="thin"><color rgb="FF999999"/></left><right style="thin"><color rgb="FF999999"/></right><top style="thin"><color rgb="FF999999"/></top><bottom style="thin"><color rgb="FF999999"/></bottom><diagonal/></border>
+</borders>
+<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
+<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
+<cellXfs count="8">
+<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
+<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment horizontal="center"/></xf>
+<xf numFmtId="0" fontId="2" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center"/></xf>
+<xf numFmtId="0" fontId="0" fillId="3" borderId="1" xfId="0" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center"/></xf>
+<xf numFmtId="0" fontId="0" fillId="4" borderId="1" xfId="0" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center"/></xf>
+<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/>
+<xf numFmtId="0" fontId="0" fillId="3" borderId="1" xfId="0" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="left"/></xf>
+<xf numFmtId="0" fontId="0" fillId="4" borderId="1" xfId="0" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="left"/></xf>
+</cellXfs>
+</styleSheet>`;
+  const workbookXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+<sheets><sheet name="${xlsxXmlEscape(sheetName.slice(0,31))}" sheetId="1" r:id="rId1"/></sheets>
+</workbook>`;
+  const workbookRelsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+</Relationships>`;
+  const rootRelsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>`;
+  const contentTypesXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+<Default Extension="xml" ContentType="application/xml"/>
+<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
+</Types>`;
+  const zip = new JSZip();
+  zip.file("[Content_Types].xml", contentTypesXml);
+  zip.file("_rels/.rels", rootRelsXml);
+  zip.file("xl/workbook.xml", workbookXml);
+  zip.file("xl/_rels/workbook.xml.rels", workbookRelsXml);
+  zip.file("xl/styles.xml", stylesXml);
+  zip.file("xl/worksheets/sheet1.xml", sheetXml);
+  return zip.generateAsync({ type: "blob", mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+}
+async function exportMunicipalPerfExcel({ school, examType, year, fundingLabel, rows, inspector }) {
+  const headers = ["S/N","CENTRE NAME","FUNDING","DIV 1","DIV 1 %","DIV 2","DIV 2 %","DIV 3","DIV 3 %","DIV 4","DIV 4 %","DIV U","DIV U %","ABSENT","TOTAL","CUM. DIV.","BEST AGG.","AVERAGE DIVISION"];
+  const numCols = headers.length;
+  const excelRows = [];
+  excelRows.push([{ v: "TORORO MUNICIPAL COUNCIL", s: 1 }]);
+  excelRows.push([{ v: "EDUCATION DEPARTMENT", s: 1 }]);
+  excelRows.push([{ v: `${year} ${examType.toUpperCase()} ANALYSIS AND OVERALL RANKING OF ${fundingLabel.toUpperCase()} SCHOOLS BASED ON AVERAGE DIVISION`, s: 1 }]);
+  excelRows.push([]); // blank row
+  excelRows.push(headers.map(h => ({ v: h, s: 2 })));
+  rows.forEach((r, i) => {
+    const bandCenter = i % 2 === 0 ? 3 : 4;
+    const bandLeft = i % 2 === 0 ? 6 : 7;
+    excelRows.push([
+      { v: i + 1, s: bandCenter, num: true },
+      { v: r.s.name || "-", s: bandLeft },
+      { v: r.s.funding || "-", s: bandCenter },
+      { v: r.s.div1 || 0, s: bandCenter, num: true }, { v: `${r.pct1}%`, s: bandCenter },
+      { v: r.s.div2 || 0, s: bandCenter, num: true }, { v: `${r.pct2}%`, s: bandCenter },
+      { v: r.s.div3 || 0, s: bandCenter, num: true }, { v: `${r.pct3}%`, s: bandCenter },
+      { v: r.s.div4 || 0, s: bandCenter, num: true }, { v: `${r.pct4}%`, s: bandCenter },
+      { v: r.s.divU || 0, s: bandCenter, num: true }, { v: `${r.pctU}%`, s: bandCenter },
+      { v: r.s.absent || 0, s: bandCenter, num: true },
+      { v: r.total, s: bandCenter, num: true },
+      { v: r.cumDiv, s: bandCenter, num: true },
+      { v: r.s.bestAgg || "-", s: bandCenter },
+      { v: r.avgDiv !== null ? Number(r.avgDiv.toFixed(4)) : "-", s: bandCenter, num: r.avgDiv !== null },
+    ]);
+  });
+  excelRows.push([]); // blank row
+  excelRows.push([{ v: "PREPARED BY", s: 5 }]);
+  excelRows.push([{ v: inspector || "", s: 5 }]);
+  const merges = [
+    `A1:${xlsxColLetter(numCols - 1)}1`,
+    `A2:${xlsxColLetter(numCols - 1)}2`,
+    `A3:${xlsxColLetter(numCols - 1)}3`,
   ];
-  const ws = XLSXStyle.utils.aoa_to_sheet(aoa);
-  ws["!merges"] = [
-    { s:{r:0,c:0}, e:{r:0,c:numCols-1} },
-    { s:{r:1,c:0}, e:{r:1,c:numCols-1} },
-    { s:{r:2,c:0}, e:{r:2,c:numCols-1} },
-  ];
-  ws["!cols"] = headerRow.map((h,i) => (i===1 ? { wch: 26 } : { wch: 11 }));
-  const HEAD_ROW_IDX = 4; // 0-indexed row of headerRow within aoa
-  for (let c = 0; c < numCols; c++) {
-    const headCell = ws[XLSXStyle.utils.encode_cell({ r: HEAD_ROW_IDX, c })];
-    if (headCell) headCell.s = { fill: MP_HEADER_FILL, font: { color: { rgb: "FFFFFF" }, bold: true }, alignment: { horizontal: "center" } };
-    rows.forEach((_, i) => {
-      const cellRef = XLSXStyle.utils.encode_cell({ r: HEAD_ROW_IDX + 1 + i, c });
-      const cell = ws[cellRef];
-      if (cell) cell.s = { fill: i % 2 === 0 ? MP_ROW_FILL_EVEN : MP_ROW_FILL_ODD, alignment: { horizontal: "center" } };
-    });
-  }
-  const wb = XLSXStyle.utils.book_new();
-  XLSXStyle.utils.book_append_sheet(wb, ws, "Municipal Performance");
-  XLSXStyle.writeFile(wb, `${safeFileName(examType)}_${year}_Municipal_Performance_${safeFileName(fundingLabel)}.xlsx`);
+  const colWidths = headers.map((h, i) => (i === 1 ? 26 : 11));
+  const blob = await buildColoredXlsxBlob({ sheetName: "Municipal Performance", rows: excelRows, merges, colWidths });
+  triggerBlobDownload(blob, `${safeFileName(examType)}_${year}_Municipal_Performance_${safeFileName(fundingLabel)}.xlsx`);
 }
 // ─── EXAM TIMETABLE ──────────────────────────────────────────────────────────
 function examTimetableHtmlTable(rows) {
