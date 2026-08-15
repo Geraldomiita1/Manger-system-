@@ -1143,6 +1143,22 @@ function computeMunicipalRow(s) {
   const pct = (v) => total > 0 ? Math.round(v/total*100) : 0;
   return { s, total, cumDiv, avgDiv, pct1:pct(d1), pct2:pct(d2), pct3:pct(d3), pct4:pct(d4), pctU:pct(dU) };
 }
+// Column totals across every school row -- summed division counts, grand
+// total, and the district-wide weighted average division (sum of cumulative
+// division points / sum of pupils), matching how a single school's average
+// division is derived, just rolled up across all centres in the table.
+function computeMunicipalTotals(rows) {
+  const n = (v) => { const x = Number(v); return isNaN(x) ? 0 : x; };
+  let d1=0,d2=0,d3=0,d4=0,dU=0,absent=0,cumDiv=0;
+  rows.forEach(r => {
+    d1 += n(r.s.div1); d2 += n(r.s.div2); d3 += n(r.s.div3); d4 += n(r.s.div4); dU += n(r.s.divU); absent += n(r.s.absent);
+    cumDiv += r.cumDiv;
+  });
+  const total = d1+d2+d3+d4+dU+absent;
+  const avgDiv = total > 0 ? cumDiv/total : null;
+  const pct = (v) => total > 0 ? Math.round(v/total*100) : 0;
+  return { div1:d1, div2:d2, div3:d3, div4:d4, divU:dU, absent, total, cumDiv, avgDiv, pct1:pct(d1), pct2:pct(d2), pct3:pct(d3), pct4:pct(d4), pctU:pct(dU) };
+}
 function municipalPerfHtmlTable(rows) {
   const th = "border:1px solid #999;padding:5px;font-size:8.5pt;background:#1e40af;color:white;";
   const td = "border:1px solid #999;padding:4px;text-align:center;font-size:9pt;";
@@ -1166,6 +1182,21 @@ function municipalPerfHtmlTable(rows) {
     body += `<td style="${td}font-weight:700;">${r.avgDiv!==null?r.avgDiv.toFixed(4):"-"}</td>`;
     body += `</tr>`;
   });
+  const t = computeMunicipalTotals(rows);
+  const totalTd = "border:1px solid #999;padding:4px;text-align:center;font-size:9pt;font-weight:800;background:#dbeafe;";
+  body += `<tr>`;
+  body += `<td style="${totalTd}" colspan="3">TOTAL</td>`;
+  body += `<td style="${totalTd}">${t.div1}</td><td style="${totalTd}">${t.pct1}%</td>`;
+  body += `<td style="${totalTd}">${t.div2}</td><td style="${totalTd}">${t.pct2}%</td>`;
+  body += `<td style="${totalTd}">${t.div3}</td><td style="${totalTd}">${t.pct3}%</td>`;
+  body += `<td style="${totalTd}">${t.div4}</td><td style="${totalTd}">${t.pct4}%</td>`;
+  body += `<td style="${totalTd}">${t.divU}</td><td style="${totalTd}">${t.pctU}%</td>`;
+  body += `<td style="${totalTd}">${t.absent}</td>`;
+  body += `<td style="${totalTd}">${t.total}</td>`;
+  body += `<td style="${totalTd}">${t.cumDiv}</td>`;
+  body += `<td style="${totalTd}">-</td>`;
+  body += `<td style="${totalTd}">${t.avgDiv!==null?t.avgDiv.toFixed(4):"-"}</td>`;
+  body += `</tr>`;
   return `<table style="border-collapse:collapse;width:100%;">${head}${body}</table>`;
 }
 function exportMunicipalPerfWord({ school, examType, year, fundingLabel, rows, inspector }) {
@@ -1313,6 +1344,20 @@ async function exportMunicipalPerfExcel({ school, examType, year, fundingLabel, 
       { v: r.avgDiv !== null ? Number(r.avgDiv.toFixed(4)) : "-", s: bandCenter, num: r.avgDiv !== null },
     ]);
   });
+  const t = computeMunicipalTotals(rows);
+  excelRows.push([
+    { v: "TOTAL", s: 2 }, { v: "", s: 2 }, { v: "", s: 2 },
+    { v: t.div1, s: 2, num: true }, { v: `${t.pct1}%`, s: 2 },
+    { v: t.div2, s: 2, num: true }, { v: `${t.pct2}%`, s: 2 },
+    { v: t.div3, s: 2, num: true }, { v: `${t.pct3}%`, s: 2 },
+    { v: t.div4, s: 2, num: true }, { v: `${t.pct4}%`, s: 2 },
+    { v: t.divU, s: 2, num: true }, { v: `${t.pctU}%`, s: 2 },
+    { v: t.absent, s: 2, num: true },
+    { v: t.total, s: 2, num: true },
+    { v: t.cumDiv, s: 2, num: true },
+    { v: "-", s: 2 },
+    { v: t.avgDiv !== null ? Number(t.avgDiv.toFixed(4)) : "-", s: 2, num: t.avgDiv !== null },
+  ]);
   excelRows.push([]); // blank row
   excelRows.push([{ v: "PREPARED BY", s: 5 }]);
   excelRows.push([{ v: inspector || "", s: 5 }]);
@@ -7745,13 +7790,9 @@ function PleInfo({ students, setStudents, school, markEditing, municipalPerf, se
           <div>
             <div style={{fontSize:14,fontWeight:700,color:"#1e3a6e",marginBottom:16}}>📊 PLE {year} — {school.name} Performance Summary</div>
             {sortedP7.length===0 ? <div style={{color:"#9ca3af",textAlign:"center",padding:24}}>No P7 learners found.</div> : (()=>{
-              const allRecs = sortedP7.map(s=>getRecForStudent(s));
-              const recs = allRecs.filter(r=>r.totalAgg);
-              const absentRecs = allRecs.filter(r=>!r.totalAgg);
+              const recs = sortedP7.map(s=>getRecForStudent(s)).filter(r=>r.totalAgg);
               const divCounts = {"1":0,"2":0,"3":0,"4":0,"U":0};
               recs.forEach(r=>{ const d=String(r.division); if(divCounts[d]!==undefined)divCounts[d]++; });
-              const absentCount = absentRecs.length;
-              const grandTotal = sortedP7.length;
               const subAvg = {};
               PLE_SUBJECTS.forEach(sub=>{
                 const vals = recs.map(r=>parseInt(r.results?.[sub]||0,10)).filter(v=>v>0);
@@ -7774,38 +7815,6 @@ function PleInfo({ students, setStudents, school, markEditing, municipalPerf, se
                       <div style={{fontSize:11,fontWeight:700,color:"#374151"}}>Total Sat</div>
                     </div>
                   </div>
-
-                  {/* ── Division Analysis Table (with totals) ── */}
-                  <div style={{overflowX:"auto",marginBottom:20}}>
-                    <table style={{width:"100%",fontSize:12,borderCollapse:"collapse"}}>
-                      <thead>
-                        <tr style={{background:"#1e3a6e",color:"white"}}>
-                          {["DIV 1","DIV 2","DIV 3","DIV 4","DIV U","ABSENT (X)","TOTAL"].map(h=>(
-                            <th key={h} style={th}>{h}</th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        <tr style={{background:"white"}}>
-                          <td style={{...td,fontWeight:800,color:divColors["1"]}}>{divCounts["1"]}</td>
-                          <td style={{...td,fontWeight:800,color:divColors["2"]}}>{divCounts["2"]}</td>
-                          <td style={{...td,fontWeight:800,color:divColors["3"]}}>{divCounts["3"]}</td>
-                          <td style={{...td,fontWeight:800,color:divColors["4"]}}>{divCounts["4"]}</td>
-                          <td style={{...td,fontWeight:800,color:divColors["U"]}}>{divCounts["U"]}</td>
-                          <td style={{...td,fontWeight:800,color:"#dc2626"}}>{absentCount}</td>
-                          <td style={{...td,fontWeight:900,background:"#eff6ff",color:"#1e3a6e"}}>{grandTotal}</td>
-                        </tr>
-                        <tr style={{background:"#f8fafc"}}>
-                          {["1","2","3","4","U"].map(d=>(
-                            <td key={d} style={{...td,color:"#6b7280"}}>{grandTotal?Math.round(divCounts[d]/grandTotal*100):0}%</td>
-                          ))}
-                          <td style={{...td,color:"#6b7280"}}>{grandTotal?Math.round(absentCount/grandTotal*100):0}%</td>
-                          <td style={{...td,fontWeight:700,color:"#6b7280"}}>100%</td>
-                        </tr>
-                      </tbody>
-                    </table>
-                  </div>
-
                   <div style={{background:"#f8fafc",borderRadius:10,padding:16,marginBottom:16}}>
                     <div style={{fontWeight:700,color:"#1e3a6e",marginBottom:12,fontSize:13}}>Average Aggregate per Subject (lower = better)</div>
                     {PLE_SUBJECTS.map((sub,i)=>(
@@ -7927,6 +7936,24 @@ function PleInfo({ students, setStudents, school, markEditing, municipalPerf, se
                         </tr>
                       ))}
                     </tbody>
+                    <tfoot>
+                      {(()=>{ const t = computeMunicipalTotals(mpRows); return (
+                        <tr style={{background:"#dbeafe",fontWeight:800}}>
+                          <td style={td} colSpan={3}>TOTAL</td>
+                          <td style={td}>{t.div1}</td><td style={{...td,color:"#374151"}}>{t.pct1}%</td>
+                          <td style={td}>{t.div2}</td><td style={{...td,color:"#374151"}}>{t.pct2}%</td>
+                          <td style={td}>{t.div3}</td><td style={{...td,color:"#374151"}}>{t.pct3}%</td>
+                          <td style={td}>{t.div4}</td><td style={{...td,color:"#374151"}}>{t.pct4}%</td>
+                          <td style={td}>{t.divU}</td><td style={{...td,color:"#374151"}}>{t.pctU}%</td>
+                          <td style={td}>{t.absent}</td>
+                          <td style={td}>{t.total}</td>
+                          <td style={td}>{t.cumDiv}</td>
+                          <td style={td}>-</td>
+                          <td style={{...td,color:"#1e40af"}}>{t.avgDiv!==null?t.avgDiv.toFixed(4):"-"}</td>
+                          <td className="no-print" style={td}></td>
+                        </tr>
+                      );})()}
+                    </tfoot>
                   </table>
                 </div>
                 <div style={{padding:"16px 20px",borderTop:"1px solid #e5e7eb"}}>
