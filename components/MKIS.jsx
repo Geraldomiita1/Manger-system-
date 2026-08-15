@@ -7745,9 +7745,13 @@ function PleInfo({ students, setStudents, school, markEditing, municipalPerf, se
           <div>
             <div style={{fontSize:14,fontWeight:700,color:"#1e3a6e",marginBottom:16}}>📊 PLE {year} — {school.name} Performance Summary</div>
             {sortedP7.length===0 ? <div style={{color:"#9ca3af",textAlign:"center",padding:24}}>No P7 learners found.</div> : (()=>{
-              const recs = sortedP7.map(s=>getRecForStudent(s)).filter(r=>r.totalAgg);
+              const allRecs = sortedP7.map(s=>getRecForStudent(s));
+              const recs = allRecs.filter(r=>r.totalAgg);
+              const absentRecs = allRecs.filter(r=>!r.totalAgg);
               const divCounts = {"1":0,"2":0,"3":0,"4":0,"U":0};
               recs.forEach(r=>{ const d=String(r.division); if(divCounts[d]!==undefined)divCounts[d]++; });
+              const absentCount = absentRecs.length;
+              const grandTotal = sortedP7.length;
               const subAvg = {};
               PLE_SUBJECTS.forEach(sub=>{
                 const vals = recs.map(r=>parseInt(r.results?.[sub]||0,10)).filter(v=>v>0);
@@ -7770,6 +7774,38 @@ function PleInfo({ students, setStudents, school, markEditing, municipalPerf, se
                       <div style={{fontSize:11,fontWeight:700,color:"#374151"}}>Total Sat</div>
                     </div>
                   </div>
+
+                  {/* ── Division Analysis Table (with totals) ── */}
+                  <div style={{overflowX:"auto",marginBottom:20}}>
+                    <table style={{width:"100%",fontSize:12,borderCollapse:"collapse"}}>
+                      <thead>
+                        <tr style={{background:"#1e3a6e",color:"white"}}>
+                          {["DIV 1","DIV 2","DIV 3","DIV 4","DIV U","ABSENT (X)","TOTAL"].map(h=>(
+                            <th key={h} style={th}>{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr style={{background:"white"}}>
+                          <td style={{...td,fontWeight:800,color:divColors["1"]}}>{divCounts["1"]}</td>
+                          <td style={{...td,fontWeight:800,color:divColors["2"]}}>{divCounts["2"]}</td>
+                          <td style={{...td,fontWeight:800,color:divColors["3"]}}>{divCounts["3"]}</td>
+                          <td style={{...td,fontWeight:800,color:divColors["4"]}}>{divCounts["4"]}</td>
+                          <td style={{...td,fontWeight:800,color:divColors["U"]}}>{divCounts["U"]}</td>
+                          <td style={{...td,fontWeight:800,color:"#dc2626"}}>{absentCount}</td>
+                          <td style={{...td,fontWeight:900,background:"#eff6ff",color:"#1e3a6e"}}>{grandTotal}</td>
+                        </tr>
+                        <tr style={{background:"#f8fafc"}}>
+                          {["1","2","3","4","U"].map(d=>(
+                            <td key={d} style={{...td,color:"#6b7280"}}>{grandTotal?Math.round(divCounts[d]/grandTotal*100):0}%</td>
+                          ))}
+                          <td style={{...td,color:"#6b7280"}}>{grandTotal?Math.round(absentCount/grandTotal*100):0}%</td>
+                          <td style={{...td,fontWeight:700,color:"#6b7280"}}>100%</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+
                   <div style={{background:"#f8fafc",borderRadius:10,padding:16,marginBottom:16}}>
                     <div style={{fontWeight:700,color:"#1e3a6e",marginBottom:12,fontSize:13}}>Average Aggregate per Subject (lower = better)</div>
                     {PLE_SUBJECTS.map((sub,i)=>(
