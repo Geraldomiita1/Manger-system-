@@ -57,6 +57,14 @@ const EXAM_TIMETABLE_INVIGILATORS = ["MR OMIITA GERALD","MR EMURON JOHN","MR ODO
 // { upper: { [term]: { rows:[{id,date,time,exam,cls,subject,venue,invigilators:[]}], preparedBy:"" } },
 //   lower: { [term]: { rows:[...], preparedBy:"" } } }
 const DEFAULT_EXAM_TIMETABLE = {};
+// Reports module: narrative drafts (Introduction/Activities/.../Conclusion +
+// optional Performance Summary) keyed by report identity, e.g.
+// "CT__P5__Term I__2026" for a Class Teacher Report, "DEPT__English__Term
+// I__2026" for a Department Report, "GEN__Term I__2026" for the General
+// School Report. The graphs/statistics themselves are never stored here --
+// only the teacher's own written text -- since the numbers are always
+// recomputed live from termMarks/monthlyMarks/mockMarks/PLE data.
+const DEFAULT_REPORTS = {};
 const TERM_MONTHS = {
   "Term I": ["FEB","MAR","APR"],
   "Term II": ["MAY","JUN","JUL"],
@@ -115,7 +123,7 @@ const DEFAULT_SCHOOL = {
 const STORAGE_KEYS = [
   "mkis_students","mkis_termmarks","mkis_monthlymarks","mkis_initials",
   "mkis_bands","mkis_special_bands","mkis_divisions","mkis_school","mkis_accounts","mkis_changerequests",
-  "mkis_locked_term","mkis_locked_monthly","mkis_groupwork","mkis_municipalperf","mkis_examtimetable",
+  "mkis_locked_term","mkis_locked_monthly","mkis_groupwork","mkis_municipalperf","mkis_examtimetable","mkis_reports",
 ];
 // One-time migration: if a browser still has old localStorage data and the
 // shared store is empty, lift it into shared storage so nothing is lost.
@@ -179,7 +187,7 @@ const KEY_LABEL = {
   mkis_students:"Students", mkis_termmarks:"Term Marks", mkis_monthlymarks:"Monthly Marks",
   mkis_bands:"Grade Bands", mkis_special_bands:"Special Grading Scale", mkis_divisions:"Divisions", mkis_school:"School Settings",
   mkis_accounts:"Accounts", mkis_changerequests:"Change Requests", mkis_initials:"Initials",
-  mkis_locked_term:"Term Lock", mkis_locked_monthly:"Monthly Lock", mkis_groupwork:"Group Work", mkis_municipalperf:"Municipal Performance", mkis_examtimetable:"Exam Timetable", mkis_mock_marks:"Mock Results", mkis_pledata:"PLE Results",
+  mkis_locked_term:"Term Lock", mkis_locked_monthly:"Monthly Lock", mkis_groupwork:"Group Work", mkis_municipalperf:"Municipal Performance", mkis_examtimetable:"Exam Timetable", mkis_mock_marks:"Mock Results", mkis_pledata:"PLE Results", mkis_reports:"Reports",
 };
 // ─── NO-DATA-LOSS WRITE LAYER ───────────────────────────────────────────────
 // Problem this solves: two devices can each hold a slightly different local
@@ -286,6 +294,11 @@ const MERGE_STRATEGIES = {
   // termMarks/monthlyMarks so one device saving PLE data for one pupil can
   // never wipe out a concurrent edit to a different pupil's record.
   mkis_pledata: (remote, local) => deepMergeObjects(remote, local),
+  // Report narrative drafts, keyed by report identity -- deep-merged so one
+  // device saving its Class Teacher Report draft can never wipe out a
+  // concurrent edit to a different report (or a not-yet-seen remote edit
+  // to the SAME report) on another device.
+  mkis_reports: (remote, local) => deepMergeObjects(remote, local),
 };
 // Reads the freshest shared value, merges in the local change using the
 // strategy for that key, writes the merged result back, and returns it so
@@ -764,6 +777,20 @@ function ordinalSuffix(n) {
   const v = n % 100;
   return (s[(v-20)%10] || s[v] || s[0]);
 }
+// Zero-pads single-digit serial/row numbers (S/N columns) so 4 -> "04",
+// matching the two-digit convention used on Result Sheets and Monthly Sheets.
+function padSN(n) {
+  return n < 10 ? `0${n}` : String(n);
+}
+// Zero-pads TOT MK to always show 3 digits (e.g. 45 -> "045", 7 -> "007"),
+// used on Result Sheets, Report Cards, Monthly Cards and Monthly Slips.
+// Non-numeric/placeholder values (e.g. "-") are passed through unchanged.
+function padTotMk(n) {
+  if (n === undefined || n === null || n === "" || n === "-") return n;
+  const num = Number(n);
+  if (isNaN(num)) return n;
+  return num < 100 ? String(num).padStart(3, "0") : String(num);
+}
 function clampMark(val, max = 100) {
   if (val === undefined || val === null || val === "") return undefined;
   const n = Number(val);
@@ -932,7 +959,7 @@ function resultSheetHtmlTable({ subjects, isLower, sortedRows }) {
         body += `<td style="${td}background:#fff7ed;">${p.isX ? "X" : (p.av !== undefined ? p.agg : "-")}</td>`;
       });
     }
-    body += `<td style="${td}font-weight:700;background:#ede9fe;">${r.totMk || "-"}</td>`;
+    body += `<td style="${td}font-weight:700;background:#ede9fe;">${padTotMk(r.totMk) || "-"}</td>`;
     if (!isLower) {
       body += `<td style="${td}background:#ede9fe;${r.hasX ? "color:#dc2626;font-weight:700;" : ""}">${r.hasX ? "X" : (r.totAgg || "-")}</td>`;
       body += `<td style="${td}font-weight:700;color:${r.hasX ? "#dc2626" : "#1e40af"};">${r.hasX ? "X" : (r.totMk ? r.div : "-")}</td>`;
@@ -985,7 +1012,7 @@ function monthlySheetHtmlTable({ subjects, isLower, sortedRows }) {
         body += `<td style="${td}background:#fff7ed;font-weight:600;${p.isX ? "color:#dc2626;" : ""}">${p.isX ? "X" : (p.mk !== undefined ? p.agg : "-")}</td>`;
       }
     });
-    body += `<td style="${td}font-weight:700;background:#ede9fe;">${r.totMk || "-"}</td>`;
+    body += `<td style="${td}font-weight:700;background:#ede9fe;">${padTotMk(r.totMk) || "-"}</td>`;
     if (!isLower) {
       body += `<td style="${td}background:#ede9fe;${r.hasX ? "color:#dc2626;font-weight:700;" : ""}">${r.hasX ? "X" : (r.totAgg || "-")}</td>`;
       body += `<td style="${td}font-weight:700;color:${r.hasX ? "#dc2626" : "#1e40af"};">${r.hasX ? "X" : (r.totMk ? r.div : "-")}</td>`;
@@ -1433,7 +1460,7 @@ function resultSheetHeaderRow(isLower, subjects) {
   return head;
 }
 function resultSheetDataRow(r, i, isLower) {
-  const row = [i + 1, r.s.name];
+  const row = [padSN(i + 1), r.s.name];
   r.perSub.forEach(p => {
     if (isLower) {
       row.push(p.isX ? "X" : (p.av ?? "-"));
@@ -1444,7 +1471,7 @@ function resultSheetDataRow(r, i, isLower) {
       row.push(p.isX ? "X" : (p.av !== undefined ? p.agg : "-"));
     }
   });
-  row.push(r.totMk || "-");
+  row.push(padTotMk(r.totMk) || "-");
   if (!isLower) {
     row.push(r.hasX ? "X" : (r.totAgg || "-"));
     row.push(r.hasX ? "X" : (r.totMk ? r.div : "-"));
@@ -1513,13 +1540,13 @@ function monthlySheetHeaderRow(isLower, subjects) {
   return head;
 }
 function monthlySheetDataRow(r, i, isLower) {
-  const row = [i + 1, r.s.name];
+  const row = [padSN(i + 1), r.s.name];
   r.perSub.forEach(p => {
     if (isLower) row.push(p.mk ?? "-");
     else { row.push(p.mk ?? "-"); row.push(p.isX ? "X" : (p.mk !== undefined ? p.agg : "-")); }
   });
   // Total marks are unaffected by X — only sum subjects actually attempted.
-  row.push(r.totMk || "-");
+  row.push(padTotMk(r.totMk) || "-");
   if (!isLower) {
     row.push(r.hasX ? "X" : (r.totAgg || "-"));
     row.push(r.hasX ? "X" : (r.totMk ? r.div : "-"));
@@ -1631,8 +1658,8 @@ function exportMonthlyCardsWord({ school, cls, term, year, isLower, subjects, ca
           : `<td style="border:1px solid #999;padding:4px;text-align:center;background:${bg};">${p.mk !== undefined ? p.mk : "-"}</td><td style="border:1px solid #999;padding:4px;text-align:center;background:#fff7ed;">${p.agg !== undefined ? p.agg : "-"}</td>`
       ).join("");
       const totCells = isLower
-        ? `<td style="border:1px solid #999;padding:4px;text-align:center;font-weight:bold;background:#ede9fe;">${totMk > 0 ? totMk : "-"}</td><td style="border:1px solid #999;padding:4px;text-align:center;">${pos && pos !== "-" ? ordinal(pos) : "-"}</td>`
-        : `<td style="border:1px solid #999;padding:4px;text-align:center;font-weight:bold;background:#ede9fe;">${totMk > 0 ? totMk : "-"}</td><td style="border:1px solid #999;padding:4px;text-align:center;background:#ede9fe;">${totAgg > 0 ? totAgg : "-"}</td><td style="border:1px solid #999;padding:4px;text-align:center;font-weight:bold;">${totMk > 0 ? div : "-"}</td><td style="border:1px solid #999;padding:4px;text-align:center;">${pos && pos !== "-" ? ordinal(pos) : "-"}</td>`;
+        ? `<td style="border:1px solid #999;padding:4px;text-align:center;font-weight:bold;background:#ede9fe;">${totMk > 0 ? padTotMk(totMk) : "-"}</td><td style="border:1px solid #999;padding:4px;text-align:center;">${pos && pos !== "-" ? ordinal(pos) : "-"}</td>`
+        : `<td style="border:1px solid #999;padding:4px;text-align:center;font-weight:bold;background:#ede9fe;">${totMk > 0 ? padTotMk(totMk) : "-"}</td><td style="border:1px solid #999;padding:4px;text-align:center;background:#ede9fe;">${totAgg > 0 ? totAgg : "-"}</td><td style="border:1px solid #999;padding:4px;text-align:center;font-weight:bold;">${totMk > 0 ? div : "-"}</td><td style="border:1px solid #999;padding:4px;text-align:center;">${pos && pos !== "-" ? ordinal(pos) : "-"}</td>`;
       body += `<tr><td style="border:1px solid #999;padding:4px;font-weight:bold;background:#dbeafe;text-align:left;">${escapeHtml(month)}</td>${subCells}${totCells}</tr>`;
     });
     body += `<tr><td colspan="100" style="border:1px solid #999;padding:4px;font-size:9pt;color:#6b7280;">Total pupils in class: <b>${totalInClass}</b></td></tr>`;
@@ -1705,7 +1732,7 @@ function exportReportCardsWord({ school, cls, term, year, isLower, rows, allPosi
     const totColspan = isLower ? 1 : 3;
     body += `<tr style="background:#fef3c7;font-weight:bold;">
       <td style="border:1px solid #999;padding:5px;text-align:left;" colspan="${totColspan + 1}">TOTAL</td>
-      <td style="border:1px solid #999;padding:5px;text-align:center;font-size:12pt;">${totMk || "-"}</td>
+      <td style="border:1px solid #999;padding:5px;text-align:center;font-size:12pt;">${padTotMk(totMk) || "-"}</td>
       ${!isLower ? `<td style="border:1px solid #999;padding:5px;text-align:center;color:#dc2626;">${hasX ? "X" : totAgg || "-"}</td>` : ""}
       <td style="border:1px solid #999;padding:5px;"></td><td style="border:1px solid #999;padding:5px;"></td>
     </tr>`;
@@ -2166,7 +2193,7 @@ function SchoolCrest({ size = 64, ink = "#0f1115", paper = "#ffffff" }) {
     </svg>
   );
 }
-const PAGES = ["DASHBOARD","MARK ENTRY","MONTHLY EXAMS","GROUP WORK","EXAM TIMETABLE","MONTHLY CARDS","MONTHLY SLIPS","RESULT SHEETS","REPORT CARDS","LEARNERS","PUPIL PROFILE","SWEEPING ROTA","MOCK INFO","PLE INFO","MANAGE REQUESTS","SETTINGS","AUDIT LOG","DOWNLOAD CENTRE"];
+const PAGES = ["DASHBOARD","MARK ENTRY","MONTHLY EXAMS","GROUP WORK","EXAM TIMETABLE","MONTHLY CARDS","MONTHLY SLIPS","RESULT SHEETS","REPORT CARDS","REPORTS","LEARNERS","PUPIL PROFILE","SWEEPING ROTA","MOCK INFO","PLE INFO","MANAGE REQUESTS","SETTINGS","AUDIT LOG","DOWNLOAD CENTRE"];
 // Pages only the admin account can see/use. Teachers never see these in the sidebar.
 const ADMIN_ONLY_PAGES = ["MANAGE REQUESTS", "SETTINGS", "AUDIT LOG"];
 // ─── APP ─────────────────────────────────────────────────────────────────────
@@ -2194,6 +2221,7 @@ export default function App() {
   const [groupWork, setGroupWork] = useState(DEFAULT_GROUP_WORK);
   const [municipalPerf, setMunicipalPerf] = useState(DEFAULT_MUNICIPAL_PERF);
   const [examTimetable, setExamTimetable] = useState(DEFAULT_EXAM_TIMETABLE);
+  const [reportsData, setReportsData] = useState(DEFAULT_REPORTS);
   const [bands, setBands] = useState(DEFAULT_BANDS);
   const [specialBands, setSpecialBands] = useState(DEFAULT_SPECIAL_BANDS);
   const [divisions, setDivisions] = useState(DEFAULT_DIVISIONS);
@@ -2222,11 +2250,11 @@ export default function App() {
   // effects and the poll loop so neither has to be re-created on every render
   const setters = { mkis_students: setStudents, mkis_termmarks: setTermMarks, mkis_monthlymarks: setMonthlyMarks,
     mkis_bands: setBands, mkis_special_bands: setSpecialBands, mkis_divisions: setDivisions, mkis_school: setSchool, mkis_accounts: setAccounts, mkis_changerequests: setChangeRequests, mkis_initials: setInitials,
-    mkis_locked_term: setLockedTerm, mkis_locked_monthly: setLockedMonthly, mkis_groupwork: setGroupWork, mkis_municipalperf: setMunicipalPerf, mkis_examtimetable: setExamTimetable };
+    mkis_locked_term: setLockedTerm, mkis_locked_monthly: setLockedMonthly, mkis_groupwork: setGroupWork, mkis_municipalperf: setMunicipalPerf, mkis_examtimetable: setExamTimetable, mkis_reports: setReportsData };
   const stateRef = useRef({});
   stateRef.current = { mkis_students: students, mkis_termmarks: termMarks, mkis_monthlymarks: monthlyMarks,
     mkis_bands: bands, mkis_special_bands: specialBands, mkis_divisions: divisions, mkis_school: school, mkis_accounts: accounts, mkis_changerequests: changeRequests, mkis_initials: initials,
-    mkis_locked_term: lockedTerm, mkis_locked_monthly: lockedMonthly, mkis_groupwork: groupWork, mkis_municipalperf: municipalPerf, mkis_examtimetable: examTimetable };
+    mkis_locked_term: lockedTerm, mkis_locked_monthly: lockedMonthly, mkis_groupwork: groupWork, mkis_municipalperf: municipalPerf, mkis_examtimetable: examTimetable, mkis_reports: reportsData };
   // last value WE wrote (or loaded) per key, serialized -- used to tell "a
   // remote device changed this" apart from "this is just our own save echoing back"
   const lastSeenRef = useRef({});
@@ -2345,7 +2373,7 @@ export default function App() {
     let mounted = true;
     (async () => {
       await migrateLocalStorageOnce();
-      const [s, tm, mm, b, sb, d, sc, acc, reqs, ini, lt, lm, gw, mp, et] = await Promise.all([
+      const [s, tm, mm, b, sb, d, sc, acc, reqs, ini, lt, lm, gw, mp, et, rp] = await Promise.all([
         loadShared("mkis_students", []),
         loadShared("mkis_termmarks", {}),
         loadShared("mkis_monthlymarks", {}),
@@ -2361,6 +2389,7 @@ export default function App() {
         loadShared("mkis_groupwork", DEFAULT_GROUP_WORK),
         loadShared("mkis_municipalperf", DEFAULT_MUNICIPAL_PERF),
         loadShared("mkis_examtimetable", DEFAULT_EXAM_TIMETABLE),
+        loadShared("mkis_reports", DEFAULT_REPORTS),
       ]);
       if (!mounted) return;
       setStudents(s); setTermMarks(tm); setMonthlyMarks(mm);
@@ -2381,11 +2410,11 @@ export default function App() {
       // school uploaded their own), so the built-in crest still shows up for
       // schools that never touched the logo field.
       setSchool({ ...DEFAULT_SCHOOL, ...sc, logo: sc?.logo || DEFAULT_SCHOOL.logo }); setAccounts(finalAccounts); setChangeRequests(reqs || []); setInitials(ini);
-      setLockedTerm(lt || {}); setLockedMonthly(lm || {}); setGroupWork(gw || {}); setMunicipalPerf(mp || {}); setExamTimetable(et || DEFAULT_EXAM_TIMETABLE);
+      setLockedTerm(lt || {}); setLockedMonthly(lm || {}); setGroupWork(gw || {}); setMunicipalPerf(mp || {}); setExamTimetable(et || DEFAULT_EXAM_TIMETABLE); setReportsData(rp || DEFAULT_REPORTS);
       lastSeenRef.current = { mkis_students: JSON.stringify(s), mkis_termmarks: JSON.stringify(tm),
         mkis_monthlymarks: JSON.stringify(mm), mkis_bands: JSON.stringify(b), mkis_special_bands: JSON.stringify(sb || {}), mkis_divisions: JSON.stringify(d),
         mkis_school: JSON.stringify(sc), mkis_accounts: JSON.stringify(finalAccounts), mkis_changerequests: JSON.stringify(reqs || []), mkis_initials: JSON.stringify(ini),
-        mkis_locked_term: JSON.stringify(lt || {}), mkis_locked_monthly: JSON.stringify(lm || {}), mkis_groupwork: JSON.stringify(gw || {}), mkis_municipalperf: JSON.stringify(mp || {}), mkis_examtimetable: JSON.stringify(et || DEFAULT_EXAM_TIMETABLE) };
+        mkis_locked_term: JSON.stringify(lt || {}), mkis_locked_monthly: JSON.stringify(lm || {}), mkis_groupwork: JSON.stringify(gw || {}), mkis_municipalperf: JSON.stringify(mp || {}), mkis_examtimetable: JSON.stringify(et || DEFAULT_EXAM_TIMETABLE), mkis_reports: JSON.stringify(rp || DEFAULT_REPORTS) };
       setDataReady(true);
       setLastSyncedAt(new Date());
     })();
@@ -2440,6 +2469,15 @@ export default function App() {
   useEffect(() => { if (dataReady) queueKeySave("mkis_groupwork"); }, [groupWork, dataReady, queueKeySave]);
   useEffect(() => { if (dataReady) queueKeySave("mkis_municipalperf"); }, [municipalPerf, dataReady, queueKeySave]);
   useEffect(() => { if (dataReady) queueKeySave("mkis_examtimetable"); }, [examTimetable, dataReady, queueKeySave]);
+  useEffect(() => {
+    if (!dataReady) return;
+    // Debounced -- same reasoning as mkis_school/mkis_bands above: the
+    // Reports narrative fields are plain textareas updated on every
+    // keystroke, so only the LAST scheduled save (700ms after typing
+    // pauses) actually fires.
+    const t = setTimeout(() => { queueKeySave("mkis_reports"); }, 700);
+    return () => clearTimeout(t);
+  }, [reportsData, dataReady, queueKeySave]);
   useEffect(() => {
     if (!dataReady) return;
     // Debounced -- see the mkis_bands effect above for why.
@@ -2856,6 +2894,7 @@ export default function App() {
     if (d.groupWork)    { forceWriteRef.current.add("mkis_groupwork"); setGroupWork(d.groupWork); }
     if (d.municipalPerf){ forceWriteRef.current.add("mkis_municipalperf"); setMunicipalPerf(d.municipalPerf); }
     if (d.examTimetable){ forceWriteRef.current.add("mkis_examtimetable"); setExamTimetable(d.examTimetable); }
+    if (d.reportsData)  { forceWriteRef.current.add("mkis_reports"); setReportsData(d.reportsData); }
     if (d.bands)         setBands(d.bands);
     if (d.specialBands)  setSpecialBands(d.specialBands);
     if (d.divisions)     setDivisions(d.divisions);
@@ -2963,7 +3002,7 @@ export default function App() {
       </div>
     );
   }
-  const props = { students, setStudents, termMarks, setTermMarks, monthlyMarks, setMonthlyMarks, groupWork, setGroupWork, municipalPerf, setMunicipalPerf, examTimetable, setExamTimetable, bands, setBands, specialBands, setSpecialBands, divisions, setDivisions, school, setSchool, accounts, setAccounts, initials, setInitials, updateTermMark, updateMonthlyMark, transferTermMarks, transferMonthlyMarks, resetMonthlyMonth, restoreMonthlyMonth, monthlyResetBackups, resetTermClass, restoreTermClass, termResetBackups, requestOrApplyTermMark, requestOrApplyMonthlyMark, addStudent, deleteStudent, dangerDeleteAllStudents, dangerDeleteAllResults, dangerResetEverything, forceRestoreData, promoteStudents, demoteStudents, openPupilProfile, role, currentUser, changeRequests, submitChangeRequest, approveChangeRequest, rejectChangeRequest, lockedTerm, lockTermEntry, unlockTermEntry, lockedMonthly, lockMonthlyEntry, unlockMonthlyEntry, requestUnlockTerm, requestUnlockMonthly, markEditing, stampAudit, dashboardPerfTerm, setDashboardPerfTerm, dashboardPerfYear, setDashboardPerfYear };
+  const props = { students, setStudents, termMarks, setTermMarks, monthlyMarks, setMonthlyMarks, groupWork, setGroupWork, municipalPerf, setMunicipalPerf, examTimetable, setExamTimetable, bands, setBands, specialBands, setSpecialBands, divisions, setDivisions, school, setSchool, accounts, setAccounts, initials, setInitials, reportsData, setReportsData, updateTermMark, updateMonthlyMark, transferTermMarks, transferMonthlyMarks, resetMonthlyMonth, restoreMonthlyMonth, monthlyResetBackups, resetTermClass, restoreTermClass, termResetBackups, requestOrApplyTermMark, requestOrApplyMonthlyMark, addStudent, deleteStudent, dangerDeleteAllStudents, dangerDeleteAllResults, dangerResetEverything, forceRestoreData, promoteStudents, demoteStudents, openPupilProfile, role, currentUser, changeRequests, submitChangeRequest, approveChangeRequest, rejectChangeRequest, lockedTerm, lockTermEntry, unlockTermEntry, lockedMonthly, lockMonthlyEntry, unlockMonthlyEntry, requestUnlockTerm, requestUnlockMonthly, markEditing, stampAudit, dashboardPerfTerm, setDashboardPerfTerm, dashboardPerfYear, setDashboardPerfYear };
   return (
     <div className="app-shell" style={{display:"flex",minHeight:"100vh",fontFamily:"'Segoe UI',system-ui,sans-serif",background:"#f1f5f9"}}>
       {/* SIDEBAR */}
@@ -2976,7 +3015,7 @@ export default function App() {
         </div>
         <nav style={{flex:1,padding:"8px 0"}}>
           {PAGES.filter(p => !ADMIN_ONLY_PAGES.includes(p) || role==="admin").map(p => {
-            const icons = {"DASHBOARD":"📊","MARK ENTRY":"📝","MONTHLY EXAMS":"📅","GROUP WORK":"👨‍👩‍👧‍👦","EXAM TIMETABLE":"🗓️","MONTHLY CARDS":"🗂️","MONTHLY SLIPS":"🎫","RESULT SHEETS":"📋","REPORT CARDS":"🎓","LEARNERS":"👥","PUPIL PROFILE":"📈","SWEEPING ROTA":"🧹","MOCK INFO":"📄","PLE INFO":"🏅","MANAGE REQUESTS":"🛂","SETTINGS":"⚙️","AUDIT LOG":"🕓","DOWNLOAD CENTRE":"📥"};
+            const icons = {"DASHBOARD":"📊","MARK ENTRY":"📝","MONTHLY EXAMS":"📅","GROUP WORK":"👨‍👩‍👧‍👦","EXAM TIMETABLE":"🗓️","MONTHLY CARDS":"🗂️","MONTHLY SLIPS":"🎫","RESULT SHEETS":"📋","REPORT CARDS":"🎓","REPORTS":"📈","LEARNERS":"👥","PUPIL PROFILE":"📈","SWEEPING ROTA":"🧹","MOCK INFO":"📄","PLE INFO":"🏅","MANAGE REQUESTS":"🛂","SETTINGS":"⚙️","AUDIT LOG":"🕓","DOWNLOAD CENTRE":"📥"};
             const pendingCount = p==="MANAGE REQUESTS" ? changeRequests.filter(r=>r.status==="pending").length : 0;
             return (
               <button key={p} onClick={()=>setPage(p)}
@@ -3058,6 +3097,7 @@ export default function App() {
           {page==="MONTHLY SLIPS" && <MonthlySlips {...props} />}
           {page==="RESULT SHEETS" && <ResultSheets {...props} />}
           {page==="REPORT CARDS" && <ReportCards {...props} />}
+          {page==="REPORTS" && <Reports {...props} />}
           {page==="LEARNERS" && <Students {...props} />}
           {page==="PUPIL PROFILE" && <PupilProfile students={students} termMarks={termMarks} monthlyMarks={monthlyMarks} bands={bands} divisions={divisions} initialStudentId={pupilProfileTargetId} onConsumeInitial={()=>setPupilProfileTargetId(null)} />}
           {page==="SWEEPING ROTA" && <SweepingRota students={students} school={school} markEditing={markEditing} />}
@@ -6480,7 +6520,7 @@ function TermlyMonthlyCard({ school, student, monthData, term, year, cls, isLowe
                           <td style={{...td,background:mIdx%2===0?"#fff7ed":"#fef3c7",fontWeight:(p.isX||p.agg!==undefined)?700:400,color:p.isX?"#dc2626":(p.agg!==undefined?"#92400e":"#9ca3af"),fontSize:11}}>{hasX&&p.isX?"X":(p.agg!==undefined?p.agg:"-")}</td>
                         </React.Fragment>
                   ))}
-                  <td style={{...td,fontWeight:700,background:mIdx%2===0?"#ede9fe":"#f5f3ff",color:"#4c1d95",fontSize:13}}>{totMk>0?totMk:"-"}</td>
+                  <td style={{...td,fontWeight:700,background:mIdx%2===0?"#ede9fe":"#f5f3ff",color:"#4c1d95",fontSize:13}}>{totMk>0?padTotMk(totMk):"-"}</td>
                   {!isLower && <>
                     <td style={{...td,background:mIdx%2===0?"#ede9fe":"#f5f3ff",fontWeight:700,color:hasX?"#dc2626":"#4c1d95"}}>{hasX?"X":(totAgg>0?totAgg:"-")}</td>
                     <td style={{...td,fontWeight:700,color:hasX?"#dc2626":"#1e40af"}}>{hasX?"X":(totMk>0?div:"-")}</td>
@@ -6722,7 +6762,7 @@ function MonthlySlip({ school, student, monthData, term, year, cls, isLower, sub
                         <td style={{...td,background:mIdx%2===0?"#fff7ed":"#fef3c7",fontWeight:(p.isX||p.agg!==undefined)?800:400,color:p.isX?"#dc2626":(p.agg!==undefined?"#92400e":"#9ca3af"),fontSize:12,padding:"0 2px",verticalAlign:"middle"}}>{hasX&&p.isX?"X":(p.agg!==undefined?p.agg:"-")}</td>
                       </React.Fragment>
                 ))}
-                <td style={{...td,fontWeight:800,background:mIdx%2===0?"#ede9fe":"#ddd6fe",color:"#111827",fontSize:10,padding:"0 2px",verticalAlign:"middle"}}>{totMk>0?totMk:"-"}</td>
+                <td style={{...td,fontWeight:800,background:mIdx%2===0?"#ede9fe":"#ddd6fe",color:"#111827",fontSize:10,padding:"0 2px",verticalAlign:"middle"}}>{totMk>0?padTotMk(totMk):"-"}</td>
                 {!isLower && <>
                   <td style={{...td,background:mIdx%2===0?"#fff7ed":"#fef3c7",fontWeight:800,color:hasX?"#dc2626":"#92400e",fontSize:10,padding:"0 2px",verticalAlign:"middle"}}>{hasX?"X":(totAgg>0?totAgg:"-")}</td>
                   <td style={{...td,fontWeight:800,color:hasX?"#dc2626":"#1e40af",fontSize:12,padding:"0 2px",verticalAlign:"middle"}}>{hasX?"X":(totMk>0?div:"-")}</td>
@@ -8283,7 +8323,7 @@ function ResultSheets({ students, termMarks, bands: defaultBands, specialBands, 
             <tbody>
               {sortedRows.map((r,i)=>(
                 <tr key={r.s.id} style={{background:i%2===0?"white":"#f8fafc"}}>
-                  <td style={td}>{i+1}</td>
+                  <td style={td}>{padSN(i+1)}</td>
                   <td style={{...td,fontWeight:600,textAlign:"left"}}>{r.s.name}</td>
                   {isLower
                     ?r.perSub.map(p=><td key={p.sub} style={td}>{p.isX?"X":p.av??"-"}</td>)
@@ -8296,7 +8336,7 @@ function ResultSheets({ students, termMarks, bands: defaultBands, specialBands, 
                         </React.Fragment>
                       ))
                   }
-                  <td style={{...td,fontWeight:700,background:"#ede9fe"}}>{r.totMk||"-"}</td>
+                  <td style={{...td,fontWeight:700,background:"#ede9fe"}}>{padTotMk(r.totMk)||"-"}</td>
                   {!isLower&&<>
                     <td style={{...td,background:"#ede9fe",color:r.hasX?"#dc2626":"inherit",fontWeight:r.hasX?700:400}}>{r.hasX?"X":r.totAgg||"-"}</td>
                     <td style={{...td,fontWeight:700,color:r.hasX?"#dc2626":"#1e40af"}}>{r.hasX?"X":r.totMk?r.div:"-"}</td>
@@ -8527,7 +8567,7 @@ function ReportCard({ school, r, term, year, cls, position, totalInClass, isLowe
               })}
               <tr style={{background:"#fef3c7",fontWeight:700}}>
                 <td style={{...td,textAlign:"left"}} colSpan={isLower?1:3}>TOTAL</td>
-                <td style={{...td,fontSize:15}}>{totMk||"-"}</td>
+                <td style={{...td,fontSize:15}}>{padTotMk(totMk)||"-"}</td>
                 {!isLower&&<td style={{...td,color:"#dc2626",fontWeight:800}}>{hasX?"X":totAgg||"-"}</td>}
                 <td style={td}></td><td style={td}></td>
               </tr>
@@ -8585,6 +8625,446 @@ function ReportCard({ school, r, term, year, cls, position, totalInClass, isLowe
     </div>
   );
 }
+// ─── REPORTS (Performance Analysis & Graphs) ─────────────────────────────────
+// Data-driven Reports module: every statistic and graph below is computed
+// live from the SAME termMarks/monthlyMarks/mockMarks/PLE records used
+// everywhere else in MKIS (Dashboard, Result Sheets, Report Cards) -- no
+// separate results calculation exists here, and no marks are re-entered by
+// the teacher just to produce a graph.
+const REPORT_TYPES = ["General School Report","Class Teacher Report","Department Report"];
+const DEPARTMENTS = ["English","Mathematics","Science","SST","ICT"];
+// Maps a canonical subject label to the actual subject code used in each
+// section (Lower/Upper primary use different code sets -- see LOWER_SUBJECTS/
+// UPPER_SUBJECTS near the top of this file). null means that subject isn't
+// examined in that section at all (e.g. Science/SST/ICT aren't separate,
+// graded subjects for P1-P3).
+const CANONICAL_SUBJECTS = [
+  { label:"English",     upperSub:"ENG",  lowerSub:"ENG" },
+  { label:"Mathematics", upperSub:"MATH", lowerSub:"MATHS" },
+  { label:"Science",     upperSub:"SCI",  lowerSub:null },
+  { label:"SST",         upperSub:"SST",  lowerSub:null },
+];
+const subjectCodeForClass = (label, cls) => {
+  const c = CANONICAL_SUBJECTS.find(x=>x.label===label);
+  if (!c) return null;
+  return LOWER_CLASSES.includes(cls) ? c.lowerSub : c.upperSub;
+};
+// PLE aggregates (1-9, best=1) use MTC where the rest of the app uses MATH.
+const PLE_SUBJECT_MAP_R = { MATH: "MTC" };
+// Returns a 0-100 percentage for one pupil/one subject/one term+year, pulling
+// from whichever source is authoritative for that pupil+term (Exam Entry for
+// everyone except P7 in Term II, which uses the Municipal Mock, and P7 in
+// Term III, which uses PLE results) -- exactly the same substitution the
+// Dashboard's own performance charts already use, so a Reports graph and the
+// Dashboard's chart for the same period never disagree.
+function reportSubjectPct(s, sub, isLower, term, year, termMarksData, mockMarksData, pleResultsData) {
+  if (!sub) return undefined;
+  if (s.className === "P7") {
+    if (term === "Term II") {
+      const val = mockMarksData?.[s.id]?.[`Municipal Mock__${year}`]?.[sub];
+      if (typeof val !== "number") return undefined;
+      return (val/(isLower?lowerSubjectMax(sub):100))*100;
+    }
+    if (term === "Term III") {
+      const pleSub = PLE_SUBJECT_MAP_R[sub] || sub;
+      if (!PLE_SUBJECTS.includes(pleSub)) return undefined;
+      const n = parseInt(pleResultsData?.[s.id]?.results?.[pleSub], 10);
+      if (isNaN(n) || n < 1 || n > 9) return undefined;
+      return ((10 - n) / 9) * 100;
+    }
+  }
+  const m = termMarksData?.[s.id]?.[`${term}__${year}`] || {};
+  const ca = m[sub]?.ca, exam = m[sub]?.exam;
+  const hasBoth = typeof ca === "number" && typeof exam === "number";
+  if (!hasBoth && typeof exam !== "number" && typeof ca !== "number") return undefined;
+  const av = hasBoth ? (ca+exam)/2 : (typeof exam === "number" ? exam : ca);
+  return (av/(isLower?lowerSubjectMax(sub):100))*100;
+}
+// Average % across every learner+subject percentage available for a class
+// (or a filtered set of classes), for one term+year. `subjectsFor(cls)`
+// returns the list of subject codes to include for that class -- lets the
+// same helper serve "all subjects" (General/Class Teacher reports) and "just
+// this department's subject" (Department reports) callers alike.
+function reportClassAvg(students, cls, term, year, subjectsFor, termMarksData, mockMarksData, pleResultsData) {
+  const isLower = LOWER_CLASSES.includes(cls);
+  const subs = subjectsFor(cls);
+  const classStudents = students.filter(s=>s.className===cls);
+  let sum=0, count=0;
+  classStudents.forEach(s=>{
+    subs.forEach(sub=>{
+      const p = reportSubjectPct(s, sub, isLower, term, year, termMarksData, mockMarksData, pleResultsData);
+      if (typeof p === "number") { sum+=p; count++; }
+    });
+  });
+  return count ? Math.round(sum/count) : null;
+}
+// Every learner's OVERALL average % for a term+year (mean of that pupil's
+// available subject percentages), used for the pass-rate / grade-distribution
+// statistics. Learners with no marks at all for the period are omitted.
+function reportPupilOverallPcts(students, classesFilter, term, year, subjectsFor, termMarksData, mockMarksData, pleResultsData) {
+  const out = [];
+  students.filter(s=>classesFilter.includes(s.className)).forEach(s=>{
+    const isLower = LOWER_CLASSES.includes(s.className);
+    const subs = subjectsFor(s.className);
+    let sum=0, count=0;
+    subs.forEach(sub=>{
+      const p = reportSubjectPct(s, sub, isLower, term, year, termMarksData, mockMarksData, pleResultsData);
+      if (typeof p === "number") { sum+=p; count++; }
+    });
+    if (count) out.push({ student:s, avgPct: sum/count });
+  });
+  return out;
+}
+// Minimal SVG line chart (term-over-term trend). Mirrors BarChart's visual
+// language (same axis/gridline treatment) so the two read as one family.
+function LineChart({ data, height=140, lineColor="#2563eb", valueLabel=(v)=>`${v}%`, emptyMsg="No data yet" }) {
+  const W = 300, H = height, PAD_L=28, PAD_B=28, PAD_T=8, PAD_R=8;
+  const plotW = W - PAD_L - PAD_R, plotH = H - PAD_T - PAD_B;
+  const usable = data.filter(d=>typeof d.value === "number");
+  if (usable.length < 1) return <div style={{color:"#9ca3af",fontSize:12,textAlign:"center",padding:20}}>{emptyMsg}</div>;
+  const maxVal = Math.max(...usable.map(d=>d.value), 1);
+  const step = data.length>1 ? plotW/(data.length-1) : 0;
+  const pts = data.map((d,i)=>{
+    if (typeof d.value !== "number") return null;
+    const x = PAD_L + (data.length>1 ? i*step : plotW/2);
+    const y = PAD_T + plotH - (d.value/maxVal)*plotH;
+    return { x, y, ...d };
+  });
+  const validPts = pts.filter(Boolean);
+  const path = validPts.map((p,i)=>`${i===0?"M":"L"}${p.x},${p.y}`).join(" ");
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} style={{width:"100%",maxWidth:W,height:"auto",display:"block"}}>
+      {[0,25,50,75,100].filter(g=>g<=maxVal+5).map(g=>{
+        const y = PAD_T + plotH - (g/maxVal)*plotH;
+        return <g key={g}>
+          <line x1={PAD_L} y1={y} x2={W-PAD_R} y2={y} stroke="#e5e7eb" strokeWidth={0.8}/>
+          <text x={PAD_L-3} y={y+3.5} textAnchor="end" fontSize={8} fill="#9ca3af">{g}</text>
+        </g>;
+      })}
+      {validPts.length>1 && <path d={path} fill="none" stroke={lineColor} strokeWidth={2}/>}
+      {pts.map((p,i)=>p && (
+        <g key={i}>
+          <circle cx={p.x} cy={p.y} r={3} fill={lineColor}/>
+          <text x={p.x} y={p.y-8} textAnchor="middle" fontSize={8} fill={lineColor} fontWeight="700">{valueLabel(p.value)}</text>
+          <text x={p.x} y={H-PAD_B+10} textAnchor="middle" fontSize={7.5} fill="#374151" fontWeight="600">{p.label}</text>
+        </g>
+      ))}
+      <line x1={PAD_L} y1={PAD_T} x2={PAD_L} y2={PAD_T+plotH} stroke="#d1d5db" strokeWidth={1}/>
+      <line x1={PAD_L} y1={PAD_T+plotH} x2={W-PAD_R} y2={PAD_T+plotH} stroke="#d1d5db" strokeWidth={1}/>
+    </svg>
+  );
+}
+// Rasterizes a captured DOM node (a chart card) into a PNG data URL, for
+// embedding into the Word export -- reuses the same html2canvas approach the
+// PDF export elsewhere in this file already relies on, so a graph in the
+// downloaded Word document is a pixel-accurate copy of what's on screen.
+async function captureNodeAsImage(node) {
+  if (!node) return null;
+  try {
+    const canvas = await html2canvas(node, { scale: 2, useCORS: true, backgroundColor: "#ffffff",
+      onclone: (doc) => { doc.querySelectorAll(".no-print").forEach(el => { el.style.display = "none"; }); } });
+    return canvas.toDataURL("image/png");
+  } catch { return null; }
+}
+const REPORT_NARRATIVE_FIELDS = [
+  { key:"introduction",   label:"1. Introduction" },
+  { key:"activities",     label:"2. Activities Carried Out" },
+  { key:"members",        label:"3. Members Involved" },
+  { key:"achievements",   label:"4. Achievements" },
+  { key:"challenges",     label:"5. Challenges" },
+  { key:"recommendations",label:"6. Recommendations" },
+  { key:"conclusion",     label:"7. Conclusion" },
+];
+const DEFAULT_NARRATIVE = { introduction:"", activities:"", members:"", achievements:"", challenges:"", recommendations:"", conclusion:"", summary:"" };
+function Reports({ students, termMarks, bands, specialBands, divisions, school, reportsData, setReportsData, markEditing }) {
+  const [reportType, setReportType] = useState("General School Report");
+  const [year, setYear] = useState(school.year || String(new Date().getFullYear()));
+  const [term, setTerm] = useState("Term I");
+  const [cls, setCls] = useState("P5");
+  const [department, setDepartment] = useState("English");
+  const [wordBusy, setWordBusy] = useState(false);
+  const [mockMarksData, setMockMarksData] = useState({});
+  const [pleResultsData, setPleResultsData] = useState({});
+  const classChartRef = useRef(null);
+  const subjectChartRef = useRef(null);
+  const trendChartRef = useRef(null);
+  const distChartRef = useRef(null);
+  const refreshSources = () => {
+    loadShared("mkis_mock_marks", {}).then(m => setMockMarksData(m || {}));
+    loadShared("mkis_pledata", {}).then(d => setPleResultsData(d || {}));
+  };
+  useEffect(() => { refreshSources(); }, []);
+  // ── Report identity: which saved narrative draft this screen is editing ──
+  const reportId = reportType==="Class Teacher Report" ? `CT__${cls}__${term}__${year}`
+    : reportType==="Department Report" ? `DEPT__${department}__${term}__${year}`
+    : `GEN__${term}__${year}`;
+  const narrative = reportsData?.[reportId] || DEFAULT_NARRATIVE;
+  const setNarrativeField = (field, val) => {
+    markEditing && markEditing();
+    setReportsData(prev => ({ ...prev, [reportId]: { ...(prev[reportId]||DEFAULT_NARRATIVE), [field]: val } }));
+  };
+  // ── Which classes/subjects this report type covers ──
+  const scopeClasses = reportType==="Class Teacher Report" ? [cls]
+    : reportType==="Department Report" && department==="ICT" ? []
+    : ALL_CLASSES;
+  const subjectsForClassFn = (c) => {
+    if (reportType==="Department Report") {
+      const code = subjectCodeForClass(department, c);
+      return code ? [code] : [];
+    }
+    return LOWER_CLASSES.includes(c) ? LOWER_SUBJECTS : UPPER_SUBJECTS;
+  };
+  // A. Class Performance Comparison (P1-P7) -- General & Department reports.
+  const classPerformance = useMemo(() => {
+    const cls_ = reportType==="Department Report" && department==="ICT" ? [] : ALL_CLASSES;
+    return cls_.map(c => ({ cls:c, avgPct: reportClassAvg(students, c, term, year, subjectsForClassFn, termMarks, mockMarksData, pleResultsData) }))
+      .filter(r=>r.avgPct!==null);
+  }, [students, term, year, termMarks, mockMarksData, pleResultsData, reportType, department]);
+  // B. Subject Performance comparison (English/Maths/Science/SST) -- General
+  // School Report only (Department reports already focus on one subject).
+  const subjectPerformance = useMemo(() => {
+    if (reportType!=="General School Report") return [];
+    return CANONICAL_SUBJECTS.map(cs => {
+      let sum=0,count=0;
+      ALL_CLASSES.forEach(c=>{
+        const code = LOWER_CLASSES.includes(c) ? cs.lowerSub : cs.upperSub;
+        if (!code) return;
+        students.filter(s=>s.className===c).forEach(s=>{
+          const p = reportSubjectPct(s, code, LOWER_CLASSES.includes(c), term, year, termMarks, mockMarksData, pleResultsData);
+          if (typeof p==="number") { sum+=p; count++; }
+        });
+      });
+      return { label:cs.label, avgPct: count?Math.round(sum/count):null };
+    }).filter(r=>r.avgPct!==null);
+  }, [students, term, year, termMarks, mockMarksData, pleResultsData, reportType]);
+  // C. Performance by Term (trend line) -- whichever class(es)/subject(s)
+  // this report covers, one point per term that actually has data.
+  const termTrend = useMemo(() => {
+    return TERMS.map(t => {
+      const cls_ = reportType==="Department Report" && department==="ICT" ? [] : scopeClasses.length ? scopeClasses : ALL_CLASSES;
+      let sum=0, count=0;
+      cls_.forEach(c=>{
+        const subs = subjectsForClassFn(c);
+        students.filter(s=>s.className===c).forEach(s=>{
+          subs.forEach(sub=>{
+            const p = reportSubjectPct(s, sub, LOWER_CLASSES.includes(c), t, year, termMarks, mockMarksData, pleResultsData);
+            if (typeof p==="number") { sum+=p; count++; }
+          });
+        });
+      });
+      return { label:t, value: count?Math.round(sum/count):null };
+    });
+  }, [students, year, termMarks, mockMarksData, pleResultsData, reportType, department, cls]);
+  const termTrendHasData = termTrend.some(t=>typeof t.value==="number");
+  // D. Grade / Performance Distribution -- uses MKIS's own configured grading
+  // bands (never a separately-invented scale), bucketed on each pupil's
+  // overall average % for the period.
+  const pupilPcts = useMemo(() => {
+    const cls_ = reportType==="Department Report" && department==="ICT" ? [] : scopeClasses.length ? scopeClasses : ALL_CLASSES;
+    return reportPupilOverallPcts(students, cls_, term, year, subjectsForClassFn, termMarks, mockMarksData, pleResultsData);
+  }, [students, term, year, termMarks, mockMarksData, pleResultsData, reportType, department, cls]);
+  const gradeDistribution = useMemo(() => {
+    const counts = {};
+    let repBands = bands;
+    pupilPcts.forEach(({ student, avgPct }) => {
+      const b = bandsForClass(student.className, bands, specialBands, "End of Term", year);
+      const label = gradeLabel(Math.round(avgPct), b);
+      counts[label] = (counts[label]||0) + 1;
+    });
+    const order = ["Excellent","Very Good","Good","Quite Good","Fair","Pass","Weak","Fail"];
+    const colors = { Excellent:"#16a34a", "Very Good":"#22c55e", Good:"#84cc16", "Quite Good":"#eab308", Fair:"#f59e0b", Pass:"#f97316", Weak:"#ef4444", Fail:"#b91c1c" };
+    return Object.keys(counts).sort((a,b)=>order.indexOf(a)-order.indexOf(b)).map(label=>({ label, value:counts[label], color: colors[label]||"#6366f1" }));
+  }, [pupilPcts, bands, specialBands, year]);
+  // ── Summary statistics ──
+  const stats = useMemo(() => {
+    const n = pupilPcts.length;
+    if (!n) return null;
+    const pcts = pupilPcts.map(p=>Math.round(p.avgPct));
+    const avg = Math.round(pcts.reduce((a,b)=>a+b,0)/n);
+    const highest = Math.max(...pcts);
+    const lowest = Math.min(...pcts);
+    const passCount = pupilPcts.filter(({student,avgPct})=>{
+      const b = bandsForClass(student.className, bands, specialBands, "End of Term", year);
+      return gradeLabel(Math.round(avgPct), b) !== "Fail";
+    }).length;
+    const passRate = Math.round((passCount/n)*100);
+    let bestClass=null, worstClass=null;
+    if (classPerformance.length) {
+      bestClass = classPerformance.reduce((a,b)=>b.avgPct>a.avgPct?b:a);
+      worstClass = classPerformance.reduce((a,b)=>b.avgPct<a.avgPct?b:a);
+    }
+    return { n, avg, highest, lowest, passRate, bestClass, worstClass };
+  }, [pupilPcts, classPerformance, bands, specialBands, year]);
+  // Class Teacher Report extras: per-subject averages for the one class.
+  const classSubjectBreakdown = useMemo(() => {
+    if (reportType!=="Class Teacher Report") return [];
+    const isLower = LOWER_CLASSES.includes(cls);
+    const subs = isLower ? LOWER_SUBJECTS : UPPER_SUBJECTS;
+    return subs.map(sub=>{
+      let sum=0,count=0;
+      students.filter(s=>s.className===cls).forEach(s=>{
+        const p = reportSubjectPct(s, sub, isLower, term, year, termMarks, mockMarksData, pleResultsData);
+        if (typeof p==="number") { sum+=p; count++; }
+      });
+      return { label:sub, avgPct: count?Math.round(sum/count):null };
+    }).filter(r=>r.avgPct!==null);
+  }, [reportType, cls, students, term, year, termMarks, mockMarksData, pleResultsData]);
+  const bestSubject = classSubjectBreakdown.length ? classSubjectBreakdown.reduce((a,b)=>b.avgPct>a.avgPct?b:a) : null;
+  const worstSubject = classSubjectBreakdown.length ? classSubjectBreakdown.reduce((a,b)=>b.avgPct<a.avgPct?b:a) : null;
+  const noDataAtAll = !stats && classPerformance.length===0 && classSubjectBreakdown.length===0;
+  const reportTitle = reportType==="Class Teacher Report" ? `${cls} CLASS TEACHER REPORT`
+    : reportType==="Department Report" ? `${department.toUpperCase()} DEPARTMENT REPORT`
+    : "GENERAL SCHOOL REPORT";
+  const barColorFn = (d) => (d.value??0) >= 65 ? "#22c55e" : (d.value??0) >= 45 ? "#f59e0b" : "#ef4444";
+  const doWordExport = async () => {
+    setWordBusy(true);
+    try {
+      const [classImg, subjectImg, trendImg, distImg] = await Promise.all([
+        classChartRef.current ? captureNodeAsImage(classChartRef.current) : null,
+        subjectChartRef.current ? captureNodeAsImage(subjectChartRef.current) : null,
+        trendChartRef.current && termTrendHasData ? captureNodeAsImage(trendChartRef.current) : null,
+        distChartRef.current && gradeDistribution.length ? captureNodeAsImage(distChartRef.current) : null,
+      ]);
+      let body = `<div class="title">${escapeHtml(school.name)}</div>`;
+      body += `<div class="addr">${escapeHtml(school.poBox)}</div>`;
+      body += `<div class="subtitle">${escapeHtml(reportTitle)}</div>`;
+      body += `<div style="text-align:center;font-size:10pt;margin-bottom:14px;">Academic Year: <b>${escapeHtml(year)}</b> &nbsp;|&nbsp; Term: <b>${escapeHtml(term)}</b> &nbsp;|&nbsp; Prepared By: ......................................</div>`;
+      body += `<div class="section-title">PERFORMANCE ANALYSIS</div>`;
+      if (stats) {
+        body += `<table><tr><th>Learners Assessed</th><th>Average %</th><th>Highest %</th><th>Lowest %</th><th>Pass Rate</th>${stats.bestClass?`<th>Best Class</th><th>Weakest Class</th>`:""}</tr>`;
+        body += `<tr><td>${stats.n}</td><td>${stats.avg}%</td><td>${stats.highest}%</td><td>${stats.lowest}%</td><td>${stats.passRate}%</td>${stats.bestClass?`<td>${escapeHtml(stats.bestClass.cls)}</td><td>${escapeHtml(stats.worstClass.cls)}</td>`:""}</tr></table>`;
+      } else {
+        body += `<p style="font-size:10pt;color:#666;">No results recorded yet for ${escapeHtml(term)} ${escapeHtml(year)}.</p>`;
+      }
+      if (classImg) body += `<p style="font-weight:bold;font-size:10pt;">Average Performance by Class</p><img src="${classImg}" style="max-width:100%;"/>`;
+      if (subjectImg) body += `<p style="font-weight:bold;font-size:10pt;">Average Performance by Subject</p><img src="${subjectImg}" style="max-width:100%;"/>`;
+      if (trendImg) body += `<p style="font-weight:bold;font-size:10pt;">Termly Performance Trend</p><img src="${trendImg}" style="max-width:100%;"/>`;
+      if (distImg) body += `<p style="font-weight:bold;font-size:10pt;">Performance Distribution</p><img src="${distImg}" style="max-width:100%;"/>`;
+      if (classSubjectBreakdown.length) {
+        body += `<table><tr><th>Subject</th><th>Average %</th></tr>${classSubjectBreakdown.map(r=>`<tr><td>${escapeHtml(r.label)}</td><td>${r.avgPct}%</td></tr>`).join("")}</table>`;
+        if (bestSubject) body += `<p style="font-size:10pt;">Highest-performing subject: <b>${escapeHtml(bestSubject.label)}</b> (${bestSubject.avgPct}%) &nbsp;|&nbsp; Lowest-performing subject: <b>${escapeHtml(worstSubject.label)}</b> (${worstSubject.avgPct}%)</p>`;
+      }
+      if (narrative.summary?.trim()) body += `<p style="font-size:10pt;"><b>Performance Summary:</b> ${escapeHtml(narrative.summary)}</p>`;
+      REPORT_NARRATIVE_FIELDS.forEach(f=>{
+        body += `<div class="section-title">${escapeHtml(f.label)}</div><p style="font-size:10.5pt;white-space:pre-wrap;">${escapeHtml(narrative[f.key]||"")||"&nbsp;"}</p>`;
+      });
+      downloadWordHtml(reportTitle, body, `${safeFileName(reportTitle)}_${safeFileName(term)}_${year}.doc`, { pageSize:"210mm 297mm" });
+    } finally { setWordBusy(false); }
+  };
+  return (
+    <div>
+      <div className="no-print" style={{display:"flex",gap:10,marginBottom:16,flexWrap:"wrap",alignItems:"flex-end",justifyContent:"space-between"}}>
+        <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"flex-end"}}>
+          <Sel label="Report Type" value={reportType} onChange={setReportType} opts={REPORT_TYPES}/>
+          {reportType==="Class Teacher Report" && <Sel label="Class" value={cls} onChange={setCls} opts={ALL_CLASSES}/>}
+          {reportType==="Department Report" && <Sel label="Department" value={department} onChange={setDepartment} opts={DEPARTMENTS}/>}
+          <Sel label="Term" value={term} onChange={setTerm} opts={TERMS}/>
+          <div><label style={lbl}>Year</label><input type="number" value={year} onChange={e=>setYear(e.target.value)} style={{...inp,width:90}}/></div>
+        </div>
+        <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
+          <button onClick={refreshSources} style={btnPrimary}>🔄 Refresh Analysis</button>
+          <button disabled={wordBusy} onClick={doWordExport} style={wordBusy?{...btnWord,opacity:0.65,cursor:"not-allowed"}:btnWord}>{wordBusy?"⏳ Preparing...":"📄 Download Word"}</button>
+          <button onClick={()=>window.print()} style={{...btnPrimary,background:"linear-gradient(135deg,#374151,#1f2937)"}}>🖨️ Print Report</button>
+        </div>
+      </div>
+      <div style={{background:"white",borderRadius:16,padding:"18px 20px",marginBottom:16,boxShadow:"0 2px 12px rgba(0,0,0,0.07)",textAlign:"center"}}>
+        {school.logo && <img src={school.logo} alt="logo" style={{width:44,height:44,objectFit:"contain",marginBottom:6}}/>}
+        <div style={{fontWeight:800,fontSize:16,color:"#1e3a6e"}}>{school.name}</div>
+        <div style={{fontSize:12,color:"#6b7280"}}>{school.poBox}</div>
+        <div style={{fontWeight:800,fontSize:14,marginTop:8,color:"#0f766e"}}>{reportTitle}</div>
+        <div style={{fontSize:12,color:"#6b7280",marginTop:4}}>Academic Year: <b>{year}</b> &nbsp;|&nbsp; Term: <b>{term}</b></div>
+      </div>
+      <div style={{background:"linear-gradient(135deg,#0f766e,#0d9488)",borderRadius:16,padding:"12px 20px",color:"white",fontWeight:800,fontSize:14,marginBottom:16}}>📊 PERFORMANCE ANALYSIS</div>
+      {noDataAtAll ? (
+        <div style={{background:"#fffbeb",borderRadius:12,padding:24,textAlign:"center",color:"#92400e",border:"1px solid #fde68a",marginBottom:20}}>
+          No {reportType==="Department Report"&&department==="ICT" ? "ICT results are stored in MKIS's examination structure" : "results recorded"} for {term} {year} yet{reportType==="Class Teacher Report"?` in ${cls}`:""}. Enter marks first, or use the optional summary box below for a manually-written section.
+        </div>
+      ) : (
+        <>
+          {stats && (
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:12,marginBottom:20}}>
+              {[["👥 Learners Assessed",stats.n],["📊 Average",stats.avg+"%"],["🏆 Highest",stats.highest+"%"],["📉 Lowest",stats.lowest+"%"],["✅ Pass Rate",stats.passRate+"%"]].map(([k,v])=>(
+                <div key={k} style={{background:"white",borderRadius:12,padding:14,textAlign:"center",boxShadow:"0 2px 10px rgba(0,0,0,0.06)"}}>
+                  <div style={{fontSize:11,color:"#6b7280",fontWeight:700}}>{k}</div>
+                  <div style={{fontSize:20,fontWeight:800,color:"#1e3a6e",marginTop:4}}>{v}</div>
+                </div>
+              ))}
+              {stats.bestClass && (
+                <div style={{background:"white",borderRadius:12,padding:14,textAlign:"center",boxShadow:"0 2px 10px rgba(0,0,0,0.06)"}}>
+                  <div style={{fontSize:11,color:"#6b7280",fontWeight:700}}>🥇 Best / Weakest Class</div>
+                  <div style={{fontSize:14,fontWeight:800,color:"#1e3a6e",marginTop:4}}>{stats.bestClass.cls} / {stats.worstClass.cls}</div>
+                </div>
+              )}
+            </div>
+          )}
+          <div style={{display:"grid",gridTemplateColumns:classPerformance.length&&subjectPerformance.length?"1fr 1fr":"1fr",gap:16,marginBottom:16}}>
+            {classPerformance.length>0 && (
+              <div ref={classChartRef} style={{background:"white",borderRadius:16,padding:20,boxShadow:"0 2px 12px rgba(0,0,0,0.07)"}}>
+                <div style={{fontWeight:800,color:"#1e3a6e",fontSize:14,marginBottom:4}}>📈 Average {reportType==="Department Report"?department+" ":""}Performance by Class</div>
+                <div style={{fontSize:11,color:"#9ca3af",marginBottom:12}}>{term} {year}</div>
+                <BarChart data={classPerformance.map(c=>({label:c.cls,value:c.avgPct}))} barColor={barColorFn} height={160}/>
+              </div>
+            )}
+            {subjectPerformance.length>0 && (
+              <div ref={subjectChartRef} style={{background:"white",borderRadius:16,padding:20,boxShadow:"0 2px 12px rgba(0,0,0,0.07)"}}>
+                <div style={{fontWeight:800,color:"#1e3a6e",fontSize:14,marginBottom:4}}>📚 Average Performance by Subject</div>
+                <div style={{fontSize:11,color:"#9ca3af",marginBottom:12}}>{term} {year} — whole school</div>
+                <BarChart data={subjectPerformance.map(r=>({label:r.label,value:r.avgPct}))} barColor={(d,i)=>subColor(d.label,i)} height={160}/>
+              </div>
+            )}
+          </div>
+          {classSubjectBreakdown.length>0 && (
+            <div style={{background:"white",borderRadius:16,padding:20,boxShadow:"0 2px 12px rgba(0,0,0,0.07)",marginBottom:16}}>
+              <div style={{fontWeight:800,color:"#1e3a6e",fontSize:14,marginBottom:4}}>🎯 {cls} Performance by Subject</div>
+              <div style={{fontSize:11,color:"#9ca3af",marginBottom:12}}>{term} {year}</div>
+              <BarChart data={classSubjectBreakdown.map(r=>({label:r.label,value:r.avgPct}))} barColor={(d,i)=>subColor(d.label,i)} height={160}/>
+              {bestSubject && <div style={{fontSize:12,marginTop:10,color:"#374151"}}>Highest-performing subject: <b style={{color:"#166534"}}>{bestSubject.label}</b> ({bestSubject.avgPct}%) &nbsp;|&nbsp; Lowest-performing: <b style={{color:"#b91c1c"}}>{worstSubject.label}</b> ({worstSubject.avgPct}%)</div>}
+            </div>
+          )}
+          <div style={{display:"grid",gridTemplateColumns:termTrendHasData&&gradeDistribution.length?"1fr 1fr":"1fr",gap:16,marginBottom:16}}>
+            {termTrendHasData && (
+              <div ref={trendChartRef} style={{background:"white",borderRadius:16,padding:20,boxShadow:"0 2px 12px rgba(0,0,0,0.07)"}}>
+                <div style={{fontWeight:800,color:"#1e3a6e",fontSize:14,marginBottom:4}}>📈 Termly Performance Trend</div>
+                <div style={{fontSize:11,color:"#9ca3af",marginBottom:12}}>{year}</div>
+                <LineChart data={termTrend}/>
+              </div>
+            )}
+            {gradeDistribution.length>0 && (
+              <div ref={distChartRef} style={{background:"white",borderRadius:16,padding:20,boxShadow:"0 2px 12px rgba(0,0,0,0.07)"}}>
+                <div style={{fontWeight:800,color:"#1e3a6e",fontSize:14,marginBottom:4}}>🥧 Performance Distribution</div>
+                <div style={{fontSize:11,color:"#9ca3af",marginBottom:12}}>{term} {year} — by grade band</div>
+                <div style={{display:"flex",alignItems:"center",gap:16,flexWrap:"wrap"}}>
+                  <div style={{flex:"0 0 auto",maxWidth:150}}><PieChart size={140} slices={gradeDistribution}/></div>
+                  <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                    {gradeDistribution.map(s=>(
+                      <div key={s.label} style={{display:"flex",alignItems:"center",gap:6,fontSize:12}}>
+                        <div style={{width:10,height:10,borderRadius:2,background:s.color}}/>
+                        <span style={{fontWeight:700,color:"#374151"}}>{s.label}</span><span style={{color:"#6b7280"}}>{s.value}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </>
+      )}
+      <div style={{background:"white",borderRadius:16,padding:20,boxShadow:"0 2px 12px rgba(0,0,0,0.07)",marginBottom:16}}>
+        <div style={{fontWeight:800,color:"#1e3a6e",fontSize:14,marginBottom:10}}>🗒️ Performance Summary (optional interpretation)</div>
+        <textarea value={narrative.summary} onChange={e=>setNarrativeField("summary", e.target.value)} placeholder="e.g. The performance analysis indicates that Mathematics recorded the highest average performance, while English requires further intervention..."
+          style={{width:"100%",minHeight:70,padding:10,border:"1.5px solid #d1d5db",borderRadius:8,fontSize:13,fontFamily:"inherit",resize:"vertical"}}/>
+      </div>
+      {REPORT_NARRATIVE_FIELDS.map(f=>(
+        <div key={f.key} style={{background:"white",borderRadius:16,padding:20,boxShadow:"0 2px 12px rgba(0,0,0,0.07)",marginBottom:16}}>
+          <div style={{fontWeight:800,color:"#1e3a6e",fontSize:14,marginBottom:10}}>{f.label}</div>
+          <textarea value={narrative[f.key]} onChange={e=>setNarrativeField(f.key, e.target.value)} placeholder={`Write ${f.label.replace(/^\d+\.\s*/,"")}...`}
+            style={{width:"100%",minHeight:90,padding:10,border:"1.5px solid #d1d5db",borderRadius:8,fontSize:13,fontFamily:"inherit",resize:"vertical"}}/>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ─── SUBJECT INITIALS MANAGER ────────────────────────────────────────────────
 function SubjectInitialsManager({ initials, setInitials }) {
   const [selClass, setSelClass] = useState("P1");
@@ -9276,7 +9756,7 @@ function Settings({ school, setSchool, bands, setBands, specialBands, setSpecial
   );
 }
 // ─── DOWNLOAD CENTRE ─────────────────────────────────────────────────────────
-function DownloadCentre({ students, termMarks, monthlyMarks, groupWork, municipalPerf, examTimetable, bands, specialBands, divisions, school, accounts, role, currentUser, forceRestoreData }) {
+function DownloadCentre({ students, termMarks, monthlyMarks, groupWork, municipalPerf, examTimetable, reportsData, bands, specialBands, divisions, school, accounts, role, currentUser, forceRestoreData }) {
   const [importStatus, setImportStatus] = useState("");
   const [importError, setImportError] = useState("");
   const [restoreConfirm, setRestoreConfirm] = useState(false);
@@ -9299,7 +9779,7 @@ function DownloadCentre({ students, termMarks, monthlyMarks, groupWork, municipa
     const data = {
       _meta: { version: 2, exportedAt: new Date().toISOString(), school: school.name },
       school, bands, specialBands, divisions, accounts,
-      students, termMarks, monthlyMarks, groupWork, municipalPerf, examTimetable,
+      students, termMarks, monthlyMarks, groupWork, municipalPerf, examTimetable, reportsData,
     };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
     triggerBlobDownload(blob, `MKIS_full_backup_${ts()}.json`);
