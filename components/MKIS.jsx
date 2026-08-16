@@ -179,7 +179,7 @@ const KEY_LABEL = {
   mkis_students:"Students", mkis_termmarks:"Term Marks", mkis_monthlymarks:"Monthly Marks",
   mkis_bands:"Grade Bands", mkis_special_bands:"Special Grading Scale", mkis_divisions:"Divisions", mkis_school:"School Settings",
   mkis_accounts:"Accounts", mkis_changerequests:"Change Requests", mkis_initials:"Initials",
-  mkis_locked_term:"Term Lock", mkis_locked_monthly:"Monthly Lock", mkis_groupwork:"Group Work", mkis_municipalperf:"Municipal Performance", mkis_examtimetable:"Exam Timetable",
+  mkis_locked_term:"Term Lock", mkis_locked_monthly:"Monthly Lock", mkis_groupwork:"Group Work", mkis_municipalperf:"Municipal Performance", mkis_examtimetable:"Exam Timetable", mkis_mock_marks:"Mock Results", mkis_pledata:"PLE Results",
 };
 // ─── NO-DATA-LOSS WRITE LAYER ───────────────────────────────────────────────
 // Problem this solves: two devices can each hold a slightly different local
@@ -281,6 +281,11 @@ const MERGE_STRATEGIES = {
   // out a concurrent edit (or a not-yet-locally-seen remote edit) to a
   // DIFFERENT student/mock-type/year branch.
   mkis_mock_marks: (remote, local) => deepMergeObjects(remote, local),
+  // PLE Info's per-pupil records (index no., subject aggregates, LIN,
+  // co-curricular, leadership, conduct, photo). Deep-merged the same way as
+  // termMarks/monthlyMarks so one device saving PLE data for one pupil can
+  // never wipe out a concurrent edit to a different pupil's record.
+  mkis_pledata: (remote, local) => deepMergeObjects(remote, local),
 };
 // Reads the freshest shared value, merges in the local change using the
 // strategy for that key, writes the merged result back, and returns it so
@@ -1666,7 +1671,7 @@ function exportReportCardsWord({ school, cls, term, year, isLower, rows, allPosi
         <td style="padding:4px 8px;font-size:12pt;"><b style="color:#0f766e;">NAME:</b> <b><i>${escapeHtml(s.name)}</i></b></td>
         <td style="padding:4px 8px;font-size:12pt;"><b style="color:#0f766e;">CLASS:</b> ${escapeHtml(cls)}</td>
         <td style="padding:4px 8px;font-size:12pt;"><b style="color:#0f766e;">TERM:</b> ${escapeHtml(term)}</td>
-        <td colspan="2" style="padding:4px 8px;font-size:12pt;"><b style="color:#0f766e;">POSITION:</b> ${position && position !== "-" ? `<b style="color:#dc2626;">${ordinal(position)}</b> <span style="color:#000000;">OUT OF</span> <b style="color:#2563eb;">${totalInClass}</b>` : "-"}</td>
+        <td colspan="2" style="padding:4px 8px;font-size:12pt;"><b style="color:#0f766e;">POSITION:</b> ${position && position !== "-" ? `<b style="color:#dc2626;">${position}<sup style="font-size:0.7em;">${ordinalSuffix(position)}</sup></b> <span style="color:#000000;">OUT OF</span> <b style="color:#2563eb;">${totalInClass}</b>` : "-"}</td>
       </tr>
     </table>`;
     const subHead = isLower
@@ -1866,15 +1871,24 @@ function MarkInput({ value, existingVal, max, onCommit, style, locked }) {
   // focusable, not typable, no edit affordance of any kind. The only way
   // back in is the admin's "Unlock" button on the entry screen.
   return (
-    <input type="number" min={0} max={max} value={locked ? (value ?? "") : draft} disabled={locked}
+    <input type="text" inputMode="numeric" pattern="[0-9]*" min={0} max={max} value={locked ? (value ?? "") : draft} disabled={locked}
       onFocus={()=>{ focusedRef.current = true; }}
       onChange={e=>{
         const raw = e.target.value;
         if (raw === "") { setDraft(""); return; }
+        // Only allow digits, but keep the raw text (including a leading
+        // "0") while typing so entries like 05, 06, 09 can be typed
+        // naturally instead of the "0" being silently dropped.
+        if (!/^[0-9]*$/.test(raw)) return;
         const n = Number(raw);
         // Clamp on every keystroke, not just on blur, so the box can never
-        // visually hold (or briefly show) a number outside 0..max.
-        if (!isNaN(n)) setDraft(String(Math.max(0, Math.min(max, n))));
+        // visually hold (or briefly show) a number outside 0..max -- but
+        // only once the value is large enough that a leading zero is no
+        // longer meaningful, so "0" and "05" aren't clamped away mid-type.
+        if (!isNaN(n)) {
+          if (raw.length > 1 && raw[0] === "0" && n <= max) { setDraft(raw); return; }
+          setDraft(String(Math.max(0, Math.min(max, n))));
+        }
       }}
       onBlur={()=>{ focusedRef.current = false; commit(); }}
       onKeyDown={e=>{ if(e.key==="Enter"){ e.target.blur(); } }}
@@ -3192,12 +3206,57 @@ function PieChart({ slices, size=160 }) {
 function Dashboard({ students, school, termMarks, bands, dashboardPerfTerm: perfTerm, setDashboardPerfTerm: setPerfTerm, dashboardPerfYear: perfYear, setDashboardPerfYear: setPerfYear }) {
   const [subjectClass, setSubjectClass] = useState("P4");
   const perfTk = `${perfTerm}__${perfYear}`;
+  // Source label shown under each chart title so it's clear which set of
+  // results is powering the numbers for the selected term.
+  const perfSourceLabel = perfTerm==="Term II" ? "Mock" : perfTerm==="Term III" ? "PLE" : "Exam Entry";
+  // Term II's "End of Term" results analysis draws from Mock results, and
+  // Term III's from PLE results, instead of Exam Entry -- these two pages
+  // manage their own shared-storage records, so Dashboard reads them
+  // read-only (with a light background refresh) rather than editing them.
+  const [mockMarksData, setMockMarksData] = useState({});
+  const [pleResultsData, setPleResultsData] = useState({});
+  useEffect(() => {
+    let alive = true;
+    loadShared("mkis_mock_marks", {}).then(m => { if (alive) setMockMarksData(m || {}); });
+    loadShared("mkis_pledata", {}).then(d => { if (alive) setPleResultsData(d || {}); });
+    const id = setInterval(() => {
+      loadShared("mkis_mock_marks", undefined).then(m => { if (alive && m !== undefined) setMockMarksData(m); });
+      loadShared("mkis_pledata", undefined).then(d => { if (alive && d !== undefined) setPleResultsData(d); });
+    }, 6000);
+    return () => { alive = false; clearInterval(id); };
+  }, []);
+  // Maps an UPPER_SUBJECTS name to its PLE_SUBJECTS equivalent where they
+  // differ (everything matches except MATH/MTC).
+  const PLE_SUBJECT_MAP = { MATH: "MTC" };
   const active = students.filter(s=>s.className!=="Completed");
   const total = active.length;
   const boys = active.filter(s=>s.gender==="M").length;
   const girls = active.filter(s=>s.gender==="F").length;
   const classCounts = ALL_CLASSES.map(c=>({ cls:c, count:active.filter(s=>s.className===c).length }));
+  // Term II — average % across whichever mock exam type(s) have marks for
+  // this pupil/subject/year, in place of Exam Entry.
+  const mockPct = (s, sub, isLower) => {
+    const vals = MOCK_TYPES
+      .map(mt => mockMarksData[s.id]?.[`${mt}__${perfYear}`]?.[sub])
+      .filter(v => typeof v === "number");
+    if (!vals.length) return undefined;
+    const avg = vals.reduce((a,b)=>a+b,0) / vals.length;
+    return (avg/(isLower?lowerSubjectMax(sub):100))*100;
+  };
+  // Term III — PLE results are recorded as 1–9 subject aggregates (best=1),
+  // not raw marks, so they're converted to a comparable percentage
+  // (1→100%, 9→~0%) for these same charts. Only applies to the four PLE
+  // subjects (effectively P7), so other classes simply show no data.
+  const plePct = (s, sub) => {
+    const pleSub = PLE_SUBJECT_MAP[sub] || sub;
+    if (!PLE_SUBJECTS.includes(pleSub)) return undefined;
+    const n = parseInt(pleResultsData[s.id]?.results?.[pleSub], 10);
+    if (isNaN(n) || n < 1 || n > 9) return undefined;
+    return ((10 - n) / 9) * 100;
+  };
   const subjectPct = (s, sub, isLower) => {
+    if (perfTerm === "Term II") return mockPct(s, sub, isLower);
+    if (perfTerm === "Term III") return plePct(s, sub);
     const m = termMarks[s.id]?.[perfTk] || {};
     const ca=m[sub]?.ca, exam=m[sub]?.exam;
     const hasBoth=typeof ca==="number"&&typeof exam==="number";
@@ -3215,7 +3274,7 @@ function Dashboard({ students, school, termMarks, bands, dashboardPerfTerm: perf
       if(pct!==undefined){sum+=pct;cnt++;}
     }));
     return {cls,avgPct:cnt?Math.round(sum/cnt):null};
-  }),[active,termMarks,perfTk]);
+  }),[active,termMarks,perfTk,perfTerm,mockMarksData,pleResultsData]);
   const subjectPerformance = useMemo(()=>{
     const allSubs=[...new Set([...UPPER_SUBJECTS,...LOWER_SUBJECTS])];
     return allSubs.map(sub=>{
@@ -3228,7 +3287,7 @@ function Dashboard({ students, school, termMarks, bands, dashboardPerfTerm: perf
       });
       return {sub,avgPct:cnt?Math.round(sum/cnt):null,entries:cnt};
     }).filter(r=>r.entries>0);
-  },[active,termMarks,perfTk]);
+  },[active,termMarks,perfTk,perfTerm,mockMarksData,pleResultsData]);
   // Per-class subject performance for the selected single class
   const classSubjectPerf = useMemo(()=>{
     const isLower=LOWER_CLASSES.includes(subjectClass);
@@ -3242,7 +3301,7 @@ function Dashboard({ students, school, termMarks, bands, dashboardPerfTerm: perf
       });
       return {sub,avgPct:cnt?Math.round(sum/cnt):null,entries:cnt};
     }).filter(r=>r.entries>0);
-  },[active,termMarks,perfTk,subjectClass]);
+  },[active,termMarks,perfTk,perfTerm,mockMarksData,pleResultsData,subjectClass]);
   const barColorFn=(d)=>d.value>=65?"#22c55e":d.value>=45?"#f59e0b":"#ef4444";
   const CARD_COLORS=[
     {bg:"linear-gradient(135deg,#1e40af,#3b82f6)",icon:"👨‍🎓",label:"Total Learners",value:total},
@@ -3322,9 +3381,9 @@ function Dashboard({ students, school, termMarks, bands, dashboardPerfTerm: perf
       {/* ── General class performance bar chart ── */}
       <div style={{background:"white",borderRadius:16,padding:20,boxShadow:"0 2px 12px rgba(0,0,0,0.07)"}}>
         <div style={{fontWeight:800,color:"#1e3a6e",fontSize:14,marginBottom:4}}>📈 Overall Performance by Class — {perfTerm} {perfYear}</div>
-        <div style={{fontSize:11,color:"#9ca3af",marginBottom:14}}>Average % across all subjects and learners per class</div>
+        <div style={{fontSize:11,color:"#9ca3af",marginBottom:14}}>Average % across all subjects and learners per class · Source: <b>{perfSourceLabel}</b></div>
         {classPerformance.every(c=>c.avgPct===null)
-          ? <div style={{color:"#9ca3af",fontSize:13,textAlign:"center",padding:20}}>No marks entered yet for {perfTerm} {perfYear}.</div>
+          ? <div style={{color:"#9ca3af",fontSize:13,textAlign:"center",padding:20}}>No {perfSourceLabel} results entered yet for {perfTerm} {perfYear}.</div>
           : <BarChart
               data={classPerformance.map(c=>({label:c.cls,value:c.avgPct??0}))}
               barColor={barColorFn}
@@ -3341,7 +3400,7 @@ function Dashboard({ students, school, termMarks, bands, dashboardPerfTerm: perf
       {/* ── Whole-school subject performance bar chart ── */}
       <div style={{background:"white",borderRadius:16,padding:20,boxShadow:"0 2px 12px rgba(0,0,0,0.07)"}}>
         <div style={{fontWeight:800,color:"#1e3a6e",fontSize:14,marginBottom:4}}>📚 Subject Performance — Whole School — {perfTerm} {perfYear}</div>
-        <div style={{fontSize:11,color:"#9ca3af",marginBottom:14}}>Average % per subject across all learners who study it</div>
+        <div style={{fontSize:11,color:"#9ca3af",marginBottom:14}}>Average % per subject across all learners who study it · Source: <b>{perfSourceLabel}</b></div>
         {subjectPerformance.length===0
           ? <div style={{color:"#9ca3af",fontSize:13,textAlign:"center",padding:20}}>No marks entered yet.</div>
           : <BarChart
@@ -3357,7 +3416,7 @@ function Dashboard({ students, school, termMarks, bands, dashboardPerfTerm: perf
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end",flexWrap:"wrap",gap:10,marginBottom:14}}>
           <div>
             <div style={{fontWeight:800,color:"#1e3a6e",fontSize:14}}>🎯 Subject Breakdown for {subjectClass} — {perfTerm} {perfYear}</div>
-            <div style={{fontSize:11,color:"#9ca3af",marginTop:2}}>Average % per subject for this class only</div>
+            <div style={{fontSize:11,color:"#9ca3af",marginTop:2}}>Average % per subject for this class only · Source: <b>{perfSourceLabel}</b></div>
           </div>
           <div>
             <label style={{fontSize:11,color:"#6b7280",display:"block",marginBottom:3}}>Select Class</label>
@@ -7203,6 +7262,66 @@ const CERT_DESIGNS = [
 function PleInfo({ students, setStudents, school, markEditing, municipalPerf, setMunicipalPerf }) {
   const [tab, setTab] = useState("records");
   const [pleData, setPleData] = useState({});
+  const [pleDataLoaded, setPleDataLoaded] = useState(false);
+  // Guards the background refresh below from yanking a value out from under
+  // someone who is actively typing -- same 2.5s "I'm mid-edit" pattern used
+  // elsewhere (Mock, Monthly, Term marks) to avoid a stale poll clobbering
+  // an in-progress edit.
+  const pleEditingUntilRef = useRef(0);
+  const lastSeenPleRef = useRef("");
+
+  useEffect(() => {
+    let alive = true;
+    loadShared("mkis_pledata", {}).then(d => {
+      if (!alive) return;
+      const val = d || {};
+      lastSeenPleRef.current = JSON.stringify(val);
+      setPleData(val);
+      setPleDataLoaded(true);
+    });
+    return () => { alive = false; };
+  }, []);
+
+  // Persist every local change to shared storage (merged, not overwritten)
+  // so PLE records survive navigating away/reloading and stay in sync
+  // across devices -- previously this data only ever lived in local
+  // component state and vanished the moment PLE Info was left.
+  useEffect(() => {
+    if (!pleDataLoaded) return;
+    const str = JSON.stringify(pleData);
+    if (str === lastSeenPleRef.current) return;
+    pleEditingUntilRef.current = Date.now() + 2500;
+    const id = setTimeout(() => {
+      updateShared("mkis_pledata", pleData).then(merged => {
+        lastSeenPleRef.current = JSON.stringify(merged);
+        setPleData(merged);
+      }).catch(() => {
+        // Write failed (network blip, etc.) -- leave lastSeenPleRef alone so
+        // the next attempt still sees this as unsaved, rather than falsely
+        // marking it confirmed and risking the next poll reverting it.
+      });
+    }, 600);
+    return () => clearTimeout(id);
+  }, [pleData, pleDataLoaded]);
+
+  // Background refresh: pick up PLE records another device/tab has saved
+  // while this page stays open, the same way Mock/Monthly/Term pages sync.
+  useEffect(() => {
+    const POLL_MS = 4000;
+    let stopped = false;
+    const id = setInterval(async () => {
+      if (stopped) return;
+      if (Date.now() < pleEditingUntilRef.current) return; // mid-edit, don't disturb
+      const remote = await loadShared("mkis_pledata", undefined);
+      if (stopped || remote === undefined) return;
+      const remoteStr = JSON.stringify(remote);
+      if (remoteStr !== lastSeenPleRef.current) {
+        lastSeenPleRef.current = remoteStr;
+        setPleData(remote);
+      }
+    }, POLL_MS);
+    return () => { stopped = true; clearInterval(id); };
+  }, []);
   // imported rows that didn't match any student (flagged red)
   const [unmatched, setUnmatched] = useState([]); // [{ name, indexNo, sex, results, totalAgg, division }]
   const [year, setYear] = useState(school.year||String(new Date().getFullYear()));
@@ -8254,6 +8373,20 @@ function ReportCards({ students, termMarks, bands: defaultBands, specialBands, d
     return {s,perSub,totMk,totAgg,div,hasX};
   }).filter(r=>r.perSub.some(p=>!p.isX)),[classStudents,termMarks,tk,subjects,bands,divisions,isLower]);
   const allClassStudents=useMemo(()=>students.filter(s=>s.className===cls),[students,cls]);
+  // Count of learners in the class who actually have results recorded for
+  // this term/year (independent of the name-search filter above), so the
+  // "OUT OF ..." figure on each card reflects who was actually assessed
+  // rather than everyone on the class roster.
+  const studentsWithResultsCount=useMemo(()=>{
+    return allClassStudents.filter(s=>{
+      const m=termMarks[s.id]?.[tk]||{};
+      return subjects.some(sub=>{
+        const ca=m[sub]?.ca, exam=m[sub]?.exam;
+        const isX=isLower?(exam===undefined||exam===null):(ca===undefined||ca===null)&&(exam===undefined||exam===null);
+        return !isX;
+      });
+    }).length;
+  },[allClassStudents,termMarks,tk,subjects,isLower]);
   const allPositions=useMemo(()=>{
     const pm={};
     const allRows=allClassStudents.map(s=>{
@@ -8284,7 +8417,7 @@ function ReportCards({ students, termMarks, bands: defaultBands, specialBands, d
           <div><label style={lbl}>Search Pupil</label><input value={search} onChange={e=>setSearch(e.target.value)} style={{...inp,width:180}} placeholder="Filter by name..."/></div>
         </div>
         <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-          <button onClick={()=>exportReportCardsWord({ school, cls, term, year, isLower, rows, allPositions, totalInClass: allClassStudents.length, bands, initials })} style={btnWord}>📄 Download Word</button>
+          <button onClick={()=>exportReportCardsWord({ school, cls, term, year, isLower, rows, allPositions, totalInClass: studentsWithResultsCount, bands, initials })} style={btnWord}>📄 Download Word</button>
           <button disabled={pdfBusy} onClick={async()=>{
             setPdfBusy(true);
             try {
@@ -8302,7 +8435,7 @@ function ReportCards({ students, termMarks, bands: defaultBands, specialBands, d
       <div ref={cardListRef} className="report-card-list">
         {rows.map(r=>(
           <ReportCard key={r.s.id} school={school} r={r} term={term} year={year} cls={cls}
-            position={allPositions[r.s.id]} totalInClass={allClassStudents.length}
+            position={allPositions[r.s.id]} totalInClass={studentsWithResultsCount}
             isLower={isLower} bands={bands} initials={initials} />
         ))}
       </div>
@@ -8334,7 +8467,7 @@ function ReportCard({ school, r, term, year, cls, position, totalInClass, isLowe
           <div><b style={{color:"#0f766e"}}>NAME:</b> <span style={{fontWeight:800,fontStyle:"italic"}}>{s.name}</span></div>
           <div><b style={{color:"#0f766e"}}>CLASS:</b> {cls}</div>
           <div><b style={{color:"#0f766e"}}>TERM:</b> {term}</div>
-          <div><b style={{color:"#0f766e"}}>POSITION:</b> {position && position !== "-" ? (<><span style={{color:"#dc2626",fontWeight:800}}>{ordinal(position)}</span> <span style={{color:"#000000"}}>OUT OF</span> <span style={{color:"#2563eb",fontWeight:800}}>{totalInClass}</span></>) : "-"}</div>
+          <div><b style={{color:"#0f766e"}}>POSITION:</b> {position && position !== "-" ? (<><span style={{color:"#dc2626",fontWeight:800}}>{position}<sup style={{fontSize:"0.7em",marginLeft:1}}>{ordinalSuffix(position)}</sup></span> <span style={{color:"#000000"}}>OUT OF</span> <span style={{color:"#2563eb",fontWeight:800}}>{totalInClass}</span></>) : "-"}</div>
           {s.lin && <div style={{gridColumn:"1/-1",fontSize:12,color:"#1e3a6e"}}><b style={{color:"#0f766e"}}>LIN:</b> <span style={{fontStyle:"italic",color:"#2563eb",fontWeight:700}}>{s.lin}</span></div>}
         </div>
         <div style={{padding:"12px 16px"}}>
@@ -9600,7 +9733,7 @@ function AuditLog() {
     mkis_students:"Students", mkis_termmarks:"Term Marks", mkis_monthlymarks:"Monthly Marks",
     mkis_bands:"Grade Bands", mkis_special_bands:"Special Grading Scale", mkis_divisions:"Divisions", mkis_school:"School Settings",
     mkis_accounts:"Accounts", mkis_changerequests:"Change Requests", mkis_initials:"Initials",
-    mkis_locked_term:"Term Lock", mkis_locked_monthly:"Monthly Lock", mkis_groupwork:"Group Work", mkis_municipalperf:"Municipal Performance", mkis_examtimetable:"Exam Timetable",
+    mkis_locked_term:"Term Lock", mkis_locked_monthly:"Monthly Lock", mkis_groupwork:"Group Work", mkis_municipalperf:"Municipal Performance", mkis_examtimetable:"Exam Timetable", mkis_mock_marks:"Mock Results", mkis_pledata:"PLE Results",
   }[key] || key);
 
   const filtered = rows
