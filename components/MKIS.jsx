@@ -3210,9 +3210,9 @@ function Dashboard({ students, school, termMarks, bands, dashboardPerfTerm: perf
   // applies to P7, so the whole-school charts (which mix P7 with other
   // classes) get a label that makes that split explicit, while the
   // per-class breakdown chart can just say exactly what that one class uses.
-  const perfSourceLabel = perfTerm==="Term II" ? "Exam Entry (P7: Mock)" : perfTerm==="Term III" ? "Exam Entry (P7: PLE)" : "Exam Entry";
+  const perfSourceLabel = perfTerm==="Term II" ? "Exam Entry (P7: Municipal Mock)" : perfTerm==="Term III" ? "Exam Entry (P7: PLE)" : "Exam Entry";
   const classSourceLabel = (cls) => {
-    if (cls==="P7" && perfTerm==="Term II") return "Mock";
+    if (cls==="P7" && perfTerm==="Term II") return "Municipal Mock";
     if (cls==="P7" && perfTerm==="Term III") return "PLE";
     return "Exam Entry";
   };
@@ -3240,15 +3240,11 @@ function Dashboard({ students, school, termMarks, bands, dashboardPerfTerm: perf
   const boys = active.filter(s=>s.gender==="M").length;
   const girls = active.filter(s=>s.gender==="F").length;
   const classCounts = ALL_CLASSES.map(c=>({ cls:c, count:active.filter(s=>s.className===c).length }));
-  // Term II — average % across whichever mock exam type(s) have marks for
-  // this pupil/subject/year, in place of Exam Entry.
+  // Term II — P7's Municipal Mock marks, in place of Exam Entry.
   const mockPct = (s, sub, isLower) => {
-    const vals = MOCK_TYPES
-      .map(mt => mockMarksData[s.id]?.[`${mt}__${perfYear}`]?.[sub])
-      .filter(v => typeof v === "number");
-    if (!vals.length) return undefined;
-    const avg = vals.reduce((a,b)=>a+b,0) / vals.length;
-    return (avg/(isLower?lowerSubjectMax(sub):100))*100;
+    const val = mockMarksData[s.id]?.[`Municipal Mock__${perfYear}`]?.[sub];
+    if (typeof val !== "number") return undefined;
+    return (val/(isLower?lowerSubjectMax(sub):100))*100;
   };
   // Term III — PLE results are recorded as 1–9 subject aggregates (best=1),
   // not raw marks, so they're converted to a comparable percentage
