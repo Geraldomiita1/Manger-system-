@@ -1645,7 +1645,7 @@ function exportMonthlyCardsWord({ school, cls, term, year, isLower, subjects, ca
   downloadWordHtml(`${cls} ${term} ${year} Monthly Report Cards`, body, `${safeFileName(cls)}_${safeFileName(term)}_${year}_Monthly_Report_Cards.doc`);
 }
 // ── Termly Report Card Word export ──
-function exportReportCardsWord({ school, cls, term, year, isLower, rows, allPositions, totalInClass, bands, initials }) {
+function exportReportCardsWord({ school, cls, term, year, isLower, rows, allPositions, totalInClass, bands, divisions, initials }) {
   let body = "";
   // Word-native "double" border style stands in for the template's nested
   // gold/navy frame -- gradients and border-radius aren't reliably rendered
@@ -1676,14 +1676,14 @@ function exportReportCardsWord({ school, cls, term, year, isLower, rows, allPosi
     </table>`;
     const subHead = isLower
       ? `<th style="border:1px solid #999;padding:5px;background:#0f766e;color:white;">MARK</th>`
-      : `<th style="border:1px solid #999;padding:5px;background:#0f766e;color:white;">CA</th><th style="border:1px solid #999;padding:5px;background:#0f766e;color:white;">EXAM</th><th style="border:1px solid #999;padding:5px;background:#0f766e;color:white;">AVERAGE</th><th style="border:1px solid #999;padding:5px;background:#0f766e;color:white;">AGG</th>`;
+      : `<th style="border:1px solid #999;padding:5px;background:#0f766e;color:white;">CA</th><th style="border:1px solid #999;padding:5px;background:#0f766e;color:white;">EXAM</th><th style="border:1px solid #999;padding:5px;background:#0f766e;color:white;">AVERAGE</th><th style="border:1px solid #999;padding:5px;background:#0f766e;color:#fecaca;">AGG</th>`;
     body += `<table style="width:100%;border-collapse:collapse;font-size:10pt;margin-bottom:6px;">
       <thead>
         <tr>
           <th style="border:1px solid #999;padding:5px;background:#0f766e;color:white;text-align:left;">SUBJECT</th>
           ${subHead}
-          <th style="border:1px solid #999;padding:5px;background:#0f766e;color:white;">REMARKS</th>
-          <th style="border:1px solid #999;padding:5px;background:#0f766e;color:white;">INITIALS</th>
+          <th style="border:1px solid #999;padding:5px;background:#0f766e;color:#bfdbfe;">REMARKS</th>
+          <th style="border:1px solid #999;padding:5px;background:#0f766e;color:#fecaca;">INITIALS</th>
         </tr>
       </thead>
       <tbody>`;
@@ -1693,31 +1693,26 @@ function exportReportCardsWord({ school, cls, term, year, isLower, rows, allPosi
       const subName = `${escapeHtml(p.sub)}${isUnscored ? ` (/${lowerSubjectMax(p.sub)})` : ""}`;
       const subCells = isLower
         ? `<td style="border:1px solid #999;padding:5px;text-align:center;font-weight:bold;font-size:12pt;background:${bg};">${p.isX ? "X" : p.av ?? "-"}</td>`
-        : `<td style="border:1px solid #999;padding:5px;text-align:center;background:#fefce8;">${p.isX ? "X" : p.ca ?? "-"}</td><td style="border:1px solid #999;padding:5px;text-align:center;background:#f0fdf4;">${p.isX ? "X" : p.exam ?? "-"}</td><td style="border:1px solid #999;padding:5px;text-align:center;font-weight:bold;font-size:12pt;background:${bg};">${p.isX ? "X" : p.av ?? "-"}</td><td style="border:1px solid #999;padding:5px;text-align:center;">${isUnscored ? "-" : p.isX ? "X" : p.av !== undefined ? p.agg : "-"}</td>`;
+        : `<td style="border:1px solid #999;padding:5px;text-align:center;background:#fefce8;">${p.isX ? "X" : p.ca ?? "-"}</td><td style="border:1px solid #999;padding:5px;text-align:center;background:#f0fdf4;">${p.isX ? "X" : p.exam ?? "-"}</td><td style="border:1px solid #999;padding:5px;text-align:center;font-weight:bold;font-size:12pt;background:${bg};">${p.isX ? "X" : p.av ?? "-"}</td><td style="border:1px solid #999;padding:5px;text-align:center;font-weight:bold;color:#dc2626;">${isUnscored ? "-" : p.isX ? "X" : p.av !== undefined ? p.agg : "-"}</td>`;
       const remark = isUnscored ? "-" : p.isX ? "Absent" : p.av !== undefined ? remarkFor(p.av) : "-";
       body += `<tr style="background:${bg};">
         <td style="border:1px solid #999;padding:5px;font-weight:600;text-align:left;">${subName}</td>
         ${subCells}
-        <td style="border:1px solid #999;padding:5px;text-align:center;font-weight:bold;color:#0f766e;">${remark}</td>
-        <td style="border:1px solid #999;padding:5px;text-align:center;font-weight:bold;color:#000000;">${((initials||{})[cls]||{})[p.sub]||""}</td>
+        <td style="border:1px solid #999;padding:5px;text-align:center;font-weight:bold;color:#2563eb;">${remark}</td>
+        <td style="border:1px solid #999;padding:5px;text-align:center;font-weight:bold;color:#dc2626;">${((initials||{})[cls]||{})[p.sub]||""}</td>
       </tr>`;
     });
     const totColspan = isLower ? 1 : 3;
     body += `<tr style="background:#fef3c7;font-weight:bold;">
       <td style="border:1px solid #999;padding:5px;text-align:left;" colspan="${totColspan + 1}">TOTAL</td>
       <td style="border:1px solid #999;padding:5px;text-align:center;font-size:12pt;">${totMk || "-"}</td>
-      ${!isLower ? `<td style="border:1px solid #999;padding:5px;text-align:center;">${hasX ? "X" : totAgg || "-"}</td>` : ""}
+      ${!isLower ? `<td style="border:1px solid #999;padding:5px;text-align:center;color:#dc2626;">${hasX ? "X" : totAgg || "-"}</td>` : ""}
       <td style="border:1px solid #999;padding:5px;"></td><td style="border:1px solid #999;padding:5px;"></td>
     </tr>`;
     body += `</tbody></table>`;
     // Grading scale legend -- reference key built from existing bands config.
-    // Lower primary doesn't use letter grades, so the GRADE column is
-    // omitted there entirely rather than shown empty.
-    body += `<div style="font-size:8pt;font-weight:bold;color:#0f766e;margin:4px 0 2px;">GRADING SCALE</div>`;
-    body += `<table style="width:100%;border-collapse:collapse;font-size:8.5pt;margin-bottom:6px;">
-      <thead><tr><th style="border:1px solid #999;padding:3px 5px;background:#0f766e;color:white;">MARKS RANGE</th>${!isLower ? `<th style="border:1px solid #999;padding:3px 5px;background:#0f766e;color:white;">GRADE</th>` : ""}<th style="border:1px solid #999;padding:3px 5px;background:#0f766e;color:white;">REMARK</th></tr></thead>
-      <tbody>${bands.map((b,i)=>`<tr style="background:${i%2===0?"#ffffff":"#f0fdfa"};"><td style="border:1px solid #999;padding:2px 5px;text-align:center;">${b.min}${b.max!==b.min?`-${b.max}`:""}</td>${!isLower ? `<td style="border:1px solid #999;padding:2px 5px;text-align:center;font-weight:bold;color:#0f766e;">${escapeHtml(b.grade)}</td>` : ""}<td style="border:1px solid #999;padding:2px 5px;text-align:center;">${escapeHtml(b.label)}</td></tr>`).join("")}</tbody>
-    </table>`;
+    // Lower primary doesn't use letter grades, so the GRADE badge omits it
+    // entirely rather than showing empty.
     body += `<p style="font-size:11pt;line-height:2.2;margin-top:6px;">`;
     if (!isLower) body += `<b>DIVISION:</b> <b style="color:#dc2626;">${hasX ? "X" : totMk ? div : "-"}</b>&nbsp;&nbsp;&nbsp;`;
     body += `</p>`;
@@ -1729,6 +1724,32 @@ function exportReportCardsWord({ school, cls, term, year, isLower, rows, allPosi
       <p style="font-size:11pt;line-height:2;"><b>Requirements:</b> <span style="font-weight:bold;font-style:italic;color:#15803d;">${escapeHtml(school.requirements||"...........................................................................................")}</span></p>
       <p style="font-size:11pt;line-height:2;"><b>Parent's Signature after reading:</b> ...................................................................</p>`;
     body += `</div>`;
+    // Grading Scale + Division Scale, side by side as pill badges, at the
+    // very bottom of the card, after the comments/signature section.
+    const gradePills = bands.map(b=>{
+      const gradePart = !isLower ? `<b style="color:#1e3a6e;">${escapeHtml(b.grade)}</b> ` : "";
+      const rangeWeight = isLower ? "bold" : "normal";
+      return `<span style="display:inline-block;background:white;border:1px solid #dbeafe;border-radius:20px;padding:3px 10px;font-size:8pt;margin:2px;">${gradePart}<span style="color:#1e3a6e;font-weight:${rangeWeight};">(${b.min}${b.max!==b.min?`-${b.max}`:""})</span> <span style="font-style:italic;color:#6b7280;">${escapeHtml(b.label)}</span></span>`;
+    }).join("");
+    const divisionPills = !isLower ? (divisions||[]).map(dv=>
+      `<span style="display:inline-block;background:white;border:1px solid #fde68a;border-radius:20px;padding:3px 10px;font-size:8pt;margin:2px;"><b style="color:#92400e;">Div. ${escapeHtml(dv.name)}</b> <span style="color:#b45309;">(${dv.min}-${dv.max})</span></span>`
+    ).join("") : "";
+    body += `<table style="width:100%;border-collapse:collapse;margin-top:14px;"><tr>`;
+    body += `<td style="width:${isLower?"100%":"50%"};vertical-align:top;padding:0 5px 0 0;">
+      <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:10px 12px;">
+        <div style="font-size:9pt;font-weight:bold;color:#1e3a6e;text-align:center;margin-bottom:8px;letter-spacing:0.3px;">GRADING SCALE — ${isLower?"LOWER":"UPPER"} PRIMARY</div>
+        <div style="text-align:center;">${gradePills}</div>
+      </div>
+    </td>`;
+    if (!isLower) {
+      body += `<td style="width:50%;vertical-align:top;padding:0 0 0 5px;">
+        <div style="background:#fef9c3;border:1px solid #fde68a;border-radius:10px;padding:10px 12px;">
+          <div style="font-size:9pt;font-weight:bold;color:#92400e;text-align:center;margin-bottom:8px;letter-spacing:0.3px;">DIVISION SCALE</div>
+          <div style="text-align:center;">${divisionPills}</div>
+        </div>
+      </td>`;
+    }
+    body += `</tr></table>`;
     body += `</div></div>`;
   });
   downloadWordHtml(`${cls} ${term} ${year} Report Cards`, body, `${safeFileName(cls)}_${safeFileName(term)}_${year}_Report_Cards.doc`, { pageSize: "210mm 297mm", margin: "12mm" });
@@ -2959,9 +2980,9 @@ export default function App() {
             const pendingCount = p==="MANAGE REQUESTS" ? changeRequests.filter(r=>r.status==="pending").length : 0;
             return (
               <button key={p} onClick={()=>setPage(p)}
-                style={{width:"100%",padding:"10px 14px",background:page===p?"rgba(255,255,255,0.2)":"transparent",border:"none",color:"white",textAlign:"left",cursor:"pointer",display:"flex",alignItems:"center",gap:10,fontSize:13,fontWeight:page===p?700:400,borderLeft:page===p?"3px solid #60a5fa":"3px solid transparent"}}>
+                style={{width:"100%",padding:"10px 14px",background:page===p?"#dc2626":"transparent",border:"none",color:"white",textAlign:"left",cursor:"pointer",display:"flex",alignItems:"center",gap:10,fontSize:13,fontWeight:page===p?700:400,borderLeft:page===p?"3px solid #7f1d1d":"3px solid transparent"}}>
                 <span style={{fontSize:16,flexShrink:0}}>{icons[p]}</span>
-                {sideOpen && <span style={{flex:1,display:"flex",alignItems:"center",justifyContent:"space-between"}}>{p}{pendingCount>0 && <span style={{background:"#dc2626",color:"white",borderRadius:10,fontSize:10,fontWeight:800,padding:"1px 7px"}}>{pendingCount}</span>}</span>}
+                {sideOpen && <span style={{flex:1,display:"flex",alignItems:"center",justifyContent:"space-between"}}>{p}{pendingCount>0 && <span style={{background:page===p?"white":"#dc2626",color:page===p?"#dc2626":"white",borderRadius:10,fontSize:10,fontWeight:800,padding:"1px 7px"}}>{pendingCount}</span>}</span>}
               </button>
             );
           })}
@@ -8425,7 +8446,7 @@ function ReportCards({ students, termMarks, bands: defaultBands, specialBands, d
           <div><label style={lbl}>Search Pupil</label><input value={search} onChange={e=>setSearch(e.target.value)} style={{...inp,width:180}} placeholder="Filter by name..."/></div>
         </div>
         <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-          <button onClick={()=>exportReportCardsWord({ school, cls, term, year, isLower, rows, allPositions, totalInClass: studentsWithResultsCount, bands, initials })} style={btnWord}>📄 Download Word</button>
+          <button onClick={()=>exportReportCardsWord({ school, cls, term, year, isLower, rows, allPositions, totalInClass: studentsWithResultsCount, bands, divisions, initials })} style={btnWord}>📄 Download Word</button>
           <button disabled={pdfBusy} onClick={async()=>{
             setPdfBusy(true);
             try {
@@ -8444,13 +8465,13 @@ function ReportCards({ students, termMarks, bands: defaultBands, specialBands, d
         {rows.map(r=>(
           <ReportCard key={r.s.id} school={school} r={r} term={term} year={year} cls={cls}
             position={allPositions[r.s.id]} totalInClass={studentsWithResultsCount}
-            isLower={isLower} bands={bands} initials={initials} />
+            isLower={isLower} bands={bands} divisions={divisions} initials={initials} />
         ))}
       </div>
     </div>
   );
 }
-function ReportCard({ school, r, term, year, cls, position, totalInClass, isLower, bands, initials }) {
+function ReportCard({ school, r, term, year, cls, position, totalInClass, isLower, bands, divisions, initials }) {
   const { s, perSub, totMk, totAgg, div, hasX } = r;
   const comments = autoComments({ isLower, totMk, div, hasX, seed: `${s.id}-${term}-${year}` });
   return (
@@ -8485,9 +8506,9 @@ function ReportCard({ school, r, term, year, cls, position, totalInClass, isLowe
                 <th style={{...th,textAlign:"left",color:"white"}}>SUBJECT</th>
                 {!isLower&&<><th style={{...th,color:"white"}}>CA</th><th style={{...th,color:"white"}}>EXAM</th></>}
                 <th style={{...th,color:"white"}}>{isLower?"MARK":"AVERAGE"}</th>
-                {!isLower&&<th style={{...th,color:"white"}}>AGG</th>}
-                <th style={{...th,color:"white"}}>REMARKS</th>
-                <th style={{...th,color:"white"}}>INITIALS</th>
+                {!isLower&&<th style={{...th,color:"#fecaca"}}>AGG</th>}
+                <th style={{...th,color:"#bfdbfe"}}>REMARKS</th>
+                <th style={{...th,color:"#fecaca"}}>INITIALS</th>
               </tr>
             </thead>
             <tbody>
@@ -8498,41 +8519,18 @@ function ReportCard({ school, r, term, year, cls, position, totalInClass, isLowe
                     <td style={{...td,fontWeight:600,textAlign:"left"}}>{p.sub}{isUnscored?` (/${lowerSubjectMax(p.sub)})`:""}</td>
                     {!isLower&&<><td style={{...td,background:"#fefce8"}}>{p.isX?"X":p.ca??"-"}</td><td style={{...td,background:"#f0fdf4"}}>{p.isX?"X":p.exam??"-"}</td></>}
                     <td style={{...td,fontWeight:700,fontSize:15}}>{p.isX?"X":p.av??"-"}</td>
-                    {!isLower&&<td style={td}>{isUnscored?"-":(p.isX?"X":p.av!==undefined?p.agg:"-")}</td>}
-                    <td style={{...td,fontWeight:700,color:"#0f766e"}}>{isUnscored?"-":(p.isX?"Absent":p.av!==undefined?remarkFor(p.av):"-")}</td>
-                    <td style={{...td,fontWeight:700,color:"#000000"}}>{((initials||{})[cls]||{})[p.sub]||""}</td>
+                    {!isLower&&<td style={{...td,fontWeight:700,color:"#dc2626"}}>{isUnscored?"-":(p.isX?"X":p.av!==undefined?p.agg:"-")}</td>}
+                    <td style={{...td,fontWeight:700,color:"#2563eb"}}>{isUnscored?"-":(p.isX?"Absent":p.av!==undefined?remarkFor(p.av):"-")}</td>
+                    <td style={{...td,fontWeight:700,color:"#dc2626"}}>{((initials||{})[cls]||{})[p.sub]||""}</td>
                   </tr>
                 );
               })}
               <tr style={{background:"#fef3c7",fontWeight:700}}>
                 <td style={{...td,textAlign:"left"}} colSpan={isLower?1:3}>TOTAL</td>
                 <td style={{...td,fontSize:15}}>{totMk||"-"}</td>
-                {!isLower&&<td style={td}>{hasX?"X":totAgg||"-"}</td>}
+                {!isLower&&<td style={{...td,color:"#dc2626",fontWeight:800}}>{hasX?"X":totAgg||"-"}</td>}
                 <td style={td}></td><td style={td}></td>
               </tr>
-            </tbody>
-          </table>
-        </div>
-        {/* Grading scale legend -- purely a reference key built from the
-            existing bands configuration, not a new field to fill in. */}
-        <div style={{padding:"0 16px 12px"}}>
-          <div style={{fontSize:11,fontWeight:800,color:"#0f766e",marginBottom:4}}>GRADING SCALE</div>
-          <table style={{width:"100%",fontSize:10.5,borderCollapse:"collapse"}}>
-            <thead>
-              <tr style={{background:"#0f766e",color:"white"}}>
-                <th style={{...th,padding:"4px 6px",color:"white"}}>MARKS RANGE</th>
-                {!isLower&&<th style={{...th,padding:"4px 6px",color:"white"}}>GRADE</th>}
-                <th style={{...th,padding:"4px 6px",color:"white"}}>REMARK</th>
-              </tr>
-            </thead>
-            <tbody>
-              {bands.map((b,i)=>(
-                <tr key={b.grade} style={{background:i%2===0?"white":"#f0fdfa"}}>
-                  <td style={{...td,padding:"3px 6px"}}>{b.min}{b.max!==b.min?`-${b.max}`:""}</td>
-                  {!isLower&&<td style={{...td,padding:"3px 6px",fontWeight:700,color:"#0f766e"}}>{b.grade}</td>}
-                  <td style={{...td,padding:"3px 6px"}}>{b.label}</td>
-                </tr>
-              ))}
             </tbody>
           </table>
         </div>
@@ -8548,6 +8546,41 @@ function ReportCard({ school, r, term, year, cls, position, totalInClass, isLowe
         <div><b>Next Term begins on</b> <span style={{fontWeight:700,fontStyle:"italic",color:"#1d4ed8"}}>{school.nextOpens||"......................."}</span> <b>Ends on</b> <span style={{fontWeight:700,fontStyle:"italic",color:"#1d4ed8"}}>{school.nextEnds||"......................."}</span></div>
         <div><b>Requirements:</b> <span style={{fontWeight:700,fontStyle:"italic",color:"#15803d"}}>{school.requirements||"..........................................................................................."}</span></div>
         <div><b>Parent's Signature after reading:</b> ...................................................................</div>
+      </div>
+      {/* Grading scale (+ Division scale) legend -- purely a reference key
+          built from the existing bands/divisions configuration, not a new
+          field to fill in. Moved to the very end of the card, after the
+          comments/signature section, per the pill-badge layout below. */}
+      <div style={{marginTop:14,display:"flex",gap:10,flexWrap:"wrap"}}>
+        <div style={{flex:isLower?"1 1 100%":"1 1 300px",background:"#eff6ff",border:"1px solid #bfdbfe",borderRadius:10,padding:"10px 12px"}}>
+          <div style={{fontSize:11,fontWeight:800,color:"#1e3a6e",textAlign:"center",marginBottom:8,letterSpacing:0.3}}>
+            GRADING SCALE — {isLower?"LOWER":"UPPER"} PRIMARY
+          </div>
+          <div style={{display:"flex",flexWrap:"wrap",gap:6,justifyContent:"center"}}>
+            {bands.map(b=>(
+              <div key={b.grade} style={{background:"white",border:"1px solid #dbeafe",borderRadius:20,padding:"3px 10px",fontSize:10}}>
+                {!isLower&&<b style={{color:"#1e3a6e"}}>{b.grade} </b>}
+                <span style={{color:"#1e3a6e",fontWeight:isLower?700:400}}>({b.min}{b.max!==b.min?`-${b.max}`:""})</span>{" "}
+                <span style={{fontStyle:"italic",color:"#6b7280"}}>{b.label}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+        {!isLower && (
+          <div style={{flex:"1 1 300px",background:"#fef9c3",border:"1px solid #fde68a",borderRadius:10,padding:"10px 12px"}}>
+            <div style={{fontSize:11,fontWeight:800,color:"#92400e",textAlign:"center",marginBottom:8,letterSpacing:0.3}}>
+              DIVISION SCALE
+            </div>
+            <div style={{display:"flex",flexWrap:"wrap",gap:6,justifyContent:"center"}}>
+              {(divisions||[]).map(dv=>(
+                <div key={dv.name} style={{background:"white",border:"1px solid #fde68a",borderRadius:20,padding:"3px 10px",fontSize:10}}>
+                  <b style={{color:"#92400e"}}>Div. {dv.name}</b>{" "}
+                  <span style={{color:"#b45309"}}>({dv.min}-{dv.max})</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
