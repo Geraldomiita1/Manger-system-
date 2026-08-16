@@ -8426,17 +8426,36 @@ function ReportCards({ students, termMarks, bands: defaultBands, specialBands, d
   const cardListRef = useRef(null);
   const isLower = LOWER_CLASSES.includes(cls);
   const subjects = isLower ? LOWER_SUBJECTS : UPPER_SUBJECTS;
-  // Special Grading Scale override for the selected class, if any.
-  const bands = useMemo(() => bandsForClass(cls, defaultBands, specialBands, "End of Term", year), [cls, defaultBands, specialBands, year]);
+  // P7's Term II report cards use Municipal Mock results in place of the
+  // regular End-of-Term "Exam Entry" marks -- same swap Dashboard and
+  // Reports already make for P7's performance charts/analysis.
+  const usesMunicipalMock = cls==="P7" && term==="Term II";
+  const [mockMarksData, setMockMarksData] = useState({});
+  useEffect(() => {
+    let alive = true;
+    loadShared("mkis_mock_marks", {}).then(m => { if (alive) setMockMarksData(m || {}); });
+    const id = setInterval(() => {
+      loadShared("mkis_mock_marks", undefined).then(m => { if (alive && m !== undefined) setMockMarksData(m); });
+    }, 6000);
+    return () => { alive = false; clearInterval(id); };
+  }, []);
+  // Special Grading Scale override for the selected class, if any -- reads
+  // the "Municipal Mock" scale (instead of "End of Term") whenever this
+  // page is showing P7 Term II Mock results, so grading matches what was
+  // configured for the Mock exam itself.
+  const bands = useMemo(() => bandsForClass(cls, defaultBands, specialBands, usesMunicipalMock ? "Municipal Mock" : "End of Term", year), [cls, defaultBands, specialBands, year, usesMunicipalMock]);
   const tk = `${term}__${year}`;
+  const mk = `Municipal Mock__${year}`;
   const classStudents = useMemo(()=>
     students.filter(s=>s.className===cls&&s.name.toLowerCase().includes(search.toLowerCase())).sort((a,b)=>a.name.localeCompare(b.name)),
     [students, cls, search]
   );
   const rows = useMemo(()=> classStudents.map(s=>{
-    const m=termMarks[s.id]?.[tk]||{};
+    const m=usesMunicipalMock ? {} : (termMarks[s.id]?.[tk]||{});
+    const mockM=usesMunicipalMock ? (mockMarksData[s.id]?.[mk]||{}) : {};
     const perSub=subjects.map(sub=>{
-      const ca=m[sub]?.ca, exam=m[sub]?.exam;
+      const ca=usesMunicipalMock?undefined:m[sub]?.ca;
+      const exam=usesMunicipalMock?mockM[sub]:m[sub]?.exam;
       const isX=isLower?(exam===undefined||exam===null):(ca===undefined||ca===null)&&(exam===undefined||exam===null);
       if(isX) return {sub,ca,exam,av:undefined,agg:undefined,isX:true};
       const hasBoth=typeof ca==="number"&&typeof exam==="number";
@@ -8450,7 +8469,7 @@ function ReportCards({ students, termMarks, bands: defaultBands, specialBands, d
     const totAgg=hasX?"X":perSub.reduce((a,p)=>a+(p.agg||0),0);
     const div=hasX?"X":(typeof totAgg==="number"?divisionOf(totAgg,isLower?5:4,divisions,hasF9):"X");
     return {s,perSub,totMk,totAgg,div,hasX};
-  }).filter(r=>r.perSub.some(p=>!p.isX)),[classStudents,termMarks,tk,subjects,bands,divisions,isLower]);
+  }).filter(r=>r.perSub.some(p=>!p.isX)),[classStudents,termMarks,tk,subjects,bands,divisions,isLower,usesMunicipalMock,mockMarksData,mk]);
   const allClassStudents=useMemo(()=>students.filter(s=>s.className===cls),[students,cls]);
   // Count of learners in the class who actually have results recorded for
   // this term/year (independent of the name-search filter above), so the
@@ -8458,21 +8477,25 @@ function ReportCards({ students, termMarks, bands: defaultBands, specialBands, d
   // rather than everyone on the class roster.
   const studentsWithResultsCount=useMemo(()=>{
     return allClassStudents.filter(s=>{
-      const m=termMarks[s.id]?.[tk]||{};
+      const m=usesMunicipalMock?{}:(termMarks[s.id]?.[tk]||{});
+      const mockM=usesMunicipalMock?(mockMarksData[s.id]?.[mk]||{}):{};
       return subjects.some(sub=>{
-        const ca=m[sub]?.ca, exam=m[sub]?.exam;
+        const ca=usesMunicipalMock?undefined:m[sub]?.ca;
+        const exam=usesMunicipalMock?mockM[sub]:m[sub]?.exam;
         const isX=isLower?(exam===undefined||exam===null):(ca===undefined||ca===null)&&(exam===undefined||exam===null);
         return !isX;
       });
     }).length;
-  },[allClassStudents,termMarks,tk,subjects,isLower]);
+  },[allClassStudents,termMarks,tk,subjects,isLower,usesMunicipalMock,mockMarksData,mk]);
   const allPositions=useMemo(()=>{
     const pm={};
     const allRows=allClassStudents.map(s=>{
-      const m=termMarks[s.id]?.[tk]||{};
+      const m=usesMunicipalMock?{}:(termMarks[s.id]?.[tk]||{});
+      const mockM=usesMunicipalMock?(mockMarksData[s.id]?.[mk]||{}):{};
       let totMk=0; let totAgg=0; let hasX=false;
       subjects.forEach(sub=>{
-        const ca=m[sub]?.ca,exam=m[sub]?.exam;
+        const ca=usesMunicipalMock?undefined:m[sub]?.ca;
+        const exam=usesMunicipalMock?mockM[sub]:m[sub]?.exam;
         const isX=isLower?(exam===undefined||exam===null):(ca===undefined||ca===null)&&(exam===undefined||exam===null);
         if(isX){ hasX=true; return; }
         const hasBoth=typeof ca==="number"&&typeof exam==="number";
@@ -8485,9 +8508,14 @@ function ReportCards({ students, termMarks, bands: defaultBands, specialBands, d
     const ranks=rankWithTies(allRows.map(r=>r.totMk>0?r.totMk:null), allRows.map(r=>typeof r.totAgg==="number"?r.totAgg:null));
     allRows.forEach((r,i)=>{ pm[r.id]=ranks[i]; });
     return pm;
-  },[allClassStudents,termMarks,tk,subjects,isLower,bands]);
+  },[allClassStudents,termMarks,tk,subjects,isLower,bands,usesMunicipalMock,mockMarksData,mk]);
   return (
     <div>
+      {usesMunicipalMock && (
+        <div className="no-print" style={{background:"#fff7ed",border:"1px solid #fdba74",borderRadius:8,padding:"8px 14px",marginBottom:12,fontSize:12.5,color:"#9a3412"}}>
+          🏛️ <b>P7 · Term II</b> report cards are generated from <b>Municipal Mock</b> results, not the regular End-of-Term marks.
+        </div>
+      )}
       <div className="no-print" style={{display:"flex",gap:10,marginBottom:16,flexWrap:"wrap",alignItems:"flex-end",justifyContent:"space-between"}}>
         <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"flex-end"}}>
           <Sel label="Class" value={cls} onChange={setCls} opts={ALL_CLASSES}/>
