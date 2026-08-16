@@ -3206,9 +3206,16 @@ function PieChart({ slices, size=160 }) {
 function Dashboard({ students, school, termMarks, bands, dashboardPerfTerm: perfTerm, setDashboardPerfTerm: setPerfTerm, dashboardPerfYear: perfYear, setDashboardPerfYear: setPerfYear }) {
   const [subjectClass, setSubjectClass] = useState("P4");
   const perfTk = `${perfTerm}__${perfYear}`;
-  // Source label shown under each chart title so it's clear which set of
-  // results is powering the numbers for the selected term.
-  const perfSourceLabel = perfTerm==="Term II" ? "Mock" : perfTerm==="Term III" ? "PLE" : "Exam Entry";
+  // Source label(s) shown under each chart title. The Mock/PLE swap only
+  // applies to P7, so the whole-school charts (which mix P7 with other
+  // classes) get a label that makes that split explicit, while the
+  // per-class breakdown chart can just say exactly what that one class uses.
+  const perfSourceLabel = perfTerm==="Term II" ? "Exam Entry (P7: Mock)" : perfTerm==="Term III" ? "Exam Entry (P7: PLE)" : "Exam Entry";
+  const classSourceLabel = (cls) => {
+    if (cls==="P7" && perfTerm==="Term II") return "Mock";
+    if (cls==="P7" && perfTerm==="Term III") return "PLE";
+    return "Exam Entry";
+  };
   // Term II's "End of Term" results analysis draws from Mock results, and
   // Term III's from PLE results, instead of Exam Entry -- these two pages
   // manage their own shared-storage records, so Dashboard reads them
@@ -3255,8 +3262,13 @@ function Dashboard({ students, school, termMarks, bands, dashboardPerfTerm: perf
     return ((10 - n) / 9) * 100;
   };
   const subjectPct = (s, sub, isLower) => {
-    if (perfTerm === "Term II") return mockPct(s, sub, isLower);
-    if (perfTerm === "Term III") return plePct(s, sub);
+    // The Mock/PLE substitution only applies to P7 — every other class
+    // keeps using Exam Entry in every term, since only P7 sits Mock exams
+    // and PLE.
+    if (s.className === "P7") {
+      if (perfTerm === "Term II") return mockPct(s, sub, isLower);
+      if (perfTerm === "Term III") return plePct(s, sub);
+    }
     const m = termMarks[s.id]?.[perfTk] || {};
     const ca=m[sub]?.ca, exam=m[sub]?.exam;
     const hasBoth=typeof ca==="number"&&typeof exam==="number";
@@ -3383,7 +3395,7 @@ function Dashboard({ students, school, termMarks, bands, dashboardPerfTerm: perf
         <div style={{fontWeight:800,color:"#1e3a6e",fontSize:14,marginBottom:4}}>📈 Overall Performance by Class — {perfTerm} {perfYear}</div>
         <div style={{fontSize:11,color:"#9ca3af",marginBottom:14}}>Average % across all subjects and learners per class · Source: <b>{perfSourceLabel}</b></div>
         {classPerformance.every(c=>c.avgPct===null)
-          ? <div style={{color:"#9ca3af",fontSize:13,textAlign:"center",padding:20}}>No {perfSourceLabel} results entered yet for {perfTerm} {perfYear}.</div>
+          ? <div style={{color:"#9ca3af",fontSize:13,textAlign:"center",padding:20}}>No results entered yet for {perfTerm} {perfYear}.</div>
           : <BarChart
               data={classPerformance.map(c=>({label:c.cls,value:c.avgPct??0}))}
               barColor={barColorFn}
@@ -3416,7 +3428,7 @@ function Dashboard({ students, school, termMarks, bands, dashboardPerfTerm: perf
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end",flexWrap:"wrap",gap:10,marginBottom:14}}>
           <div>
             <div style={{fontWeight:800,color:"#1e3a6e",fontSize:14}}>🎯 Subject Breakdown for {subjectClass} — {perfTerm} {perfYear}</div>
-            <div style={{fontSize:11,color:"#9ca3af",marginTop:2}}>Average % per subject for this class only · Source: <b>{perfSourceLabel}</b></div>
+            <div style={{fontSize:11,color:"#9ca3af",marginTop:2}}>Average % per subject for this class only · Source: <b>{classSourceLabel(subjectClass)}</b></div>
           </div>
           <div>
             <label style={{fontSize:11,color:"#6b7280",display:"block",marginBottom:3}}>Select Class</label>
