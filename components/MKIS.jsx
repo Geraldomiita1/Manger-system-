@@ -791,6 +791,16 @@ function padTotMk(n) {
   if (isNaN(num)) return n;
   return num < 100 ? String(num).padStart(3, "0") : String(num);
 }
+// Zero-pads individual mark values (CA, EXAM, AVERAGE/MARK, monthly MK) so a
+// single-digit score like 4 shows as "04", used on Report Cards, Monthly
+// Cards and Monthly Slips. Placeholders ("-", "X", "Absent") and non-numeric
+// values pass through unchanged.
+function padMark(n) {
+  if (n === undefined || n === null || n === "-" || n === "X" || n === "Absent") return n;
+  const num = Number(n);
+  if (isNaN(num)) return n;
+  return num < 10 ? `0${num}` : String(num);
+}
 function clampMark(val, max = 100) {
   if (val === undefined || val === null || val === "") return undefined;
   const n = Number(val);
@@ -1654,8 +1664,8 @@ function exportMonthlyCardsWord({ school, cls, term, year, isLower, subjects, ca
       const bg = mIdx % 2 === 0 ? "#ffffff" : "#f8fafc";
       const subCells = perSub.map(p =>
         isLower
-          ? `<td style="border:1px solid #999;padding:4px;text-align:center;background:${bg};">${p.mk !== undefined ? p.mk : "-"}</td>`
-          : `<td style="border:1px solid #999;padding:4px;text-align:center;background:${bg};">${p.mk !== undefined ? p.mk : "-"}</td><td style="border:1px solid #999;padding:4px;text-align:center;background:#fff7ed;">${p.agg !== undefined ? p.agg : "-"}</td>`
+          ? `<td style="border:1px solid #999;padding:4px;text-align:center;background:${bg};">${p.mk !== undefined ? padMark(p.mk) : "-"}</td>`
+          : `<td style="border:1px solid #999;padding:4px;text-align:center;background:${bg};">${p.mk !== undefined ? padMark(p.mk) : "-"}</td><td style="border:1px solid #999;padding:4px;text-align:center;background:#fff7ed;">${p.agg !== undefined ? p.agg : "-"}</td>`
       ).join("");
       const totCells = isLower
         ? `<td style="border:1px solid #999;padding:4px;text-align:center;font-weight:bold;background:#ede9fe;">${totMk > 0 ? padTotMk(totMk) : "-"}</td><td style="border:1px solid #999;padding:4px;text-align:center;">${pos && pos !== "-" ? ordinal(pos) : "-"}</td>`
@@ -1703,14 +1713,14 @@ function exportReportCardsWord({ school, cls, term, year, isLower, rows, allPosi
     </table>`;
     const subHead = isLower
       ? `<th style="border:1px solid #999;padding:5px;background:#0f766e;color:white;">MARK</th>`
-      : `<th style="border:1px solid #999;padding:5px;background:#0f766e;color:white;">CA</th><th style="border:1px solid #999;padding:5px;background:#0f766e;color:white;">EXAM</th><th style="border:1px solid #999;padding:5px;background:#0f766e;color:white;">AVERAGE</th><th style="border:1px solid #999;padding:5px;background:#0f766e;color:#fecaca;">AGG</th>`;
+      : `<th style="border:1px solid #999;padding:5px;background:#0f766e;color:white;">CA</th><th style="border:1px solid #999;padding:5px;background:#0f766e;color:white;">EXAM</th><th style="border:1px solid #999;padding:5px;background:#0f766e;color:white;">AVERAGE</th><th style="border:1px solid #999;padding:5px;background:#0f766e;color:white;">AGG</th>`;
     body += `<table style="width:100%;border-collapse:collapse;font-size:10pt;margin-bottom:6px;">
       <thead>
         <tr>
           <th style="border:1px solid #999;padding:5px;background:#0f766e;color:white;text-align:left;">SUBJECT</th>
           ${subHead}
-          <th style="border:1px solid #999;padding:5px;background:#0f766e;color:#bfdbfe;">REMARKS</th>
-          <th style="border:1px solid #999;padding:5px;background:#0f766e;color:#fecaca;">INITIALS</th>
+          <th style="border:1px solid #999;padding:5px;background:#0f766e;color:white;">REMARKS</th>
+          <th style="border:1px solid #999;padding:5px;background:#0f766e;color:white;">INITIALS</th>
         </tr>
       </thead>
       <tbody>`;
@@ -1719,8 +1729,8 @@ function exportReportCardsWord({ school, cls, term, year, isLower, rows, allPosi
       const bg = i % 2 === 0 ? "#ffffff" : "#f0fdfa";
       const subName = `${escapeHtml(p.sub)}${isUnscored ? ` (/${lowerSubjectMax(p.sub)})` : ""}`;
       const subCells = isLower
-        ? `<td style="border:1px solid #999;padding:5px;text-align:center;font-weight:bold;font-size:12pt;background:${bg};">${p.isX ? "X" : p.av ?? "-"}</td>`
-        : `<td style="border:1px solid #999;padding:5px;text-align:center;background:#fefce8;">${p.isX ? "X" : p.ca ?? "-"}</td><td style="border:1px solid #999;padding:5px;text-align:center;background:#f0fdf4;">${p.isX ? "X" : p.exam ?? "-"}</td><td style="border:1px solid #999;padding:5px;text-align:center;font-weight:bold;font-size:12pt;background:${bg};">${p.isX ? "X" : p.av ?? "-"}</td><td style="border:1px solid #999;padding:5px;text-align:center;font-weight:bold;color:#dc2626;">${isUnscored ? "-" : p.isX ? "X" : p.av !== undefined ? p.agg : "-"}</td>`;
+        ? `<td style="border:1px solid #999;padding:5px;text-align:center;font-weight:bold;font-size:12pt;background:${bg};">${p.isX ? "X" : padMark(p.av) ?? "-"}</td>`
+        : `<td style="border:1px solid #999;padding:5px;text-align:center;background:#fefce8;">${p.isX ? "X" : padMark(p.ca) ?? "-"}</td><td style="border:1px solid #999;padding:5px;text-align:center;background:#f0fdf4;">${p.isX ? "X" : padMark(p.exam) ?? "-"}</td><td style="border:1px solid #999;padding:5px;text-align:center;font-weight:bold;font-size:12pt;background:${bg};">${p.isX ? "X" : padMark(p.av) ?? "-"}</td><td style="border:1px solid #999;padding:5px;text-align:center;font-weight:bold;color:#dc2626;">${isUnscored ? "-" : p.isX ? "X" : p.av !== undefined ? p.agg : "-"}</td>`;
       const remark = isUnscored ? "-" : p.isX ? "Absent" : p.av !== undefined ? remarkFor(p.av) : "-";
       body += `<tr style="background:${bg};">
         <td style="border:1px solid #999;padding:5px;font-weight:600;text-align:left;">${subName}</td>
@@ -6514,9 +6524,9 @@ function TermlyMonthlyCard({ school, student, monthData, term, year, cls, isLowe
                   <td style={{...td,fontWeight:800,fontSize:13,background:monthLabelBg,color:"#1e3a6e",textAlign:"left",paddingLeft:10,borderRight:"2px solid #93c5fd"}}>{month}</td>
                   {perSub.map(p=>(
                     isLower
-                      ? <td key={p.sub+"mk"} style={{...td,background:rowBg,fontWeight:p.mk!==undefined?600:400,color:p.mk!==undefined?"#1f2937":"#9ca3af"}}>{p.mk!==undefined?p.mk:"-"}</td>
+                      ? <td key={p.sub+"mk"} style={{...td,background:rowBg,fontWeight:p.mk!==undefined?600:400,color:p.mk!==undefined?"#1f2937":"#9ca3af"}}>{p.mk!==undefined?padMark(p.mk):"-"}</td>
                       : <React.Fragment key={p.sub}>
-                          <td style={{...td,background:rowBg,fontWeight:p.mk!==undefined?600:400,color:p.mk!==undefined?"#1f2937":"#9ca3af"}}>{p.mk!==undefined?p.mk:"-"}</td>
+                          <td style={{...td,background:rowBg,fontWeight:p.mk!==undefined?600:400,color:p.mk!==undefined?"#1f2937":"#9ca3af"}}>{p.mk!==undefined?padMark(p.mk):"-"}</td>
                           <td style={{...td,background:mIdx%2===0?"#fff7ed":"#fef3c7",fontWeight:(p.isX||p.agg!==undefined)?700:400,color:p.isX?"#dc2626":(p.agg!==undefined?"#92400e":"#9ca3af"),fontSize:11}}>{hasX&&p.isX?"X":(p.agg!==undefined?p.agg:"-")}</td>
                         </React.Fragment>
                   ))}
@@ -6756,9 +6766,9 @@ function MonthlySlip({ school, student, monthData, term, year, cls, isLower, sub
                 <td style={{...td,fontWeight:800,fontSize:8,background:mIdx%2===0?"#dbeafe":"#bfdbfe",color:"#1e3a6e",textAlign:"left",padding:"0 2px",verticalAlign:"middle",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{month}</td>
                 {perSub.map(p=>(
                   isLower
-                    ? <td key={p.sub+"mk"} style={{...td,background:rowBg,fontWeight:p.mk!==undefined?800:400,color:p.mk!==undefined?"#111827":"#9ca3af",fontSize:12,padding:"0 2px",verticalAlign:"middle"}}>{p.mk!==undefined?p.mk:"-"}</td>
+                    ? <td key={p.sub+"mk"} style={{...td,background:rowBg,fontWeight:p.mk!==undefined?800:400,color:p.mk!==undefined?"#111827":"#9ca3af",fontSize:12,padding:"0 2px",verticalAlign:"middle"}}>{p.mk!==undefined?padMark(p.mk):"-"}</td>
                     : <React.Fragment key={p.sub}>
-                        <td style={{...td,background:rowBg,fontWeight:p.mk!==undefined?800:400,color:p.mk!==undefined?"#111827":"#9ca3af",fontSize:12,padding:"0 2px",verticalAlign:"middle"}}>{p.mk!==undefined?p.mk:"-"}</td>
+                        <td style={{...td,background:rowBg,fontWeight:p.mk!==undefined?800:400,color:p.mk!==undefined?"#111827":"#9ca3af",fontSize:12,padding:"0 2px",verticalAlign:"middle"}}>{p.mk!==undefined?padMark(p.mk):"-"}</td>
                         <td style={{...td,background:mIdx%2===0?"#fff7ed":"#fef3c7",fontWeight:(p.isX||p.agg!==undefined)?800:400,color:p.isX?"#dc2626":(p.agg!==undefined?"#92400e":"#9ca3af"),fontSize:12,padding:"0 2px",verticalAlign:"middle"}}>{hasX&&p.isX?"X":(p.agg!==undefined?p.agg:"-")}</td>
                       </React.Fragment>
                 ))}
@@ -8546,9 +8556,9 @@ function ReportCard({ school, r, term, year, cls, position, totalInClass, isLowe
                 <th style={{...th,textAlign:"left",color:"white"}}>SUBJECT</th>
                 {!isLower&&<><th style={{...th,color:"white"}}>CA</th><th style={{...th,color:"white"}}>EXAM</th></>}
                 <th style={{...th,color:"white"}}>{isLower?"MARK":"AVERAGE"}</th>
-                {!isLower&&<th style={{...th,color:"#fecaca"}}>AGG</th>}
-                <th style={{...th,color:"#bfdbfe"}}>REMARKS</th>
-                <th style={{...th,color:"#fecaca"}}>INITIALS</th>
+                {!isLower&&<th style={{...th,color:"white"}}>AGG</th>}
+                <th style={{...th,color:"white"}}>REMARKS</th>
+                <th style={{...th,color:"white"}}>INITIALS</th>
               </tr>
             </thead>
             <tbody>
@@ -8557,8 +8567,8 @@ function ReportCard({ school, r, term, year, cls, position, totalInClass, isLowe
                 return (
                   <tr key={p.sub} style={{background:i%2===0?"white":"#f0fdfa"}}>
                     <td style={{...td,fontWeight:600,textAlign:"left"}}>{p.sub}{isUnscored?` (/${lowerSubjectMax(p.sub)})`:""}</td>
-                    {!isLower&&<><td style={{...td,background:"#fefce8"}}>{p.isX?"X":p.ca??"-"}</td><td style={{...td,background:"#f0fdf4"}}>{p.isX?"X":p.exam??"-"}</td></>}
-                    <td style={{...td,fontWeight:700,fontSize:15}}>{p.isX?"X":p.av??"-"}</td>
+                    {!isLower&&<><td style={{...td,background:"#fefce8"}}>{p.isX?"X":padMark(p.ca)??"-"}</td><td style={{...td,background:"#f0fdf4"}}>{p.isX?"X":padMark(p.exam)??"-"}</td></>}
+                    <td style={{...td,fontWeight:700,fontSize:15}}>{p.isX?"X":padMark(p.av)??"-"}</td>
                     {!isLower&&<td style={{...td,fontWeight:700,color:"#dc2626"}}>{isUnscored?"-":(p.isX?"X":p.av!==undefined?p.agg:"-")}</td>}
                     <td style={{...td,fontWeight:700,color:"#2563eb"}}>{isUnscored?"-":(p.isX?"Absent":p.av!==undefined?remarkFor(p.av):"-")}</td>
                     <td style={{...td,fontWeight:700,color:"#dc2626"}}>{((initials||{})[cls]||{})[p.sub]||""}</td>
