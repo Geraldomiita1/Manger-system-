@@ -385,6 +385,38 @@ async function saveShared(key, val) {
     // vanishes a few seconds later even though nothing else touched it.
     await window.storage.set(key, JSON.stringify(val), true);
 }
+// ── Offline safety net ──────────────────────────────────────────────────
+// Real, per-device browser localStorage (NOT shared/synced) used purely as
+// a crash-safe backup for edits that haven't finished saving to shared
+// storage yet. It is never treated as a source of truth for anything other
+// devices see -- it exists only so that if the connection drops (or the
+// tab/app is closed) before a save lands, the unsaved edit survives a
+// reload on THIS device and gets retried automatically the moment the
+// network is back, instead of being silently lost.
+const OFFLINE_BACKUP_PREFIX = "mkis_offline_backup::";
+function backupPendingWrite(key, val) {
+    try {
+        localStorage.setItem(OFFLINE_BACKUP_PREFIX + key, JSON.stringify({
+            val,
+            savedAt: Date.now()
+        }));
+    } catch (e) {}
+}
+function clearPendingWriteBackup(key) {
+    try {
+        localStorage.removeItem(OFFLINE_BACKUP_PREFIX + key);
+    } catch (e) {}
+}
+function readPendingWriteBackup(key) {
+    try {
+        const raw = localStorage.getItem(OFFLINE_BACKUP_PREFIX + key);
+        if (!raw) return undefined;
+        const parsed = JSON.parse(raw);
+        return parsed && Object.prototype.hasOwnProperty.call(parsed, "val") ? parsed.val : undefined;
+    } catch (e) {
+        return undefined;
+    }
+}
 // Friendly key → section label map
 const KEY_LABEL = {
     mkis_students: "Students",
@@ -3826,6 +3858,34 @@ export default function App() {
     // Same idea as deletedStudentIdsRef, but for change-request records that
     // have been resolved (approved/rejected) and removed from the list.
     const deletedRequestIdsRef = useRef(new Set());
+    // ── Offline / unsaved-changes tracking ──────────────────────────────
+    // isOnline mirrors the browser's connectivity status. pendingKeysRef
+    // holds every STORAGE_KEY that currently has an edit which has NOT yet
+    // been confirmed saved to shared storage (i.e. local state has moved
+    // past lastSeenRef for that key). pendingSaveCount is a plain number
+    // mirroring pendingKeysRef's size purely so React re-renders the
+    // status banner and the exit-guard react to it -- the ref itself is
+    // what every save/queue/retry function actually reads and writes.
+    const [isOnline, setIsOnline] = useState(()=>typeof navigator === "undefined" ? true : navigator.onLine);
+    const [pendingSaveCount, setPendingSaveCount] = useState(0);
+    const [saveBannerDismissed, setSaveBannerDismissed] = useState(false);
+    const pendingKeysRef = useRef(new Set());
+    const notifyPendingChanged = useCallback(()=>{
+        setPendingSaveCount(pendingKeysRef.current.size);
+    }, []);
+    // A few keys need extra merge context (e.g. which ids were explicitly
+    // deleted on this device) passed alongside the raw value. Centralized
+    // here so the reconnect-retry path below can reproduce the exact same
+    // context the normal save effects use, instead of retrying "blind".
+    const getCtxForKey = useCallback((key)=>{
+        if (key === "mkis_students") return ()=>({
+                deletedStudentIds: deletedStudentIdsRef.current
+            });
+        if (key === "mkis_changerequests") return ()=>({
+                deletedRequestIds: deletedRequestIdsRef.current
+            });
+        return undefined;
+    }, []);
     // When a key is in this set, the NEXT save effect for that key writes the
     // local value as-is, bypassing the merge strategy entirely. Used only for
     // deliberate, user-confirmed full-backup restores, where overwriting
@@ -3857,8 +3917,24 @@ export default function App() {
     const queueKeySave = useCallback((key, ctx)=>{
         const run = async ()=>{
             inFlightRef.current.add(key);
+            const localVal = stateRef.current[key]; // freshest value AT THE TIME THIS SAVE ACTUALLY RUNS
+            // Mark this key as having an unsaved edit and back it up to real,
+            // per-device localStorage BEFORE attempting the network write. If
+            // the connection drops (or the app is closed) mid-save, the edit
+            // is still recoverable on reload -- see readPendingWriteBackup()
+            // in the initial-load effect below.
+            pendingKeysRef.current.add(key);
+            notifyPendingChanged();
+            backupPendingWrite(key, localVal);
             try {
-                const localVal = stateRef.current[key]; // freshest value AT THE TIME THIS SAVE ACTUALLY RUNS
+                // Don't even attempt the network round trip while offline --
+                // it will only fail after a timeout. Fail fast into the catch
+                // block below so the retry/backoff logic there takes over, and
+                // let the 'online' listener trigger an immediate retry the
+                // moment connectivity actually returns.
+                if (typeof navigator !== "undefined" && !navigator.onLine) {
+                    throw new Error("MKIS_OFFLINE");
+                }
                 if (forceWriteRef.current.has(key)) {
                     forceWriteRef.current.delete(key);
                     await saveShared(key, localVal);
@@ -3899,6 +3975,20 @@ export default function App() {
                 }, 3000);
             } finally{
                 inFlightRef.current.delete(key);
+                // Only clear the "unsaved" flag (and its localStorage backup)
+                // once local state has actually been confirmed saved -- i.e.
+                // nothing newer has been typed/changed since this attempt
+                // started. If a fresher edit landed in the meantime, leave
+                // this key marked pending; the next queued run (already
+                // chained right behind this one) will pick it up and clear
+                // it once IT succeeds.
+                if (JSON.stringify(stateRef.current[key]) === lastSeenRef.current[key]) {
+                    pendingKeysRef.current.delete(key);
+                    clearPendingWriteBackup(key);
+                } else {
+                    pendingKeysRef.current.add(key);
+                }
+                notifyPendingChanged();
             }
         };
         const prevTail = saveQueueRef.current[key] || Promise.resolve();
@@ -3983,6 +4073,27 @@ export default function App() {
                 mkis_examtimetable: JSON.stringify(et || DEFAULT_EXAM_TIMETABLE),
                 mkis_reports: JSON.stringify(rp || DEFAULT_REPORTS)
             };
+            // ── Offline-backup recovery ──────────────────────────────────
+            // If this device still has an edit backed up from a previous
+            // session that never finished saving (e.g. the tab/app was
+            // closed while offline, before the write could reach shared
+            // storage), restore it now and mark it pending so it gets
+            // queued for saving again below -- instead of silently losing
+            // whatever was last typed.
+            STORAGE_KEYS.forEach((key)=>{
+                const backedUp = readPendingWriteBackup(key);
+                if (backedUp === undefined) return;
+                if (JSON.stringify(backedUp) === lastSeenRef.current[key]) {
+                    // Matches what's already confirmed saved -- stale leftover, discard.
+                    clearPendingWriteBackup(key);
+                    return;
+                }
+                if (setters[key]) {
+                    setters[key](backedUp);
+                    pendingKeysRef.current.add(key);
+                }
+            });
+            notifyPendingChanged();
             setDataReady(true);
             setLastSyncedAt(new Date());
         })();
@@ -4231,6 +4342,50 @@ export default function App() {
     }, [
         dataReady
     ]);
+    // ── Connectivity tracking + instant reconnect retry ──────────────────
+    // Keeps isOnline in sync with the browser's real connectivity status,
+    // and -- the moment the connection comes back -- immediately re-queues
+    // every key still marked unsaved instead of waiting on the 3s backoff
+    // timer inside queueKeySave's catch block.
+    useEffect(()=>{
+        const handleOnline = ()=>{
+            setIsOnline(true);
+            setSaveBannerDismissed(false);
+            pendingKeysRef.current.forEach((key)=>{
+                queueKeySave(key, getCtxForKey(key));
+            });
+        };
+        const handleOffline = ()=>{
+            setIsOnline(false);
+            setSaveBannerDismissed(false);
+        };
+        window.addEventListener("online", handleOnline);
+        window.addEventListener("offline", handleOffline);
+        return ()=>{
+            window.removeEventListener("online", handleOnline);
+            window.removeEventListener("offline", handleOffline);
+        };
+    }, [
+        queueKeySave,
+        getCtxForKey
+    ]);
+    // ── Exit guard ─────────────────────────────────────────────────────
+    // Warns before the tab/app closes or reloads if any edit hasn't been
+    // confirmed saved yet (offline, or a save still mid-retry). Browsers
+    // ignore custom beforeunload text and show their own generic "Leave
+    // site?" / "Leave app?" prompt -- preventDefault() + setting
+    // returnValue is what triggers that native dialog.
+    useEffect(()=>{
+        const handleBeforeUnload = (e)=>{
+            if (pendingKeysRef.current.size > 0) {
+                e.preventDefault();
+                e.returnValue = "";
+                return "";
+            }
+        };
+        window.addEventListener("beforeunload", handleBeforeUnload);
+        return ()=>window.removeEventListener("beforeunload", handleBeforeUnload);
+    }, []);
     const updateTermMark = useCallback((sid, tk, sub, field, val)=>{
         markEditing();
         const [term, year] = tk.split("__");
@@ -5146,19 +5301,93 @@ export default function App() {
         dashboardPerfYear,
         setDashboardPerfYear
     };
-    return /*#__PURE__*/ _jsxs("div", {
-        className: "app-shell",
+    // Shown whenever this device is offline, or has an edit that hasn't
+    // finished saving to shared storage yet (still mid-retry). Dismissible,
+    // but it reappears automatically if the underlying status changes again
+    // (e.g. it drops offline again after being dismissed while online).
+    const showSaveBanner = (!isOnline || pendingSaveCount > 0) && !saveBannerDismissed;
+    const saveBanner = showSaveBanner && /*#__PURE__*/ _jsxs("div", {
+        className: "no-print",
         style: {
+            position: "sticky",
+            top: 0,
+            zIndex: 9999,
+            width: "100%",
+            boxSizing: "border-box",
+            background: isOnline ? "#fff7ed" : "#fef2f2",
+            borderBottom: "1px solid ".concat(isOnline ? "#fdba74" : "#fca5a5"),
+            color: isOnline ? "#9a3412" : "#991b1b",
+            padding: "10px 16px",
             display: "flex",
-            minHeight: "100vh",
-            fontFamily: "'Segoe UI',system-ui,sans-serif",
-            background: "#f1f5f9"
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 12,
+            flexWrap: "wrap",
+            fontSize: 13,
+            fontWeight: 600,
+            boxShadow: "0 2px 6px rgba(0,0,0,0.08)"
         },
         children: [
-            /*#__PURE__*/ _jsxs("div", {
-                className: "no-print",
+            /*#__PURE__*/ _jsx("span", {
+                children: "⚠️"
+            }),
+            /*#__PURE__*/ _jsx("span", {
                 style: {
-                    width: sideOpen ? 230 : 60,
+                    maxWidth: 720
+                },
+                children: isOnline ? "".concat(pendingSaveCount, " change").concat(pendingSaveCount === 1 ? "" : "s", " still saving… retrying now that you're back online.") : "You're offline — your changes are saved on this device and will sync automatically once your connection returns. Please don't close the app until this message clears, or the latest changes may not reach other devices."
+            }),
+            !isOnline && /*#__PURE__*/ _jsx("button", {
+                onClick: ()=>{
+                    pendingKeysRef.current.forEach((key)=>{
+                        queueKeySave(key, getCtxForKey(key));
+                    });
+                },
+                style: {
+                    background: "#991b1b",
+                    color: "#fff",
+                    border: "none",
+                    borderRadius: 6,
+                    padding: "5px 14px",
+                    fontWeight: 700,
+                    fontSize: 12,
+                    cursor: "pointer"
+                },
+                children: "Retry Now"
+            }),
+            /*#__PURE__*/ _jsx("button", {
+                onClick: ()=>setSaveBannerDismissed(true),
+                style: {
+                    background: "transparent",
+                    color: "inherit",
+                    border: "1px solid currentColor",
+                    borderRadius: 6,
+                    padding: "5px 14px",
+                    fontWeight: 700,
+                    fontSize: 12,
+                    cursor: "pointer",
+                    opacity: 0.85
+                },
+                children: "Dismiss"
+            })
+        ]
+    });
+    return /*#__PURE__*/ _jsxs(_Fragment, {
+        children: [
+            saveBanner,
+            /*#__PURE__*/ _jsxs("div", {
+                className: "app-shell",
+                style: {
+                    display: "flex",
+                    minHeight: "100vh",
+                    fontFamily: "'Segoe UI',system-ui,sans-serif",
+                    background: "#f1f5f9"
+                },
+                children: [
+                    /*#__PURE__*/ _jsxs("div", {
+                        className: "no-print",
+                        style: {
+                            width: sideOpen ? 230 : 60,
                     background: "linear-gradient(180deg,#1e3a6e 0%,#1e40af 100%)",
                     color: "white",
                     transition: "width 0.2s",
@@ -5661,6 +5890,8 @@ export default function App() {
             }),
             /*#__PURE__*/ _jsx("style", {
                 children: "\n        @media print {\n          @page { size: A4 portrait; margin: 8mm; }\n          .no-print { display: none !important; }\n          .page-break { page-break-after: always; }\n          /* The app's on-screen layout is a flex shell with the sidebar +\n             header pinned and the content area set to overflow:auto so it\n             scrolls independently. Browsers only reliably print whatever is\n             currently VISIBLE inside an overflow:auto container -- not the\n             rest of the content the user would otherwise have to scroll to\n             see -- which is exactly why printing used to produce what\n             looked like a screenshot of just the on-screen portion instead\n             of the full Marksheet/Report Card/etc. Switching to plain block\n             layout with overflow visible here lets the full content flow\n             and paginate normally across as many physical pages as it\n             needs, the way printing actually works. */\n          .app-shell { display: block !important; min-height: auto !important; }\n          .app-main { overflow: visible !important; }\n          /* Report Card: every pupil's full card (school details, pupil\n             info, subjects, grades, comments, signatures) stays together\n             as one unbroken block, and each card starts a fresh page --\n             except the last one, which should not leave a trailing blank\n             page after it. */\n          .report-card-sheet {\n            page-break-inside: avoid;\n            break-inside: avoid;\n            page-break-after: always;\n            break-after: page;\n          }\n          .report-card-sheet:last-child {\n            page-break-after: auto;\n            break-after: auto;\n          }\n          .report-card-sheet table,\n          .report-card-sheet tr,\n          .report-card-sheet thead,\n          .report-card-sheet tbody {\n            page-break-inside: avoid;\n            break-inside: avoid;\n          }\n          /* Monthly Slips: each \"page\" of up to 9 slips (3x3) prints as one\n             landscape A4 sheet -- a fixed 9cm x 6.3cm slip needs a wider page\n             than portrait A4 to fit 3 across, so this page only switches\n             orientation for these specific sheets, not the whole document. */\n          .monthly-slip-page {\n            page: monthly-slips-landscape;\n            page-break-after: always;\n            break-after: page;\n            page-break-inside: avoid;\n            break-inside: avoid;\n          }\n          .monthly-slip-page:last-child {\n            page-break-after: auto;\n            break-after: auto;\n          }\n        }\n        @page monthly-slips-landscape { size: A4 landscape; margin: 5mm; }\n        .monthly-slip-page {\n          display: grid;\n          grid-template-columns: repeat(3, 9cm);\n          grid-auto-rows: 6.3cm;\n          gap: 3mm;\n          justify-content: center;\n          margin: 0 auto 10mm;\n        }\n        /* Screen preview: stack report cards as plain blocks (not flex) so\n           the same page-break rules above apply predictably when printed. */\n        .report-card-list { display: block; }\n        .report-card-sheet { margin: 0 auto 24px; }\n        @media print {\n          .report-card-sheet { margin: 0 auto; }\n        }\n        input[type=number]::-webkit-inner-spin-button { opacity:1; }\n        * { box-sizing: border-box; }\n        table { border-collapse: collapse; }\n        th, td { border: 1px solid #d1d5db; }\n      "
+            })
+        ]
             })
         ]
     });
@@ -25160,6 +25391,240 @@ function reportPupilOverallPcts(students, classesFilter, term, year, subjectsFor
     });
     return out;
 }
+// Every learner's real PASS/FAIL status for a term+year -- used for the
+// Pass Rate ("Performance Rate") figure in General Performance Analysis.
+// This deliberately does NOT reuse the loose descriptive grade bands
+// (Excellent/Very Good/.../Fail) that reportPupilOverallPcts' avgPct feeds
+// into elsewhere, because those bands only call a learner "Fail" below 25%
+// average -- nowhere near the school's actual pass/fail line. Instead this
+// mirrors the same Division system the report cards themselves use:
+//  - P4-P7 (division-based): a pupil passes only with Division I, II, III,
+//    or IV. Division U is a total failure, same as on the printed report
+//    card -- there is no partial credit for a U.
+//  - P1-P3 (marks-based, no divisions): a pupil passes with a total of 140
+//    or more raw marks summed across their subjects for the period; below
+//    140 is a failure.
+// Learners with no marks entered at all for the period are omitted, same
+// as reportPupilOverallPcts.
+function reportPupilPassStatus(students, classesFilter, term, year, subjectsFor, termMarksData, mockMarksData, pleResultsData, bands, specialBands, divisions) {
+    const out = [];
+    students.filter((s)=>classesFilter.includes(s.className)).forEach((s)=>{
+        const isLower = LOWER_CLASSES.includes(s.className);
+        const subs = subjectsFor(s.className);
+        if (isLower) {
+            let totMk = 0, count = 0;
+            subs.forEach((sub)=>{
+                const p = reportSubjectPct(s, sub, true, term, year, termMarksData, mockMarksData, pleResultsData);
+                if (typeof p === "number") {
+                    totMk += p / 100 * lowerSubjectMax(sub);
+                    count++;
+                }
+            });
+            if (!count) return;
+            out.push({
+                student: s,
+                pass: totMk >= 140
+            });
+        } else {
+            const classBands = bandsForClass(s.className, bands, specialBands, "End of Term", year);
+            let totAgg = 0, count = 0, hasF9 = false;
+            subs.forEach((sub)=>{
+                const p = reportSubjectPct(s, sub, false, term, year, termMarksData, mockMarksData, pleResultsData);
+                if (typeof p === "number") {
+                    const g = gradeFor(Math.round(p), classBands);
+                    const pts = g ? parseInt(g.grade.replace(/\D/g, "")) || 9 : 9;
+                    totAgg += pts;
+                    count++;
+                    if ((g ? g.grade : "F9") === "F9") hasF9 = true;
+                }
+            });
+            if (!count) return;
+            const div = divisionOf(totAgg, count, divisions, hasF9);
+            out.push({
+                student: s,
+                pass: div !== "U"
+            });
+        }
+    });
+    return out;
+}
+// Upper Primary (P4-P7) only: percentage breakdown of every individual
+// subject grade awarded (D1/D2/C3/C4/C5/C6/P7/P8/F9 -- one grade per
+// pupil per subject, so a pupil contributes several to this total) and of
+// pupils by final Division (I/II/III/IV/U -- one per pupil). Two different
+// denominators on purpose: the grade breakdown's denominator is the number
+// of subject-grades awarded, the division breakdown's is the number of
+// pupils.
+function upperGradeAndDivisionBreakdown(students, classesFilter, term, year, subjectsFor, termMarksData, mockMarksData, pleResultsData, bands, specialBands, divisions) {
+    const GRADE_ORDER = [
+        "D1",
+        "D2",
+        "C3",
+        "C4",
+        "C5",
+        "C6",
+        "P7",
+        "P8",
+        "F9"
+    ];
+    const gradeCounts = {};
+    GRADE_ORDER.forEach((g)=>gradeCounts[g] = 0);
+    let gradeTotal = 0;
+    const divCounts = {};
+    divisions.forEach((d)=>divCounts[d.name] = 0);
+    let divTotal = 0;
+    students.filter((s)=>classesFilter.includes(s.className) && UPPER_CLASSES.includes(s.className)).forEach((s)=>{
+        const subs = subjectsFor(s.className);
+        const classBands = bandsForClass(s.className, bands, specialBands, "End of Term", year);
+        let totAgg = 0, count = 0, hasF9 = false;
+        subs.forEach((sub)=>{
+            const p = reportSubjectPct(s, sub, false, term, year, termMarksData, mockMarksData, pleResultsData);
+            if (typeof p !== "number") return;
+            const g = gradeFor(Math.round(p), classBands);
+            const label = g ? g.grade : "F9";
+            gradeCounts[label] = (gradeCounts[label] || 0) + 1;
+            gradeTotal++;
+            const pts = g ? parseInt(g.grade.replace(/\D/g, "")) || 9 : 9;
+            totAgg += pts;
+            count++;
+            if (label === "F9") hasF9 = true;
+        });
+        if (!count) return;
+        const div = divisionOf(totAgg, count, divisions, hasF9);
+        divCounts[div] = (divCounts[div] || 0) + 1;
+        divTotal++;
+    });
+    const gradeBreakdown = Object.keys(gradeCounts).sort((a, b)=>{
+        const oa = GRADE_ORDER.indexOf(a), ob = GRADE_ORDER.indexOf(b);
+        if (oa === -1 && ob === -1) return 0;
+        if (oa === -1) return 1;
+        if (ob === -1) return -1;
+        return oa - ob;
+    }).map((g)=>({
+            label: g,
+            count: gradeCounts[g],
+            pct: gradeTotal ? Math.round(gradeCounts[g] / gradeTotal * 100) : 0
+        }));
+    const divisionBreakdown = divisions.map((d)=>({
+            label: "DIV ".concat(d.name),
+            count: divCounts[d.name] || 0,
+            pct: divTotal ? Math.round((divCounts[d.name] || 0) / divTotal * 100) : 0
+        }));
+    return {
+        gradeBreakdown,
+        divisionBreakdown,
+        gradeTotal,
+        divTotal
+    };
+}
+// Matches Division "I" against either the Roman or Arabic naming a school
+// might use for its divisions config (some schools name divisions 1-4
+// instead of I-IV).
+function isDivisionOne(div) {
+    const d = String(div).trim().toUpperCase();
+    return d === "I" || d === "1";
+}
+// Upper Primary (P4-P7) only, one entry per class: every Division I
+// achiever in that class (name + aggregate), plus that class's best and
+// worst learner by TOT MK (the sum of raw subject marks -- the same
+// figure a printed Result Sheet calls "TOT MK", separate from TOT AGG).
+// Requires the full core-subject set, so this is skipped for Department
+// Reports (which only cover one subject and can't produce a real
+// aggregate/division for a pupil).
+function upperClassAchievers(students, classesFilter, term, year, subjectsFor, termMarksData, mockMarksData, pleResultsData, bands, specialBands, divisions) {
+    const out = [];
+    UPPER_CLASSES.filter((c)=>classesFilter.includes(c)).forEach((c)=>{
+        const subs = subjectsFor(c);
+        const classBands = bandsForClass(c, bands, specialBands, "End of Term", year);
+        const rows = [];
+        students.filter((s)=>s.className === c).forEach((s)=>{
+            let totMk = 0, totAgg = 0, count = 0, hasF9 = false;
+            subs.forEach((sub)=>{
+                const p = reportSubjectPct(s, sub, false, term, year, termMarksData, mockMarksData, pleResultsData);
+                if (typeof p !== "number") return;
+                totMk += p;
+                const g = gradeFor(Math.round(p), classBands);
+                const pts = g ? parseInt(g.grade.replace(/\D/g, "")) || 9 : 9;
+                totAgg += pts;
+                count++;
+                if ((g ? g.grade : "F9") === "F9") hasF9 = true;
+            });
+            if (!count) return;
+            const div = divisionOf(totAgg, count, divisions, hasF9);
+            rows.push({
+                name: s.name,
+                totMk: Math.round(totMk),
+                totAgg,
+                div
+            });
+        });
+        if (!rows.length) return;
+        const div1 = rows.filter((r)=>isDivisionOne(r.div)).sort((a, b)=>a.totAgg - b.totAgg).map((r)=>({
+                name: r.name,
+                agg: r.totAgg
+            }));
+        const best = rows.reduce((a, b)=>b.totMk > a.totMk ? b : a);
+        const worst = rows.reduce((a, b)=>b.totMk < a.totMk ? b : a);
+        out.push({
+            cls: c,
+            div1,
+            best: {
+                name: best.name,
+                totMk: best.totMk
+            },
+            worst: {
+                name: worst.name,
+                totMk: worst.totMk
+            }
+        });
+    });
+    return out;
+}
+// Lower Primary (P1-P3) only, one entry per class: the class's top learner
+// by total marks, together with that learner's own best-performing and
+// weakest-performing subject (name + raw mark for each). P1-P3 has no
+// aggregate/division system, so there's no Division I list for this tier
+// -- just each class's stand-out pupil.
+function lowerClassTopLearner(students, classesFilter, term, year, subjectsFor, termMarksData, mockMarksData, pleResultsData) {
+    const out = [];
+    LOWER_CLASSES.filter((c)=>classesFilter.includes(c)).forEach((c)=>{
+        const subs = subjectsFor(c);
+        let top = null;
+        students.filter((s)=>s.className === c).forEach((s)=>{
+            let totMk = 0, count = 0;
+            const subMarks = [];
+            subs.forEach((sub)=>{
+                const p = reportSubjectPct(s, sub, true, term, year, termMarksData, mockMarksData, pleResultsData);
+                if (typeof p !== "number") return;
+                const max = lowerSubjectMax(sub);
+                const raw = Math.round(p / 100 * max);
+                totMk += raw;
+                count++;
+                subMarks.push({
+                    sub,
+                    mark: raw,
+                    max
+                });
+            });
+            if (!count) return;
+            if (!top || totMk > top.totMk) {
+                const best = subMarks.reduce((a, b)=>b.mark > a.mark ? b : a);
+                const worst = subMarks.reduce((a, b)=>b.mark < a.mark ? b : a);
+                top = {
+                    name: s.name,
+                    totMk,
+                    best,
+                    worst
+                };
+            }
+        });
+        if (top) out.push({
+            cls: c,
+            ...top
+        });
+    });
+    return out;
+}
 // Minimal SVG line chart (term-over-term trend). Mirrors BarChart's visual
 // language (same axis/gridline treatment) so the two read as one family.
 function LineChart(param) {
@@ -25529,6 +25994,25 @@ function Reports(param) {
         specialBands,
         year
     ]);
+    // Real pass/fail per learner (Division I-IV / 140+ marks = pass,
+    // Division U / <140 marks = fail) -- feeds stats.passRate below. See
+    // reportPupilPassStatus for why this can't just reuse pupilPcts.
+    const pupilPassStatus = useMemo(()=>{
+        const cls_ = reportType === "Department Report" && department === "ICT" ? [] : scopeClasses.length ? scopeClasses : ALL_CLASSES;
+        return reportPupilPassStatus(students, cls_, term, year, subjectsForClassFn, termMarks, mockMarksData, pleResultsData, bands, specialBands, divisions);
+    }, [
+        students,
+        term,
+        year,
+        termMarks,
+        mockMarksData,
+        pleResultsData,
+        reportType,
+        department,
+        bands,
+        specialBands,
+        divisions
+    ]);
     // ── Summary statistics ──
     const stats = useMemo(()=>{
         const n = pupilPcts.length;
@@ -25537,12 +26021,13 @@ function Reports(param) {
         const avg = Math.round(pcts.reduce((a, b)=>a + b, 0) / n);
         const highest = Math.max(...pcts);
         const lowest = Math.min(...pcts);
-        const passCount = pupilPcts.filter((param)=>{
-            let { student, avgPct } = param;
-            const b = bandsForClass(student.className, bands, specialBands, "End of Term", year);
-            return gradeLabel(Math.round(avgPct), b) !== "Fail";
-        }).length;
-        const passRate = Math.round(passCount / n * 100);
+        // Pass Rate: genuine passes only -- Division I-IV (P4-P7) or 140+
+        // total marks (P1-P3). Division U / under-140 counts as a failure,
+        // not a partial pass.
+        const passDenom = pupilPassStatus.length;
+        const passCount = pupilPassStatus.filter((r)=>r.pass).length;
+        const passRate = passDenom ? Math.round(passCount / passDenom * 100) : 0;
+        const failRate = passDenom ? 100 - passRate : 0;
         let bestClass = null, worstClass = null;
         if (classPerformance.length) {
             bestClass = classPerformance.reduce((a, b)=>b.avgPct > a.avgPct ? b : a);
@@ -25554,15 +26039,96 @@ function Reports(param) {
             highest,
             lowest,
             passRate,
+            failRate,
             bestClass,
             worstClass
         };
     }, [
         pupilPcts,
+        pupilPassStatus,
         classPerformance,
         bands,
         specialBands,
         year
+    ]);
+    // Lower Primary (P1-P3) vs Upper Primary (P4-P7) pass/fail, rolled up
+    // separately so the report never blends the two tiers' very different
+    // pass criteria (140+ marks vs Division I-IV) into one misleading
+    // school-wide number.
+    const tierStats = useMemo(()=>{
+        const summarize = (list)=>{
+            const n = list.length;
+            if (!n) return null;
+            const passCount = list.filter((r)=>r.pass).length;
+            const passRate = Math.round(passCount / n * 100);
+            return {
+                n,
+                passCount,
+                failCount: n - passCount,
+                passRate,
+                failRate: 100 - passRate
+            };
+        };
+        return {
+            lower: summarize(pupilPassStatus.filter((r)=>LOWER_CLASSES.includes(r.student.className))),
+            upper: summarize(pupilPassStatus.filter((r)=>UPPER_CLASSES.includes(r.student.className)))
+        };
+    }, [
+        pupilPassStatus
+    ]);
+    // Upper Primary (P4-P7) only: percentage breakdown of every subject
+    // grade awarded (D1/D2/C3/C4/C5/C6/P7/P8/F9) and of pupils by final
+    // Division (I/II/III/IV/U), for the same scope as the report.
+    const upperBreakdown = useMemo(()=>{
+        const cls_ = reportType === "Department Report" && department === "ICT" ? [] : scopeClasses.length ? scopeClasses : ALL_CLASSES;
+        return upperGradeAndDivisionBreakdown(students, cls_, term, year, subjectsForClassFn, termMarks, mockMarksData, pleResultsData, bands, specialBands, divisions);
+    }, [
+        students,
+        term,
+        year,
+        termMarks,
+        mockMarksData,
+        pleResultsData,
+        reportType,
+        department,
+        bands,
+        specialBands,
+        divisions
+    ]);
+    // Division I achievers + best/worst learner per class (P4-P7). Needs
+    // the full core-subject set to compute a real aggregate/division, so
+    // this is skipped for Department Reports (single-subject scope).
+    const upperAchievers = useMemo(()=>{
+        if (reportType === "Department Report") return [];
+        const cls_ = scopeClasses.length ? scopeClasses : ALL_CLASSES;
+        return upperClassAchievers(students, cls_, term, year, subjectsForClassFn, termMarks, mockMarksData, pleResultsData, bands, specialBands, divisions);
+    }, [
+        students,
+        term,
+        year,
+        termMarks,
+        mockMarksData,
+        pleResultsData,
+        reportType,
+        cls,
+        bands,
+        specialBands,
+        divisions
+    ]);
+    // Top learner per class (P1-P3), with their own best/weakest subject.
+    const lowerTopLearners = useMemo(()=>{
+        if (reportType === "Department Report") return [];
+        const cls_ = scopeClasses.length ? scopeClasses : ALL_CLASSES;
+        return lowerClassTopLearner(students, cls_, term, year, subjectsForClassFn, termMarks, mockMarksData, pleResultsData);
+    }, [
+        students,
+        term,
+        year,
+        termMarks,
+        mockMarksData,
+        pleResultsData,
+        reportType,
+        cls
     ]);
     // Class Teacher Report extras: per-subject averages for the one class.
     const classSubjectBreakdown = useMemo(()=>{
@@ -25617,10 +26183,34 @@ function Reports(param) {
             body += '<div style="text-align:center;font-size:10pt;margin-bottom:14px;">Academic Year: <b>'.concat(escapeHtml(year), "</b> &nbsp;|&nbsp; Term: <b>").concat(escapeHtml(term), "</b> &nbsp;|&nbsp; Prepared By: ......................................</div>");
             body += '<div class="section-title">PERFORMANCE ANALYSIS</div>';
             if (stats) {
-                body += "<table><tr><th>Learners Assessed</th><th>Average %</th><th>Highest %</th><th>Lowest %</th><th>Pass Rate</th>".concat(stats.bestClass ? "<th>Best Class</th><th>Weakest Class</th>" : "", "</tr>");
-                body += "<tr><td>".concat(stats.n, "</td><td>").concat(stats.avg, "%</td><td>").concat(stats.highest, "%</td><td>").concat(stats.lowest, "%</td><td>").concat(stats.passRate, "%</td>").concat(stats.bestClass ? "<td>".concat(escapeHtml(stats.bestClass.cls), "</td><td>").concat(escapeHtml(stats.worstClass.cls), "</td>") : "", "</tr></table>");
+                body += "<table><tr><th>Learners Assessed</th><th>Average %</th><th>Highest %</th><th>Lowest %</th><th>Pass Rate</th><th>Fail Rate</th>".concat(stats.bestClass ? "<th>Best Class</th><th>Weakest Class</th>" : "", "</tr>");
+                body += "<tr><td>".concat(stats.n, "</td><td>").concat(stats.avg, "%</td><td>").concat(stats.highest, "%</td><td>").concat(stats.lowest, "%</td><td>").concat(stats.passRate, "%</td><td>").concat(stats.failRate, "%</td>").concat(stats.bestClass ? "<td>".concat(escapeHtml(stats.bestClass.cls), "</td><td>").concat(escapeHtml(stats.worstClass.cls), "</td>") : "", "</tr></table>");
             } else {
                 body += '<p style="font-size:10pt;color:#666;">No results recorded yet for '.concat(escapeHtml(term), " ").concat(escapeHtml(year), ".</p>");
+            }
+            if (tierStats.lower || tierStats.upper) {
+                body += '<div class="section-title">PERFORMANCE BY TIER (LOWER vs UPPER PRIMARY)</div>';
+                body += "<table><tr><th>Tier</th><th>Learners Assessed</th><th>Pass Rate</th><th>Fail Rate</th></tr>";
+                if (tierStats.lower) body += "<tr><td>Lower Primary (P1-P3)</td><td>".concat(tierStats.lower.n, "</td><td>").concat(tierStats.lower.passRate, "%</td><td>").concat(tierStats.lower.failRate, "%</td></tr>");
+                if (tierStats.upper) body += "<tr><td>Upper Primary (P4-P7)</td><td>".concat(tierStats.upper.n, "</td><td>").concat(tierStats.upper.passRate, "%</td><td>").concat(tierStats.upper.failRate, "%</td></tr>");
+                body += "</table>";
+            }
+            if (upperBreakdown.gradeTotal > 0) {
+                body += '<div class="section-title">UPPER PRIMARY \u2013 GRADE BREAKDOWN</div>';
+                body += "<table><tr><th>Grade</th><th>Count</th><th>%</th></tr>".concat(upperBreakdown.gradeBreakdown.map((r)=>"<tr><td>".concat(escapeHtml(r.label), "</td><td>").concat(r.count, "</td><td>").concat(r.pct, "%</td></tr>")).join(""), "</table>");
+                body += '<div class="section-title">UPPER PRIMARY \u2013 DIVISION BREAKDOWN</div>';
+                body += "<table><tr><th>Division</th><th>Learners</th><th>%</th></tr>".concat(upperBreakdown.divisionBreakdown.map((r)=>"<tr><td>".concat(escapeHtml(r.label), "</td><td>").concat(r.count, "</td><td>").concat(r.pct, "%</td></tr>")).join(""), "</table>");
+            }
+            if (upperAchievers.length) {
+                body += '<div class="section-title">DIVISION I ACHIEVERS BY CLASS (P4-P7)</div>';
+                const div1Rows = upperAchievers.flatMap((c)=>c.div1.map((r)=>"<tr><td>".concat(escapeHtml(c.cls), "</td><td>").concat(escapeHtml(r.name), "</td><td>").concat(r.agg, "</td></tr>")));
+                body += div1Rows.length ? "<table><tr><th>Class</th><th>Learner</th><th>Aggregate</th></tr>".concat(div1Rows.join(""), "</table>") : '<p style="font-size:10pt;color:#666;">No Division I achievers recorded for this period.</p>';
+                body += '<div class="section-title">BEST &amp; WORST LEARNER BY CLASS (P4-P7)</div>';
+                body += "<table><tr><th>Class</th><th>Best Learner</th><th>Total Mark</th><th>Worst Learner</th><th>Total Mark</th></tr>".concat(upperAchievers.map((c)=>"<tr><td>".concat(escapeHtml(c.cls), "</td><td>").concat(escapeHtml(c.best.name), "</td><td>").concat(c.best.totMk, "</td><td>").concat(escapeHtml(c.worst.name), "</td><td>").concat(c.worst.totMk, "</td></tr>")).join(""), "</table>");
+            }
+            if (lowerTopLearners.length) {
+                body += '<div class="section-title">TOP LEARNER BY CLASS (P1-P3)</div>';
+                body += "<table><tr><th>Class</th><th>Top Learner</th><th>Total Mark</th><th>Best Subject</th><th>Lowest Subject</th></tr>".concat(lowerTopLearners.map((c)=>"<tr><td>".concat(escapeHtml(c.cls), "</td><td>").concat(escapeHtml(c.name), "</td><td>").concat(c.totMk, "</td><td>").concat(escapeHtml(c.best.sub), " (").concat(c.best.mark, "/").concat(c.best.max, ")</td><td>").concat(escapeHtml(c.worst.sub), " (").concat(c.worst.mark, "/").concat(c.worst.max, ")</td></tr>")).join(""), "</table>");
             }
             if (classImg) body += '<p style="font-weight:bold;font-size:10pt;">Average Performance by Class</p><img src="'.concat(classImg, '" style="max-width:100%;"/>');
             if (subjectImg) body += '<p style="font-weight:bold;font-size:10pt;">Average Performance by Subject</p><img src="'.concat(subjectImg, '" style="max-width:100%;"/>');
@@ -25865,6 +26455,10 @@ function Reports(param) {
                                 [
                                     "✅ Pass Rate",
                                     stats.passRate + "%"
+                                ],
+                                [
+                                    "❌ Fail Rate",
+                                    stats.failRate + "%"
                                 ]
                             ].map((param)=>{
                                 let [k, v] = param;
@@ -25928,6 +26522,624 @@ function Reports(param) {
                                         ]
                                     })
                                 ]
+                            })
+                        ]
+                    }),
+                    (tierStats.lower || tierStats.upper) && /*#__PURE__*/ _jsxs("div", {
+                        style: {
+                            background: "white",
+                            borderRadius: 16,
+                            padding: 20,
+                            boxShadow: "0 2px 12px rgba(0,0,0,0.07)",
+                            marginBottom: 16
+                        },
+                        children: [
+                            /*#__PURE__*/ _jsx("div", {
+                                style: {
+                                    fontWeight: 800,
+                                    fontSize: 13,
+                                    color: "#1e3a6e",
+                                    marginBottom: 12
+                                },
+                                children: "🎓 Performance by Tier (Lower vs Upper Primary)"
+                            }),
+                            /*#__PURE__*/ _jsx("div", {
+                                style: {
+                                    display: "grid",
+                                    gridTemplateColumns: "repeat(auto-fit,minmax(200px,1fr))",
+                                    gap: 12
+                                },
+                                children: [
+                                    [
+                                        "Lower Primary (P1-P3)",
+                                        tierStats.lower,
+                                        "140+ marks = pass"
+                                    ],
+                                    [
+                                        "Upper Primary (P4-P7)",
+                                        tierStats.upper,
+                                        "Div I-IV = pass, Div U = fail"
+                                    ]
+                                ].filter((param)=>{
+                                    let [, t] = param;
+                                    return t;
+                                }).map((param)=>{
+                                    let [label, t, note] = param;
+                                    return /*#__PURE__*/ _jsxs("div", {
+                                        style: {
+                                            background: "#f9fafb",
+                                            borderRadius: 10,
+                                            padding: 12,
+                                            border: "1px solid #e5e7eb"
+                                        },
+                                        children: [
+                                            /*#__PURE__*/ _jsx("div", {
+                                                style: {
+                                                    fontSize: 12,
+                                                    fontWeight: 700,
+                                                    color: "#374151",
+                                                    marginBottom: 6
+                                                },
+                                                children: label
+                                            }),
+                                            /*#__PURE__*/ _jsxs("div", {
+                                                style: {
+                                                    fontSize: 11,
+                                                    color: "#6b7280",
+                                                    marginBottom: 6
+                                                },
+                                                children: [
+                                                    t.n,
+                                                    " learners assessed \u2022 ",
+                                                    note
+                                                ]
+                                            }),
+                                            /*#__PURE__*/ _jsxs("div", {
+                                                style: {
+                                                    display: "flex",
+                                                    gap: 16
+                                                },
+                                                children: [
+                                                    /*#__PURE__*/ _jsxs("div", {
+                                                        children: [
+                                                            /*#__PURE__*/ _jsx("span", {
+                                                                style: {
+                                                                    fontSize: 18,
+                                                                    fontWeight: 800,
+                                                                    color: "#16a34a"
+                                                                },
+                                                                children: t.passRate + "%"
+                                                            }),
+                                                            /*#__PURE__*/ _jsxs("div", {
+                                                                style: {
+                                                                    fontSize: 10,
+                                                                    color: "#6b7280"
+                                                                },
+                                                                children: [
+                                                                    "✅ Pass (",
+                                                                    t.passCount,
+                                                                    ")"
+                                                                ]
+                                                            })
+                                                        ]
+                                                    }),
+                                                    /*#__PURE__*/ _jsxs("div", {
+                                                        children: [
+                                                            /*#__PURE__*/ _jsx("span", {
+                                                                style: {
+                                                                    fontSize: 18,
+                                                                    fontWeight: 800,
+                                                                    color: "#dc2626"
+                                                                },
+                                                                children: t.failRate + "%"
+                                                            }),
+                                                            /*#__PURE__*/ _jsxs("div", {
+                                                                style: {
+                                                                    fontSize: 10,
+                                                                    color: "#6b7280"
+                                                                },
+                                                                children: [
+                                                                    "❌ Fail (",
+                                                                    t.failCount,
+                                                                    ")"
+                                                                ]
+                                                            })
+                                                        ]
+                                                    })
+                                                ]
+                                            })
+                                        ]
+                                    }, label);
+                                })
+                            })
+                        ]
+                    }),
+                    upperBreakdown.gradeTotal > 0 && /*#__PURE__*/ _jsxs("div", {
+                        style: {
+                            display: "grid",
+                            gridTemplateColumns: "1fr 1fr",
+                            gap: 16,
+                            marginBottom: 16
+                        },
+                        children: [
+                            /*#__PURE__*/ _jsxs("div", {
+                                style: {
+                                    background: "white",
+                                    borderRadius: 16,
+                                    padding: 20,
+                                    boxShadow: "0 2px 12px rgba(0,0,0,0.07)"
+                                },
+                                children: [
+                                    /*#__PURE__*/ _jsx("div", {
+                                        style: {
+                                            fontWeight: 800,
+                                            fontSize: 13,
+                                            color: "#1e3a6e",
+                                            marginBottom: 10
+                                        },
+                                        children: "Upper Primary \u2013 Grade Breakdown"
+                                    }),
+                                    /*#__PURE__*/ _jsx("table", {
+                                        style: {
+                                            width: "100%",
+                                            borderCollapse: "collapse",
+                                            fontSize: 12
+                                        },
+                                        children: /*#__PURE__*/ _jsx("tbody", {
+                                            children: upperBreakdown.gradeBreakdown.map((r)=>/*#__PURE__*/ _jsxs("tr", {
+                                                    children: [
+                                                        /*#__PURE__*/ _jsx("td", {
+                                                            style: {
+                                                                padding: "4px 6px",
+                                                                borderBottom: "1px solid #f0f0f0",
+                                                                fontWeight: 700
+                                                            },
+                                                            children: r.label
+                                                        }),
+                                                        /*#__PURE__*/ _jsxs("td", {
+                                                            style: {
+                                                                padding: "4px 6px",
+                                                                borderBottom: "1px solid #f0f0f0",
+                                                                color: "#6b7280"
+                                                            },
+                                                            children: [
+                                                                r.count,
+                                                                " grades"
+                                                            ]
+                                                        }),
+                                                        /*#__PURE__*/ _jsxs("td", {
+                                                            style: {
+                                                                padding: "4px 6px",
+                                                                borderBottom: "1px solid #f0f0f0",
+                                                                textAlign: "right",
+                                                                fontWeight: 800,
+                                                                color: "#1e3a6e"
+                                                            },
+                                                            children: [
+                                                                r.pct,
+                                                                "%"
+                                                            ]
+                                                        })
+                                                    ]
+                                                }, r.label))
+                                        })
+                                    })
+                                ]
+                            }),
+                            /*#__PURE__*/ _jsxs("div", {
+                                style: {
+                                    background: "white",
+                                    borderRadius: 16,
+                                    padding: 20,
+                                    boxShadow: "0 2px 12px rgba(0,0,0,0.07)"
+                                },
+                                children: [
+                                    /*#__PURE__*/ _jsx("div", {
+                                        style: {
+                                            fontWeight: 800,
+                                            fontSize: 13,
+                                            color: "#1e3a6e",
+                                            marginBottom: 10
+                                        },
+                                        children: "Upper Primary \u2013 Division Breakdown"
+                                    }),
+                                    /*#__PURE__*/ _jsx("table", {
+                                        style: {
+                                            width: "100%",
+                                            borderCollapse: "collapse",
+                                            fontSize: 12
+                                        },
+                                        children: /*#__PURE__*/ _jsx("tbody", {
+                                            children: upperBreakdown.divisionBreakdown.map((r)=>/*#__PURE__*/ _jsxs("tr", {
+                                                    children: [
+                                                        /*#__PURE__*/ _jsx("td", {
+                                                            style: {
+                                                                padding: "4px 6px",
+                                                                borderBottom: "1px solid #f0f0f0",
+                                                                fontWeight: 700,
+                                                                color: r.label === "DIV U" ? "#dc2626" : "#111827"
+                                                            },
+                                                            children: r.label
+                                                        }),
+                                                        /*#__PURE__*/ _jsxs("td", {
+                                                            style: {
+                                                                padding: "4px 6px",
+                                                                borderBottom: "1px solid #f0f0f0",
+                                                                color: "#6b7280"
+                                                            },
+                                                            children: [
+                                                                r.count,
+                                                                " learners"
+                                                            ]
+                                                        }),
+                                                        /*#__PURE__*/ _jsxs("td", {
+                                                            style: {
+                                                                padding: "4px 6px",
+                                                                borderBottom: "1px solid #f0f0f0",
+                                                                textAlign: "right",
+                                                                fontWeight: 800,
+                                                                color: r.label === "DIV U" ? "#dc2626" : "#1e3a6e"
+                                                            },
+                                                            children: [
+                                                                r.pct,
+                                                                "%"
+                                                            ]
+                                                        })
+                                                    ]
+                                                }, r.label))
+                                        })
+                                    })
+                                ]
+                            })
+                        ]
+                    }),
+                    upperAchievers.length > 0 && /*#__PURE__*/ _jsxs("div", {
+                        style: {
+                            background: "white",
+                            borderRadius: 16,
+                            padding: 20,
+                            boxShadow: "0 2px 12px rgba(0,0,0,0.07)",
+                            marginBottom: 16
+                        },
+                        children: [
+                            /*#__PURE__*/ _jsx("div", {
+                                style: {
+                                    fontWeight: 800,
+                                    fontSize: 13,
+                                    color: "#1e3a6e",
+                                    marginBottom: 10
+                                },
+                                children: "\uD83E\uDD47 Division I Achievers by Class (P4-P7)"
+                            }),
+                            upperAchievers.every((c)=>!c.div1.length) ? /*#__PURE__*/ _jsx("div", {
+                                style: {
+                                    fontSize: 12,
+                                    color: "#9ca3af"
+                                },
+                                children: "No Division I achievers recorded for this period."
+                            }) : /*#__PURE__*/ _jsx("table", {
+                                style: {
+                                    width: "100%",
+                                    borderCollapse: "collapse",
+                                    fontSize: 12
+                                },
+                                children: /*#__PURE__*/ _jsxs("tbody", {
+                                    children: [
+                                        /*#__PURE__*/ _jsxs("tr", {
+                                            children: [
+                                                /*#__PURE__*/ _jsx("th", {
+                                                    style: {
+                                                        textAlign: "left",
+                                                        padding: "4px 6px",
+                                                        borderBottom: "2px solid #e5e7eb"
+                                                    },
+                                                    children: "Class"
+                                                }),
+                                                /*#__PURE__*/ _jsx("th", {
+                                                    style: {
+                                                        textAlign: "left",
+                                                        padding: "4px 6px",
+                                                        borderBottom: "2px solid #e5e7eb"
+                                                    },
+                                                    children: "Learner"
+                                                }),
+                                                /*#__PURE__*/ _jsx("th", {
+                                                    style: {
+                                                        textAlign: "right",
+                                                        padding: "4px 6px",
+                                                        borderBottom: "2px solid #e5e7eb"
+                                                    },
+                                                    children: "Aggregate"
+                                                })
+                                            ]
+                                        }),
+                                        upperAchievers.flatMap((c)=>c.div1.map((r)=>/*#__PURE__*/ _jsxs("tr", {
+                                                    children: [
+                                                        /*#__PURE__*/ _jsx("td", {
+                                                            style: {
+                                                                padding: "4px 6px",
+                                                                borderBottom: "1px solid #f0f0f0",
+                                                                fontWeight: 700
+                                                            },
+                                                            children: c.cls
+                                                        }),
+                                                        /*#__PURE__*/ _jsx("td", {
+                                                            style: {
+                                                                padding: "4px 6px",
+                                                                borderBottom: "1px solid #f0f0f0"
+                                                            },
+                                                            children: r.name
+                                                        }),
+                                                        /*#__PURE__*/ _jsx("td", {
+                                                            style: {
+                                                                padding: "4px 6px",
+                                                                borderBottom: "1px solid #f0f0f0",
+                                                                textAlign: "right",
+                                                                fontWeight: 800,
+                                                                color: "#16a34a"
+                                                            },
+                                                            children: r.agg
+                                                        })
+                                                    ]
+                                                }, c.cls + ":" + r.name)))
+                                    ]
+                                })
+                            })
+                        ]
+                    }),
+                    upperAchievers.length > 0 && /*#__PURE__*/ _jsxs("div", {
+                        style: {
+                            background: "white",
+                            borderRadius: 16,
+                            padding: 20,
+                            boxShadow: "0 2px 12px rgba(0,0,0,0.07)",
+                            marginBottom: 16
+                        },
+                        children: [
+                            /*#__PURE__*/ _jsx("div", {
+                                style: {
+                                    fontWeight: 800,
+                                    fontSize: 13,
+                                    color: "#1e3a6e",
+                                    marginBottom: 10
+                                },
+                                children: "Best & Worst Learner by Class (P4-P7)"
+                            }),
+                            /*#__PURE__*/ _jsx("table", {
+                                style: {
+                                    width: "100%",
+                                    borderCollapse: "collapse",
+                                    fontSize: 12
+                                },
+                                children: /*#__PURE__*/ _jsxs("tbody", {
+                                    children: [
+                                        /*#__PURE__*/ _jsxs("tr", {
+                                            children: [
+                                                /*#__PURE__*/ _jsx("th", {
+                                                    style: {
+                                                        textAlign: "left",
+                                                        padding: "4px 6px",
+                                                        borderBottom: "2px solid #e5e7eb"
+                                                    },
+                                                    children: "Class"
+                                                }),
+                                                /*#__PURE__*/ _jsx("th", {
+                                                    style: {
+                                                        textAlign: "left",
+                                                        padding: "4px 6px",
+                                                        borderBottom: "2px solid #e5e7eb"
+                                                    },
+                                                    children: "Best Learner"
+                                                }),
+                                                /*#__PURE__*/ _jsx("th", {
+                                                    style: {
+                                                        textAlign: "right",
+                                                        padding: "4px 6px",
+                                                        borderBottom: "2px solid #e5e7eb"
+                                                    },
+                                                    children: "Total Mark"
+                                                }),
+                                                /*#__PURE__*/ _jsx("th", {
+                                                    style: {
+                                                        textAlign: "left",
+                                                        padding: "4px 6px",
+                                                        borderBottom: "2px solid #e5e7eb"
+                                                    },
+                                                    children: "Worst Learner"
+                                                }),
+                                                /*#__PURE__*/ _jsx("th", {
+                                                    style: {
+                                                        textAlign: "right",
+                                                        padding: "4px 6px",
+                                                        borderBottom: "2px solid #e5e7eb"
+                                                    },
+                                                    children: "Total Mark"
+                                                })
+                                            ]
+                                        }),
+                                        upperAchievers.map((c)=>/*#__PURE__*/ _jsxs("tr", {
+                                                children: [
+                                                    /*#__PURE__*/ _jsx("td", {
+                                                        style: {
+                                                            padding: "4px 6px",
+                                                            borderBottom: "1px solid #f0f0f0",
+                                                            fontWeight: 700
+                                                        },
+                                                        children: c.cls
+                                                    }),
+                                                    /*#__PURE__*/ _jsx("td", {
+                                                        style: {
+                                                            padding: "4px 6px",
+                                                            borderBottom: "1px solid #f0f0f0",
+                                                            color: "#16a34a",
+                                                            fontWeight: 700
+                                                        },
+                                                        children: c.best.name
+                                                    }),
+                                                    /*#__PURE__*/ _jsx("td", {
+                                                        style: {
+                                                            padding: "4px 6px",
+                                                            borderBottom: "1px solid #f0f0f0",
+                                                            textAlign: "right",
+                                                            fontWeight: 800
+                                                        },
+                                                        children: c.best.totMk
+                                                    }),
+                                                    /*#__PURE__*/ _jsx("td", {
+                                                        style: {
+                                                            padding: "4px 6px",
+                                                            borderBottom: "1px solid #f0f0f0",
+                                                            color: "#dc2626",
+                                                            fontWeight: 700
+                                                        },
+                                                        children: c.worst.name
+                                                    }),
+                                                    /*#__PURE__*/ _jsx("td", {
+                                                        style: {
+                                                            padding: "4px 6px",
+                                                            borderBottom: "1px solid #f0f0f0",
+                                                            textAlign: "right",
+                                                            fontWeight: 800
+                                                        },
+                                                        children: c.worst.totMk
+                                                    })
+                                                ]
+                                            }, c.cls))
+                                    ]
+                                })
+                            })
+                        ]
+                    }),
+                    lowerTopLearners.length > 0 && /*#__PURE__*/ _jsxs("div", {
+                        style: {
+                            background: "white",
+                            borderRadius: 16,
+                            padding: 20,
+                            boxShadow: "0 2px 12px rgba(0,0,0,0.07)",
+                            marginBottom: 16
+                        },
+                        children: [
+                            /*#__PURE__*/ _jsx("div", {
+                                style: {
+                                    fontWeight: 800,
+                                    fontSize: 13,
+                                    color: "#1e3a6e",
+                                    marginBottom: 10
+                                },
+                                children: "\uD83E\uDD47 Top Learner by Class (P1-P3)"
+                            }),
+                            /*#__PURE__*/ _jsx("table", {
+                                style: {
+                                    width: "100%",
+                                    borderCollapse: "collapse",
+                                    fontSize: 12
+                                },
+                                children: /*#__PURE__*/ _jsxs("tbody", {
+                                    children: [
+                                        /*#__PURE__*/ _jsxs("tr", {
+                                            children: [
+                                                /*#__PURE__*/ _jsx("th", {
+                                                    style: {
+                                                        textAlign: "left",
+                                                        padding: "4px 6px",
+                                                        borderBottom: "2px solid #e5e7eb"
+                                                    },
+                                                    children: "Class"
+                                                }),
+                                                /*#__PURE__*/ _jsx("th", {
+                                                    style: {
+                                                        textAlign: "left",
+                                                        padding: "4px 6px",
+                                                        borderBottom: "2px solid #e5e7eb"
+                                                    },
+                                                    children: "Top Learner"
+                                                }),
+                                                /*#__PURE__*/ _jsx("th", {
+                                                    style: {
+                                                        textAlign: "right",
+                                                        padding: "4px 6px",
+                                                        borderBottom: "2px solid #e5e7eb"
+                                                    },
+                                                    children: "Total Mark"
+                                                }),
+                                                /*#__PURE__*/ _jsx("th", {
+                                                    style: {
+                                                        textAlign: "left",
+                                                        padding: "4px 6px",
+                                                        borderBottom: "2px solid #e5e7eb"
+                                                    },
+                                                    children: "Best Subject"
+                                                }),
+                                                /*#__PURE__*/ _jsx("th", {
+                                                    style: {
+                                                        textAlign: "left",
+                                                        padding: "4px 6px",
+                                                        borderBottom: "2px solid #e5e7eb"
+                                                    },
+                                                    children: "Lowest Subject"
+                                                })
+                                            ]
+                                        }),
+                                        lowerTopLearners.map((c)=>/*#__PURE__*/ _jsxs("tr", {
+                                                children: [
+                                                    /*#__PURE__*/ _jsx("td", {
+                                                        style: {
+                                                            padding: "4px 6px",
+                                                            borderBottom: "1px solid #f0f0f0",
+                                                            fontWeight: 700
+                                                        },
+                                                        children: c.cls
+                                                    }),
+                                                    /*#__PURE__*/ _jsx("td", {
+                                                        style: {
+                                                            padding: "4px 6px",
+                                                            borderBottom: "1px solid #f0f0f0",
+                                                            color: "#16a34a",
+                                                            fontWeight: 700
+                                                        },
+                                                        children: c.name
+                                                    }),
+                                                    /*#__PURE__*/ _jsx("td", {
+                                                        style: {
+                                                            padding: "4px 6px",
+                                                            borderBottom: "1px solid #f0f0f0",
+                                                            textAlign: "right",
+                                                            fontWeight: 800
+                                                        },
+                                                        children: c.totMk
+                                                    }),
+                                                    /*#__PURE__*/ _jsxs("td", {
+                                                        style: {
+                                                            padding: "4px 6px",
+                                                            borderBottom: "1px solid #f0f0f0"
+                                                        },
+                                                        children: [
+                                                            c.best.sub,
+                                                            " (",
+                                                            c.best.mark,
+                                                            "/",
+                                                            c.best.max,
+                                                            ")"
+                                                        ]
+                                                    }),
+                                                    /*#__PURE__*/ _jsxs("td", {
+                                                        style: {
+                                                            padding: "4px 6px",
+                                                            borderBottom: "1px solid #f0f0f0"
+                                                        },
+                                                        children: [
+                                                            c.worst.sub,
+                                                            " (",
+                                                            c.worst.mark,
+                                                            "/",
+                                                            c.worst.max,
+                                                            ")"
+                                                        ]
+                                                    })
+                                                ]
+                                            }, c.cls))
+                                    ]
+                                })
                             })
                         ]
                     }),
