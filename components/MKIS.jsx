@@ -406,6 +406,74 @@ const KEY_LABEL = {
     mkis_pledata: "PLE Results",
     mkis_reports: "Reports"
 };
+// ─── SHARED KEY SAVE QUEUE (module-level) ───────────────────────────────────
+// The main students/termMarks/monthlyMarks/etc. sync loop protects every save
+// with two things: (1) a per-key queue so two saves to the same key can never
+// run concurrently and finish out of order (an older save landing AFTER a
+// newer one, silently reverting it), and (2) an "in-flight" flag so the
+// background poll never re-applies a read that was captured while a save for
+// that key was still mid read-merge-write.
+//
+// A few screens (Mock Exam marks, PLE Info) manage their own key outside
+// that main loop and used to call updateShared() directly with no queue and
+// no in-flight tracking. That's what let an admin's just-saved PLE record
+// (or a mock mark typed quickly) get silently reverted a few seconds later:
+// two overlapping saves would race, and whichever read-merge-write happened
+// to finish LAST -- even if it started first and was already stale -- would
+// win and overwrite the newer one. Mock marks made this worse by saving on
+// every single keystroke with no debounce, multiplying how often saves could
+// overlap and race, and adding a full network round trip per digit typed
+// (the "takes a long time to save" symptom).
+//
+// queueSharedSave() gives any screen that owns its own storage key the same
+// two protections the main loop has, without needing to fold that key into
+// the main loop's shared state.
+const _keySaveQueues = {};
+const _keyInFlight = new Set();
+function isKeySaveInFlight(key) {
+    return _keyInFlight.has(key);
+}
+// latestValRef: a ref whose .current always holds the freshest local value
+//   for this key (assigned synchronously during render -- see call sites).
+// setter: React state setter to call if the merge result differs from what
+//   was just saved (e.g. another device's concurrent edit got folded in).
+// lastSeenRef: a ref this function keeps up to date with the last value this
+//   screen knows to be safely persisted; the screen's own background poll
+//   should leave a key alone whenever isKeySaveInFlight(key) is true.
+// auditDetail: optional human-readable string for the Audit Log.
+function queueSharedSave(key, latestValRef, setter, lastSeenRef, auditDetail) {
+    const run = async ()=>{
+        _keyInFlight.add(key);
+        try {
+            const localVal = latestValRef.current; // freshest value AT THE TIME THIS SAVE ACTUALLY RUNS
+            const merged = await updateShared(key, localVal);
+            if (JSON.stringify(merged) !== JSON.stringify(localVal)) {
+                await writeAuditEntry(key, "UPDATE", auditDetail || "".concat(KEY_LABEL[key] || key, " updated"));
+            }
+            lastSeenRef.current = JSON.stringify(merged);
+            // Only push the merge result into React state if nothing newer has
+            // been entered locally since this save started -- otherwise a
+            // still-unsaved newer edit would get clobbered by this older result.
+            if (JSON.stringify(latestValRef.current) === JSON.stringify(localVal) && JSON.stringify(merged) !== JSON.stringify(localVal)) {
+                setter(merged);
+            }
+        } catch (err) {
+            // Write failed (network blip, storage rate limit, etc.). Deliberately
+            // do NOT advance lastSeenRef -- see saveShared()'s comment above for
+            // why that matters. Retry shortly so the edit still lands once the
+            // hiccup passes.
+            setTimeout(()=>{
+                queueSharedSave(key, latestValRef, setter, lastSeenRef, auditDetail);
+            }, 3000);
+        } finally{
+            _keyInFlight.delete(key);
+        }
+    };
+    const prevTail = _keySaveQueues[key] || Promise.resolve();
+    const nextTail = prevTail.then(run, run);
+    _keySaveQueues[key] = nextTail;
+    return nextTail;
+}
 // ─── NO-DATA-LOSS WRITE LAYER ───────────────────────────────────────────────
 // Problem this solves: two devices can each hold a slightly different local
 // snapshot of the same shared key. If a save simply pushes "whatever my
@@ -10621,6 +10689,38 @@ function MockInfo(param) {
     // by the top-level poll loop for termMarks/monthlyMarks.
     const mockEditingUntilRef = useRef(0);
     const lastSeenMockRef = useRef("");
+    // Always holds the freshest local mockMarks value, updated synchronously
+    // every render (same pattern the top-level sync loop uses for stateRef).
+    // queueSharedSave reads from this at the moment a queued save actually
+    // runs, rather than from a value captured back when the save was
+    // scheduled, so a save can never write over a newer edit made in between.
+    const mockLatestRef = useRef(mockMarks);
+    mockLatestRef.current = mockMarks;
+    // Lets a handler (reset/transfer) stamp a more specific Audit Log detail
+    // string before its state change triggers the save effect below; cleared
+    // once consumed so the next, ordinary edit falls back to the generic label.
+    const mockAuditDetailRef = useRef("");
+    // Single save effect for every mockMarks change -- keystroke edits AND
+    // bulk actions (reset/transfer) all flow through here, debounced 700ms
+    // and funneled through queueSharedSave so saves to this key are always
+    // serialized and never race each other out of order. Triggering the save
+    // from an effect (rather than directly inside each handler) guarantees
+    // mockLatestRef has already been updated to the post-edit value by the
+    // time the effect runs, since effects always run after render.
+    useEffect(()=>{
+        if (!loaded) return;
+        const str = JSON.stringify(mockMarks);
+        if (str === lastSeenMockRef.current) return; // nothing new to save (e.g. this is the initial load, or a poll-applied remote value)
+        const detail = mockAuditDetailRef.current || "Mock Results updated";
+        mockAuditDetailRef.current = "";
+        const t = setTimeout(()=>{
+            queueSharedSave("mkis_mock_marks", mockLatestRef, setMockMarks, lastSeenMockRef, detail);
+        }, 700);
+        return ()=>clearTimeout(t);
+    }, [
+        mockMarks,
+        loaded
+    ]);
     useEffect(()=>{
         let alive = true;
         loadShared("mkis_mock_marks", {}).then((m)=>{
@@ -10646,6 +10746,7 @@ function MockInfo(param) {
         const id = setInterval(async ()=>{
             if (stopped) return;
             if (Date.now() < mockEditingUntilRef.current) return; // mid-edit, don't disturb
+            if (isKeySaveInFlight("mkis_mock_marks")) return; // a save is still mid read-merge-write; wait for it
             const remote = await loadShared("mkis_mock_marks", undefined);
             if (stopped || remote === undefined) return;
             const remoteStr = JSON.stringify(remote);
@@ -10684,19 +10785,6 @@ function MockInfo(param) {
                     }
                 }
             };
-            updateShared("mkis_mock_marks", next).then((merged)=>{
-                lastSeenMockRef.current = JSON.stringify(merged);
-                setMockMarks(merged);
-            }).catch(()=>{
-            // Write failed (network blip, etc.) -- leave lastSeenMockRef and
-            // local state alone rather than advancing lastSeenMockRef as if it
-            // had saved. Advancing it here is what could make a just-entered
-            // mock mark vanish a few seconds later: the next poll would see
-            // storage still holding the old value, wrongly conclude someone
-            // else changed it, and revert the screen. `next` (already applied
-            // above) stays authoritative locally; the debounced flow above
-            // will simply try again on the next edit.
-            });
             return next;
         });
     };
@@ -10708,6 +10796,7 @@ function MockInfo(param) {
     const resetMockClass = ()=>{
         markEditing && markEditing();
         mockEditingUntilRef.current = Date.now() + 2500;
+        mockAuditDetailRef.current = "Mock Results reset — ".concat(cls, " ").concat(mk);
         setMockMarks((prev)=>{
             const next = {
                 ...prev
@@ -10725,19 +10814,6 @@ function MockInfo(param) {
                     };
                 }
             });
-            updateShared("mkis_mock_marks", next).then((merged)=>{
-                lastSeenMockRef.current = JSON.stringify(merged);
-                setMockMarks(merged);
-            }).catch(()=>{
-            // Write failed (network blip, etc.) -- leave lastSeenMockRef and
-            // local state alone rather than advancing lastSeenMockRef as if it
-            // had saved. Advancing it here is what could make a just-entered
-            // mock mark vanish a few seconds later: the next poll would see
-            // storage still holding the old value, wrongly conclude someone
-            // else changed it, and revert the screen. `next` (already applied
-            // above) stays authoritative locally; the debounced flow above
-            // will simply try again on the next edit.
-            });
             return next;
         });
         setShowResetConfirm(false);
@@ -10749,6 +10825,7 @@ function MockInfo(param) {
     const transferMockMarks = (fromMk, toMk)=>{
         markEditing && markEditing();
         mockEditingUntilRef.current = Date.now() + 2500;
+        mockAuditDetailRef.current = "Mock Results transferred — ".concat(cls, " ").concat(fromMk, " → ").concat(toMk);
         setMockMarks((prev)=>{
             const next = {
                 ...prev
@@ -10762,19 +10839,6 @@ function MockInfo(param) {
                         [toMk]: src
                     };
                 }
-            });
-            updateShared("mkis_mock_marks", next).then((merged)=>{
-                lastSeenMockRef.current = JSON.stringify(merged);
-                setMockMarks(merged);
-            }).catch(()=>{
-            // Write failed (network blip, etc.) -- leave lastSeenMockRef and
-            // local state alone rather than advancing lastSeenMockRef as if it
-            // had saved. Advancing it here is what could make a just-entered
-            // mock mark vanish a few seconds later: the next poll would see
-            // storage still holding the old value, wrongly conclude someone
-            // else changed it, and revert the screen. `next` (already applied
-            // above) stays authoritative locally; the debounced flow above
-            // will simply try again on the next edit.
             });
             return next;
         });
@@ -20057,6 +20121,12 @@ function PleInfo(param) {
     // an in-progress edit.
     const pleEditingUntilRef = useRef(0);
     const lastSeenPleRef = useRef("");
+    // Always holds the freshest local pleData value, updated synchronously
+    // every render. queueSharedSave reads from this at the moment a queued
+    // save actually runs (not a value captured when the save was scheduled),
+    // so a save can never write over a newer edit made in between.
+    const pleLatestRef = useRef(pleData);
+    pleLatestRef.current = pleData;
     useEffect(()=>{
         let alive = true;
         loadShared("mkis_pledata", {}).then((d)=>{
@@ -20074,20 +20144,21 @@ function PleInfo(param) {
     // so PLE records survive navigating away/reloading and stay in sync
     // across devices -- previously this data only ever lived in local
     // component state and vanished the moment PLE Info was left.
+    //
+    // Routed through queueSharedSave (rather than calling updateShared
+    // directly) so two saves fired close together -- e.g. editing two
+    // different pupils' records within the same 600ms window -- are always
+    // serialized and can never finish out of order and revert one another.
+    // That race was the cause of admin-entered results (especially here,
+    // since Performance Analysis reads this data live) appearing to "go back
+    // to the original mark" a few seconds after being saved.
     useEffect(()=>{
         if (!pleDataLoaded) return;
         const str = JSON.stringify(pleData);
         if (str === lastSeenPleRef.current) return;
         pleEditingUntilRef.current = Date.now() + 2500;
         const id = setTimeout(()=>{
-            updateShared("mkis_pledata", pleData).then((merged)=>{
-                lastSeenPleRef.current = JSON.stringify(merged);
-                setPleData(merged);
-            }).catch(()=>{
-            // Write failed (network blip, etc.) -- leave lastSeenPleRef alone so
-            // the next attempt still sees this as unsaved, rather than falsely
-            // marking it confirmed and risking the next poll reverting it.
-            });
+            queueSharedSave("mkis_pledata", pleLatestRef, setPleData, lastSeenPleRef, "PLE Results updated");
         }, 600);
         return ()=>clearTimeout(id);
     }, [
@@ -20102,6 +20173,7 @@ function PleInfo(param) {
         const id = setInterval(async ()=>{
             if (stopped) return;
             if (Date.now() < pleEditingUntilRef.current) return; // mid-edit, don't disturb
+            if (isKeySaveInFlight("mkis_pledata")) return; // a save is still mid read-merge-write; wait for it
             const remote = await loadShared("mkis_pledata", undefined);
             if (stopped || remote === undefined) return;
             const remoteStr = JSON.stringify(remote);
