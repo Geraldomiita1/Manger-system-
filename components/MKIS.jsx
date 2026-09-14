@@ -2746,6 +2746,69 @@ async function nodeToPdfPageSlices(node) {
 // result sheet, or one node per 3x3 page of Monthly Slips). Each node
 // starts on a fresh page; tall nodes span more. orientation applies to
 // every page in the PDF (mixed-orientation documents aren't needed here).
+// ─── PHOTO COMPRESSION ───────────────────────────────────────────────────────
+// Candidate/logo photos are stored as base64 text directly inside the shared
+// JSON data (mkis_pledata, mkis_school), which is what actually counts
+// against the Supabase free plan's 500MB database-size limit. An
+// uncompressed phone photo saved this way is routinely 2-8MB -- a school
+// with a hundred-plus candidate photos can single-handedly blow through the
+// entire free quota. Resizing to a small, print-appropriate size and
+// re-encoding as JPEG before it's ever stored shrinks a typical photo down
+// to roughly 20-80KB -- a 50-100x reduction -- with no visible quality loss
+// at the sizes these photos are actually displayed/printed.
+function compressImageFile(file) {
+    let maxDim = arguments.length > 1 && arguments[1] !== void 0 ? arguments[1] : 480, quality = arguments.length > 2 && arguments[2] !== void 0 ? arguments[2] : 0.72,
+        format = arguments.length > 3 && arguments[3] !== void 0 ? arguments[3] : "image/jpeg";
+    return new Promise((resolve, reject)=>{
+        const reader = new FileReader();
+        reader.onerror = ()=>reject(reader.error);
+        reader.onload = ()=>{
+            const img = new Image();
+            img.onerror = ()=>reject(new Error("Could not read that image"));
+            img.onload = ()=>{
+                const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+                const w = Math.max(1, Math.round(img.width * scale));
+                const h = Math.max(1, Math.round(img.height * scale));
+                const canvas = document.createElement("canvas");
+                canvas.width = w;
+                canvas.height = h;
+                canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+                // PNG for the school logo: it's a simple graphic (often with a
+                // transparent background) rather than a photo, so a lossless
+                // format keeps the transparency and crisp edges JPEG would
+                // otherwise wreck -- resizing the dimensions down alone still
+                // does most of the size-saving work for a logo. Photos (JPEG)
+                // get real lossy compression on top, since they're the ones
+                // actually large enough to matter for database size.
+                resolve(canvas.toDataURL(format, quality));
+            };
+            img.src = reader.result;
+        };
+        reader.readAsDataURL(file);
+    });
+}
+// Re-compresses a photo that's ALREADY stored as a data-URL string (rather
+// than a freshly-picked File) -- used by the one-click cleanup tool below to
+// shrink photos that were saved before this compression step existed,
+// without asking anyone to re-upload each one by hand.
+function recompressStoredDataUrl(dataUrl) {
+    let maxDim = arguments.length > 1 && arguments[1] !== void 0 ? arguments[1] : 480, quality = arguments.length > 2 && arguments[2] !== void 0 ? arguments[2] : 0.72;
+    return new Promise((resolve, reject)=>{
+        const img = new Image();
+        img.onerror = ()=>reject(new Error("Could not read that image"));
+        img.onload = ()=>{
+            const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+            const w = Math.max(1, Math.round(img.width * scale));
+            const h = Math.max(1, Math.round(img.height * scale));
+            const canvas = document.createElement("canvas");
+            canvas.width = w;
+            canvas.height = h;
+            canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+            resolve(canvas.toDataURL("image/jpeg", quality));
+        };
+        img.src = dataUrl;
+    });
+}
 async function downloadNodesAsPdf(nodes, filename) {
     let orientation = arguments.length > 2 && arguments[2] !== void 0 ? arguments[2] : "portrait";
     const validNodes = nodes.filter(Boolean);
@@ -5388,510 +5451,510 @@ export default function App() {
                         className: "no-print",
                         style: {
                             width: sideOpen ? 230 : 60,
-                    background: "linear-gradient(180deg,#1e3a6e 0%,#1e40af 100%)",
-                    color: "white",
-                    transition: "width 0.2s",
-                    overflow: "hidden",
-                    flexShrink: 0,
-                    display: "flex",
-                    flexDirection: "column"
-                },
-                children: [
-                    /*#__PURE__*/ _jsxs("div", {
-                        style: {
-                            padding: "16px 12px",
-                            borderBottom: "1px solid rgba(255,255,255,0.1)",
+                            background: "linear-gradient(180deg,#1e3a6e 0%,#1e40af 100%)",
+                            color: "white",
+                            transition: "width 0.2s",
+                            overflow: "hidden",
+                            flexShrink: 0,
                             display: "flex",
-                            alignItems: "center",
-                            gap: 10
+                            flexDirection: "column"
                         },
                         children: [
-                            /*#__PURE__*/ _jsx("div", {
+                            /*#__PURE__*/ _jsxs("div", {
                                 style: {
-                                    width: 36,
-                                    height: 36,
-                                    borderRadius: "50%",
-                                    background: "rgba(255,255,255,0.92)",
+                                    padding: "16px 12px",
+                                    borderBottom: "1px solid rgba(255,255,255,0.1)",
                                     display: "flex",
                                     alignItems: "center",
-                                    justifyContent: "center",
-                                    flexShrink: 0,
-                                    padding: 3,
-                                    boxSizing: "border-box"
+                                    gap: 10
                                 },
-                                children: /*#__PURE__*/ _jsx(SchoolCrest, {
-                                    size: 30,
-                                    ink: "#1e3a6e",
-                                    paper: "#ffffff"
+                                children: [
+                                    /*#__PURE__*/ _jsx("div", {
+                                        style: {
+                                            width: 36,
+                                            height: 36,
+                                            borderRadius: "50%",
+                                            background: "rgba(255,255,255,0.92)",
+                                            display: "flex",
+                                            alignItems: "center",
+                                            justifyContent: "center",
+                                            flexShrink: 0,
+                                            padding: 3,
+                                            boxSizing: "border-box"
+                                        },
+                                        children: /*#__PURE__*/ _jsx(SchoolCrest, {
+                                            size: 30,
+                                            ink: "#1e3a6e",
+                                            paper: "#ffffff"
+                                        })
+                                    }),
+                                    sideOpen && /*#__PURE__*/ _jsxs("div", {
+                                        style: {
+                                            fontSize: 11,
+                                            fontWeight: 700,
+                                            lineHeight: 1.3
+                                        },
+                                        children: [
+                                            "ST. KIZITO'S",
+                                            /*#__PURE__*/ _jsx("br", {}),
+                                            /*#__PURE__*/ _jsx("span", {
+                                                style: {
+                                                    fontWeight: 400,
+                                                    opacity: 0.8
+                                                },
+                                                children: "Results MIS v2"
+                                            })
+                                        ]
+                                    })
+                                ]
+                            }),
+                            /*#__PURE__*/ _jsx("nav", {
+                                style: {
+                                    flex: 1,
+                                    padding: "8px 0"
+                                },
+                                children: PAGES.filter((p)=>!ADMIN_ONLY_PAGES.includes(p) || role === "admin").map((p)=>{
+                                    const icons = {
+                                        "DASHBOARD": "📊",
+                                        "MARK ENTRY": "📝",
+                                        "MONTHLY EXAMS": "📅",
+                                        "GROUP WORK": "👨‍👩‍👧‍👦",
+                                        "EXAM TIMETABLE": "🗓️",
+                                        "MONTHLY CARDS": "🗂️",
+                                        "MONTHLY SLIPS": "🎫",
+                                        "RESULT SHEETS": "📋",
+                                        "REPORT CARDS": "🎓",
+                                        "REPORTS": "📈",
+                                        "LEARNERS": "👥",
+                                        "PUPIL PROFILE": "📈",
+                                        "SWEEPING ROTA": "🧹",
+                                        "MOCK INFO": "📄",
+                                        "PLE INFO": "🏅",
+                                        "MANAGE REQUESTS": "🛂",
+                                        "SETTINGS": "⚙️",
+                                        "AUDIT LOG": "🕓",
+                                        "DOWNLOAD CENTRE": "📥"
+                                    };
+                                    const pendingCount = p === "MANAGE REQUESTS" ? changeRequests.filter((r)=>r.status === "pending").length : 0;
+                                    return /*#__PURE__*/ _jsxs("button", {
+                                        onClick: ()=>setPage(p),
+                                        style: {
+                                            width: "100%",
+                                            padding: "10px 14px",
+                                            background: page === p ? "#dc2626" : "transparent",
+                                            border: "none",
+                                            color: "white",
+                                            textAlign: "left",
+                                            cursor: "pointer",
+                                            display: "flex",
+                                            alignItems: "center",
+                                            gap: 10,
+                                            fontSize: 13,
+                                            fontWeight: page === p ? 700 : 400,
+                                            borderLeft: page === p ? "3px solid #7f1d1d" : "3px solid transparent"
+                                        },
+                                        children: [
+                                            /*#__PURE__*/ _jsx("span", {
+                                                style: {
+                                                    fontSize: 16,
+                                                    flexShrink: 0
+                                                },
+                                                children: icons[p]
+                                            }),
+                                            sideOpen && /*#__PURE__*/ _jsxs("span", {
+                                                style: {
+                                                    flex: 1,
+                                                    display: "flex",
+                                                    alignItems: "center",
+                                                    justifyContent: "space-between"
+                                                },
+                                                children: [
+                                                    p,
+                                                    pendingCount > 0 && /*#__PURE__*/ _jsx("span", {
+                                                        style: {
+                                                            background: page === p ? "white" : "#dc2626",
+                                                            color: page === p ? "#dc2626" : "white",
+                                                            borderRadius: 10,
+                                                            fontSize: 10,
+                                                            fontWeight: 800,
+                                                            padding: "1px 7px"
+                                                        },
+                                                        children: pendingCount
+                                                    })
+                                                ]
+                                            })
+                                        ]
+                                    }, p);
                                 })
                             }),
                             sideOpen && /*#__PURE__*/ _jsxs("div", {
                                 style: {
+                                    padding: "10px 14px",
                                     fontSize: 11,
-                                    fontWeight: 700,
-                                    lineHeight: 1.3
+                                    color: "rgba(255,255,255,0.65)",
+                                    borderTop: "1px solid rgba(255,255,255,0.1)"
                                 },
                                 children: [
-                                    "ST. KIZITO'S",
-                                    /*#__PURE__*/ _jsx("br", {}),
-                                    /*#__PURE__*/ _jsx("span", {
+                                    "Signed in as ",
+                                    /*#__PURE__*/ _jsx("b", {
                                         style: {
-                                            fontWeight: 400,
-                                            opacity: 0.8
+                                            color: "white"
                                         },
-                                        children: "Results MIS v2"
-                                    })
+                                        children: currentUser
+                                    }),
+                                    " (",
+                                    role === "admin" ? "Admin" : "Teacher",
+                                    ")"
                                 ]
-                            })
-                        ]
-                    }),
-                    /*#__PURE__*/ _jsx("nav", {
-                        style: {
-                            flex: 1,
-                            padding: "8px 0"
-                        },
-                        children: PAGES.filter((p)=>!ADMIN_ONLY_PAGES.includes(p) || role === "admin").map((p)=>{
-                            const icons = {
-                                "DASHBOARD": "📊",
-                                "MARK ENTRY": "📝",
-                                "MONTHLY EXAMS": "📅",
-                                "GROUP WORK": "👨‍👩‍👧‍👦",
-                                "EXAM TIMETABLE": "🗓️",
-                                "MONTHLY CARDS": "🗂️",
-                                "MONTHLY SLIPS": "🎫",
-                                "RESULT SHEETS": "📋",
-                                "REPORT CARDS": "🎓",
-                                "REPORTS": "📈",
-                                "LEARNERS": "👥",
-                                "PUPIL PROFILE": "📈",
-                                "SWEEPING ROTA": "🧹",
-                                "MOCK INFO": "📄",
-                                "PLE INFO": "🏅",
-                                "MANAGE REQUESTS": "🛂",
-                                "SETTINGS": "⚙️",
-                                "AUDIT LOG": "🕓",
-                                "DOWNLOAD CENTRE": "📥"
-                            };
-                            const pendingCount = p === "MANAGE REQUESTS" ? changeRequests.filter((r)=>r.status === "pending").length : 0;
-                            return /*#__PURE__*/ _jsxs("button", {
-                                onClick: ()=>setPage(p),
+                            }),
+                            /*#__PURE__*/ _jsxs("button", {
+                                onClick: ()=>{
+                                    writeAuditEntry("session", "LOGOUT", "".concat(currentUser, " logged out"));
+                                    setAuthed(false);
+                                    setRole(null);
+                                    setCurrentUser(null);
+                                    setAuditUser(null);
+                                    setLoginUser("");
+                                    setPage("DASHBOARD");
+                                },
                                 style: {
-                                    width: "100%",
-                                    padding: "10px 14px",
-                                    background: page === p ? "#dc2626" : "transparent",
+                                    padding: "12px 14px",
+                                    background: "transparent",
                                     border: "none",
-                                    color: "white",
+                                    color: "rgba(255,255,255,0.6)",
                                     textAlign: "left",
                                     cursor: "pointer",
+                                    fontSize: 13,
                                     display: "flex",
                                     alignItems: "center",
-                                    gap: 10,
-                                    fontSize: 13,
-                                    fontWeight: page === p ? 700 : 400,
-                                    borderLeft: page === p ? "3px solid #7f1d1d" : "3px solid transparent"
+                                    gap: 10
                                 },
                                 children: [
                                     /*#__PURE__*/ _jsx("span", {
-                                        style: {
-                                            fontSize: 16,
-                                            flexShrink: 0
-                                        },
-                                        children: icons[p]
+                                        children: "🚪"
                                     }),
-                                    sideOpen && /*#__PURE__*/ _jsxs("span", {
-                                        style: {
-                                            flex: 1,
-                                            display: "flex",
-                                            alignItems: "center",
-                                            justifyContent: "space-between"
-                                        },
-                                        children: [
-                                            p,
-                                            pendingCount > 0 && /*#__PURE__*/ _jsx("span", {
-                                                style: {
-                                                    background: page === p ? "white" : "#dc2626",
-                                                    color: page === p ? "#dc2626" : "white",
-                                                    borderRadius: 10,
-                                                    fontSize: 10,
-                                                    fontWeight: 800,
-                                                    padding: "1px 7px"
-                                                },
-                                                children: pendingCount
-                                            })
-                                        ]
-                                    })
+                                    sideOpen && "Logout"
                                 ]
-                            }, p);
-                        })
-                    }),
-                    sideOpen && /*#__PURE__*/ _jsxs("div", {
-                        style: {
-                            padding: "10px 14px",
-                            fontSize: 11,
-                            color: "rgba(255,255,255,0.65)",
-                            borderTop: "1px solid rgba(255,255,255,0.1)"
-                        },
-                        children: [
-                            "Signed in as ",
-                            /*#__PURE__*/ _jsx("b", {
-                                style: {
-                                    color: "white"
-                                },
-                                children: currentUser
-                            }),
-                            " (",
-                            role === "admin" ? "Admin" : "Teacher",
-                            ")"
+                            })
                         ]
                     }),
-                    /*#__PURE__*/ _jsxs("button", {
-                        onClick: ()=>{
-                            writeAuditEntry("session", "LOGOUT", "".concat(currentUser, " logged out"));
-                            setAuthed(false);
-                            setRole(null);
-                            setCurrentUser(null);
-                            setAuditUser(null);
-                            setLoginUser("");
-                            setPage("DASHBOARD");
-                        },
-                        style: {
-                            padding: "12px 14px",
-                            background: "transparent",
-                            border: "none",
-                            color: "rgba(255,255,255,0.6)",
-                            textAlign: "left",
-                            cursor: "pointer",
-                            fontSize: 13,
-                            display: "flex",
-                            alignItems: "center",
-                            gap: 10
-                        },
-                        children: [
-                            /*#__PURE__*/ _jsx("span", {
-                                children: "🚪"
-                            }),
-                            sideOpen && "Logout"
-                        ]
-                    })
-                ]
-            }),
-            /*#__PURE__*/ _jsxs("div", {
-                className: "app-main",
-                style: {
-                    flex: 1,
-                    overflow: "auto"
-                },
-                children: [
                     /*#__PURE__*/ _jsxs("div", {
-                        className: "no-print",
+                        className: "app-main",
                         style: {
-                            background: "white",
-                            padding: "12px 20px",
-                            borderBottom: "1px solid #e5e7eb",
-                            display: "flex",
-                            alignItems: "center",
-                            gap: 12,
-                            position: "sticky",
-                            top: 0,
-                            zIndex: 10
+                            flex: 1,
+                            overflow: "auto"
                         },
                         children: [
-                            /*#__PURE__*/ _jsx("button", {
-                                onClick: ()=>setSideOpen((v)=>!v),
-                                style: {
-                                    background: "none",
-                                    border: "none",
-                                    cursor: "pointer",
-                                    fontSize: 20,
-                                    color: "#374151"
-                                },
-                                children: "☰"
-                            }),
-                            /*#__PURE__*/ _jsx("h1", {
-                                style: {
-                                    fontSize: 18,
-                                    fontWeight: 700,
-                                    color: "#1e3a6e",
-                                    margin: 0
-                                },
-                                children: page
-                            }),
                             /*#__PURE__*/ _jsxs("div", {
+                                className: "no-print",
                                 style: {
-                                    position: "relative",
-                                    width: 260
+                                    background: "white",
+                                    padding: "12px 20px",
+                                    borderBottom: "1px solid #e5e7eb",
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: 12,
+                                    position: "sticky",
+                                    top: 0,
+                                    zIndex: 10
                                 },
                                 children: [
-                                    /*#__PURE__*/ _jsx("input", {
-                                        value: gSearch,
-                                        onChange: (e)=>setGSearch(e.target.value),
+                                    /*#__PURE__*/ _jsx("button", {
+                                        onClick: ()=>setSideOpen((v)=>!v),
                                         style: {
-                                            ...inp,
-                                            width: "100%",
-                                            padding: "7px 10px 7px 30px"
+                                            background: "none",
+                                            border: "none",
+                                            cursor: "pointer",
+                                            fontSize: 20,
+                                            color: "#374151"
                                         },
-                                        placeholder: "🔎 Search learners, pages…"
+                                        children: "☰"
                                     }),
-                                    /*#__PURE__*/ _jsx("span", {
+                                    /*#__PURE__*/ _jsx("h1", {
                                         style: {
-                                            position: "absolute",
-                                            left: 9,
-                                            top: "50%",
-                                            transform: "translateY(-50%)",
-                                            fontSize: 12,
-                                            color: "#9ca3af",
-                                            pointerEvents: "none"
+                                            fontSize: 18,
+                                            fontWeight: 700,
+                                            color: "#1e3a6e",
+                                            margin: 0
                                         },
-                                        children: "🔎"
+                                        children: page
                                     }),
-                                    gSearch.trim() && /*#__PURE__*/ _jsxs("div", {
+                                    /*#__PURE__*/ _jsxs("div", {
                                         style: {
-                                            position: "absolute",
-                                            top: "100%",
-                                            left: 0,
-                                            right: 0,
-                                            background: "white",
-                                            border: "1px solid #e5e7eb",
-                                            borderRadius: 8,
-                                            boxShadow: "0 10px 30px rgba(0,0,0,0.15)",
-                                            zIndex: 50,
-                                            maxHeight: 340,
-                                            overflowY: "auto",
-                                            marginTop: 4
+                                            position: "relative",
+                                            width: 260
                                         },
                                         children: [
-                                            !gSearchHasResults && /*#__PURE__*/ _jsxs("div", {
+                                            /*#__PURE__*/ _jsx("input", {
+                                                value: gSearch,
+                                                onChange: (e)=>setGSearch(e.target.value),
                                                 style: {
-                                                    padding: "12px",
+                                                    ...inp,
+                                                    width: "100%",
+                                                    padding: "7px 10px 7px 30px"
+                                                },
+                                                placeholder: "🔎 Search learners, pages…"
+                                            }),
+                                            /*#__PURE__*/ _jsx("span", {
+                                                style: {
+                                                    position: "absolute",
+                                                    left: 9,
+                                                    top: "50%",
+                                                    transform: "translateY(-50%)",
                                                     fontSize: 12,
                                                     color: "#9ca3af",
-                                                    textAlign: "center"
+                                                    pointerEvents: "none"
+                                                },
+                                                children: "🔎"
+                                            }),
+                                            gSearch.trim() && /*#__PURE__*/ _jsxs("div", {
+                                                style: {
+                                                    position: "absolute",
+                                                    top: "100%",
+                                                    left: 0,
+                                                    right: 0,
+                                                    background: "white",
+                                                    border: "1px solid #e5e7eb",
+                                                    borderRadius: 8,
+                                                    boxShadow: "0 10px 30px rgba(0,0,0,0.15)",
+                                                    zIndex: 50,
+                                                    maxHeight: 340,
+                                                    overflowY: "auto",
+                                                    marginTop: 4
                                                 },
                                                 children: [
-                                                    'No matches for "',
-                                                    gSearch,
-                                                    '".'
-                                                ]
-                                            }),
-                                            gSearchResults.pupils.length > 0 && /*#__PURE__*/ _jsxs("div", {
-                                                children: [
-                                                    /*#__PURE__*/ _jsx("div", {
+                                                    !gSearchHasResults && /*#__PURE__*/ _jsxs("div", {
                                                         style: {
-                                                            padding: "6px 12px",
-                                                            fontSize: 10,
-                                                            fontWeight: 800,
-                                                            color: "#6b7280",
-                                                            background: "#f8fafc",
-                                                            letterSpacing: 0.4
+                                                            padding: "12px",
+                                                            fontSize: 12,
+                                                            color: "#9ca3af",
+                                                            textAlign: "center"
                                                         },
-                                                        children: "LEARNERS"
+                                                        children: [
+                                                            'No matches for "',
+                                                            gSearch,
+                                                            '".'
+                                                        ]
                                                     }),
-                                                    gSearchResults.pupils.map((s)=>/*#__PURE__*/ _jsxs("div", {
-                                                            onMouseDown: (e)=>e.preventDefault(),
-                                                            onClick: ()=>{
-                                                                openPupilProfile(s.id);
-                                                                setGSearch("");
-                                                            },
-                                                            style: {
-                                                                padding: "8px 12px",
-                                                                cursor: "pointer",
-                                                                fontSize: 13,
-                                                                borderBottom: "1px solid #f3f4f6",
-                                                                display: "flex",
-                                                                justifyContent: "space-between"
-                                                            },
-                                                            children: [
-                                                                /*#__PURE__*/ _jsx("span", {
-                                                                    children: /*#__PURE__*/ _jsx("b", {
-                                                                        children: s.name
-                                                                    })
-                                                                }),
-                                                                /*#__PURE__*/ _jsx("span", {
-                                                                    style: {
-                                                                        color: "#9ca3af",
-                                                                        fontSize: 11
+                                                    gSearchResults.pupils.length > 0 && /*#__PURE__*/ _jsxs("div", {
+                                                        children: [
+                                                            /*#__PURE__*/ _jsx("div", {
+                                                                style: {
+                                                                    padding: "6px 12px",
+                                                                    fontSize: 10,
+                                                                    fontWeight: 800,
+                                                                    color: "#6b7280",
+                                                                    background: "#f8fafc",
+                                                                    letterSpacing: 0.4
+                                                                },
+                                                                children: "LEARNERS"
+                                                            }),
+                                                            gSearchResults.pupils.map((s)=>/*#__PURE__*/ _jsxs("div", {
+                                                                    onMouseDown: (e)=>e.preventDefault(),
+                                                                    onClick: ()=>{
+                                                                        openPupilProfile(s.id);
+                                                                        setGSearch("");
                                                                     },
-                                                                    children: s.className
-                                                                })
-                                                            ]
-                                                        }, s.id))
-                                                ]
-                                            }),
-                                            gSearchResults.pages.length > 0 && /*#__PURE__*/ _jsxs("div", {
-                                                children: [
-                                                    /*#__PURE__*/ _jsx("div", {
-                                                        style: {
-                                                            padding: "6px 12px",
-                                                            fontSize: 10,
-                                                            fontWeight: 800,
-                                                            color: "#6b7280",
-                                                            background: "#f8fafc",
-                                                            letterSpacing: 0.4
-                                                        },
-                                                        children: "PAGES"
-                                                    }),
-                                                    gSearchResults.pages.map((p)=>/*#__PURE__*/ _jsx("div", {
-                                                            onMouseDown: (e)=>e.preventDefault(),
-                                                            onClick: ()=>{
-                                                                setPage(p);
-                                                                setGSearch("");
-                                                            },
-                                                            style: {
-                                                                padding: "8px 12px",
-                                                                cursor: "pointer",
-                                                                fontSize: 13,
-                                                                borderBottom: "1px solid #f3f4f6"
-                                                            },
-                                                            children: p
-                                                        }, p))
-                                                ]
-                                            }),
-                                            gSearchResults.requests.length > 0 && /*#__PURE__*/ _jsxs("div", {
-                                                children: [
-                                                    /*#__PURE__*/ _jsx("div", {
-                                                        style: {
-                                                            padding: "6px 12px",
-                                                            fontSize: 10,
-                                                            fontWeight: 800,
-                                                            color: "#6b7280",
-                                                            background: "#f8fafc",
-                                                            letterSpacing: 0.4
-                                                        },
-                                                        children: "PENDING REQUESTS"
-                                                    }),
-                                                    gSearchResults.requests.map((r)=>/*#__PURE__*/ _jsxs("div", {
-                                                            onMouseDown: (e)=>e.preventDefault(),
-                                                            onClick: ()=>{
-                                                                setPage("MANAGE REQUESTS");
-                                                                setGSearch("");
-                                                            },
-                                                            style: {
-                                                                padding: "8px 12px",
-                                                                cursor: "pointer",
-                                                                fontSize: 13,
-                                                                borderBottom: "1px solid #f3f4f6"
-                                                            },
-                                                            children: [
-                                                                /*#__PURE__*/ _jsx("b", {
-                                                                    children: r.studentName || r.requestedBy || r.kind
-                                                                }),
-                                                                " ",
-                                                                /*#__PURE__*/ _jsx("span", {
                                                                     style: {
-                                                                        color: "#9ca3af",
-                                                                        fontSize: 11
+                                                                        padding: "8px 12px",
+                                                                        cursor: "pointer",
+                                                                        fontSize: 13,
+                                                                        borderBottom: "1px solid #f3f4f6",
+                                                                        display: "flex",
+                                                                        justifyContent: "space-between"
                                                                     },
-                                                                    children: r.cls ? "— ".concat(r.cls) : ""
-                                                                })
-                                                            ]
-                                                        }, r.id))
+                                                                    children: [
+                                                                        /*#__PURE__*/ _jsx("span", {
+                                                                            children: /*#__PURE__*/ _jsx("b", {
+                                                                                children: s.name
+                                                                            })
+                                                                        }),
+                                                                        /*#__PURE__*/ _jsx("span", {
+                                                                            style: {
+                                                                                color: "#9ca3af",
+                                                                                fontSize: 11
+                                                                            },
+                                                                            children: s.className
+                                                                        })
+                                                                    ]
+                                                                }, s.id))
+                                                        ]
+                                                    }),
+                                                    gSearchResults.pages.length > 0 && /*#__PURE__*/ _jsxs("div", {
+                                                        children: [
+                                                            /*#__PURE__*/ _jsx("div", {
+                                                                style: {
+                                                                    padding: "6px 12px",
+                                                                    fontSize: 10,
+                                                                    fontWeight: 800,
+                                                                    color: "#6b7280",
+                                                                    background: "#f8fafc",
+                                                                    letterSpacing: 0.4
+                                                                },
+                                                                children: "PAGES"
+                                                            }),
+                                                            gSearchResults.pages.map((p)=>/*#__PURE__*/ _jsx("div", {
+                                                                    onMouseDown: (e)=>e.preventDefault(),
+                                                                    onClick: ()=>{
+                                                                        setPage(p);
+                                                                        setGSearch("");
+                                                                    },
+                                                                    style: {
+                                                                        padding: "8px 12px",
+                                                                        cursor: "pointer",
+                                                                        fontSize: 13,
+                                                                        borderBottom: "1px solid #f3f4f6"
+                                                                    },
+                                                                    children: p
+                                                                }, p))
+                                                        ]
+                                                    }),
+                                                    gSearchResults.requests.length > 0 && /*#__PURE__*/ _jsxs("div", {
+                                                        children: [
+                                                            /*#__PURE__*/ _jsx("div", {
+                                                                style: {
+                                                                    padding: "6px 12px",
+                                                                    fontSize: 10,
+                                                                    fontWeight: 800,
+                                                                    color: "#6b7280",
+                                                                    background: "#f8fafc",
+                                                                    letterSpacing: 0.4
+                                                                },
+                                                                children: "PENDING REQUESTS"
+                                                            }),
+                                                            gSearchResults.requests.map((r)=>/*#__PURE__*/ _jsxs("div", {
+                                                                    onMouseDown: (e)=>e.preventDefault(),
+                                                                    onClick: ()=>{
+                                                                        setPage("MANAGE REQUESTS");
+                                                                        setGSearch("");
+                                                                    },
+                                                                    style: {
+                                                                        padding: "8px 12px",
+                                                                        cursor: "pointer",
+                                                                        fontSize: 13,
+                                                                        borderBottom: "1px solid #f3f4f6"
+                                                                    },
+                                                                    children: [
+                                                                        /*#__PURE__*/ _jsx("b", {
+                                                                            children: r.studentName || r.requestedBy || r.kind
+                                                                        }),
+                                                                        " ",
+                                                                        /*#__PURE__*/ _jsx("span", {
+                                                                            style: {
+                                                                                color: "#9ca3af",
+                                                                                fontSize: 11
+                                                                            },
+                                                                            children: r.cls ? "— ".concat(r.cls) : ""
+                                                                        })
+                                                                    ]
+                                                                }, r.id))
+                                                        ]
+                                                    })
                                                 ]
                                             })
+                                        ]
+                                    }),
+                                    /*#__PURE__*/ _jsxs("div", {
+                                        style: {
+                                            marginLeft: "auto",
+                                            fontSize: 12,
+                                            color: "#6b7280"
+                                        },
+                                        children: [
+                                            school.name,
+                                            " - ",
+                                            school.year
                                         ]
                                     })
                                 ]
                             }),
                             /*#__PURE__*/ _jsxs("div", {
                                 style: {
-                                    marginLeft: "auto",
-                                    fontSize: 12,
-                                    color: "#6b7280"
+                                    padding: 20
                                 },
                                 children: [
-                                    school.name,
-                                    " - ",
-                                    school.year
+                                    page === "DASHBOARD" && /*#__PURE__*/ _jsx(Dashboard, {
+                                        ...props
+                                    }),
+                                    page === "MARK ENTRY" && /*#__PURE__*/ _jsx(MarkEntry, {
+                                        ...props
+                                    }),
+                                    page === "MONTHLY EXAMS" && /*#__PURE__*/ _jsx(MonthlyExams, {
+                                        ...props
+                                    }),
+                                    page === "GROUP WORK" && /*#__PURE__*/ _jsx(GroupWork, {
+                                        ...props
+                                    }),
+                                    page === "EXAM TIMETABLE" && /*#__PURE__*/ _jsx(ExamTimetable, {
+                                        ...props
+                                    }),
+                                    page === "MONTHLY CARDS" && /*#__PURE__*/ _jsx(MonthlyCards, {
+                                        ...props
+                                    }),
+                                    page === "MONTHLY SLIPS" && /*#__PURE__*/ _jsx(MonthlySlips, {
+                                        ...props
+                                    }),
+                                    page === "RESULT SHEETS" && /*#__PURE__*/ _jsx(ResultSheets, {
+                                        ...props
+                                    }),
+                                    page === "REPORT CARDS" && /*#__PURE__*/ _jsx(ReportCards, {
+                                        ...props
+                                    }),
+                                    page === "REPORTS" && /*#__PURE__*/ _jsx(Reports, {
+                                        ...props
+                                    }),
+                                    page === "LEARNERS" && /*#__PURE__*/ _jsx(Students, {
+                                        ...props
+                                    }),
+                                    page === "PUPIL PROFILE" && /*#__PURE__*/ _jsx(PupilProfile, {
+                                        students: students,
+                                        termMarks: termMarks,
+                                        monthlyMarks: monthlyMarks,
+                                        bands: bands,
+                                        divisions: divisions,
+                                        initialStudentId: pupilProfileTargetId,
+                                        onConsumeInitial: ()=>setPupilProfileTargetId(null)
+                                    }),
+                                    page === "SWEEPING ROTA" && /*#__PURE__*/ _jsx(SweepingRota, {
+                                        students: students,
+                                        school: school,
+                                        markEditing: markEditing
+                                    }),
+                                    page === "MOCK INFO" && /*#__PURE__*/ _jsx(MockInfo, {
+                                        students: students,
+                                        school: school,
+                                        bands: bands,
+                                        specialBands: specialBands,
+                                        divisions: divisions,
+                                        markEditing: markEditing,
+                                        role: role
+                                    }),
+                                    page === "PLE INFO" && /*#__PURE__*/ _jsx(PleInfo, {
+                                        students: students,
+                                        setStudents: setStudents,
+                                        school: school,
+                                        markEditing: markEditing,
+                                        municipalPerf: municipalPerf,
+                                        setMunicipalPerf: setMunicipalPerf
+                                    }),
+                                    page === "MANAGE REQUESTS" && role === "admin" && /*#__PURE__*/ _jsx(ManageRequests, {
+                                        ...props
+                                    }),
+                                    page === "SETTINGS" && role === "admin" && /*#__PURE__*/ _jsx(Settings, {
+                                        ...props
+                                    }),
+                                    page === "AUDIT LOG" && role === "admin" && /*#__PURE__*/ _jsx(AuditLog, {}),
+                                    page === "DOWNLOAD CENTRE" && /*#__PURE__*/ _jsx(DownloadCentre, {
+                                        ...props
+                                    })
                                 ]
                             })
                         ]
                     }),
-                    /*#__PURE__*/ _jsxs("div", {
-                        style: {
-                            padding: 20
-                        },
-                        children: [
-                            page === "DASHBOARD" && /*#__PURE__*/ _jsx(Dashboard, {
-                                ...props
-                            }),
-                            page === "MARK ENTRY" && /*#__PURE__*/ _jsx(MarkEntry, {
-                                ...props
-                            }),
-                            page === "MONTHLY EXAMS" && /*#__PURE__*/ _jsx(MonthlyExams, {
-                                ...props
-                            }),
-                            page === "GROUP WORK" && /*#__PURE__*/ _jsx(GroupWork, {
-                                ...props
-                            }),
-                            page === "EXAM TIMETABLE" && /*#__PURE__*/ _jsx(ExamTimetable, {
-                                ...props
-                            }),
-                            page === "MONTHLY CARDS" && /*#__PURE__*/ _jsx(MonthlyCards, {
-                                ...props
-                            }),
-                            page === "MONTHLY SLIPS" && /*#__PURE__*/ _jsx(MonthlySlips, {
-                                ...props
-                            }),
-                            page === "RESULT SHEETS" && /*#__PURE__*/ _jsx(ResultSheets, {
-                                ...props
-                            }),
-                            page === "REPORT CARDS" && /*#__PURE__*/ _jsx(ReportCards, {
-                                ...props
-                            }),
-                            page === "REPORTS" && /*#__PURE__*/ _jsx(Reports, {
-                                ...props
-                            }),
-                            page === "LEARNERS" && /*#__PURE__*/ _jsx(Students, {
-                                ...props
-                            }),
-                            page === "PUPIL PROFILE" && /*#__PURE__*/ _jsx(PupilProfile, {
-                                students: students,
-                                termMarks: termMarks,
-                                monthlyMarks: monthlyMarks,
-                                bands: bands,
-                                divisions: divisions,
-                                initialStudentId: pupilProfileTargetId,
-                                onConsumeInitial: ()=>setPupilProfileTargetId(null)
-                            }),
-                            page === "SWEEPING ROTA" && /*#__PURE__*/ _jsx(SweepingRota, {
-                                students: students,
-                                school: school,
-                                markEditing: markEditing
-                            }),
-                            page === "MOCK INFO" && /*#__PURE__*/ _jsx(MockInfo, {
-                                students: students,
-                                school: school,
-                                bands: bands,
-                                specialBands: specialBands,
-                                divisions: divisions,
-                                markEditing: markEditing,
-                                role: role
-                            }),
-                            page === "PLE INFO" && /*#__PURE__*/ _jsx(PleInfo, {
-                                students: students,
-                                setStudents: setStudents,
-                                school: school,
-                                markEditing: markEditing,
-                                municipalPerf: municipalPerf,
-                                setMunicipalPerf: setMunicipalPerf
-                            }),
-                            page === "MANAGE REQUESTS" && role === "admin" && /*#__PURE__*/ _jsx(ManageRequests, {
-                                ...props
-                            }),
-                            page === "SETTINGS" && role === "admin" && /*#__PURE__*/ _jsx(Settings, {
-                                ...props
-                            }),
-                            page === "AUDIT LOG" && role === "admin" && /*#__PURE__*/ _jsx(AuditLog, {}),
-                            page === "DOWNLOAD CENTRE" && /*#__PURE__*/ _jsx(DownloadCentre, {
-                                ...props
-                            })
-                        ]
+                    /*#__PURE__*/ _jsx("style", {
+                        children: "\n        @media print {\n          @page { size: A4 portrait; margin: 8mm; }\n          .no-print { display: none !important; }\n          .page-break { page-break-after: always; }\n          /* The app's on-screen layout is a flex shell with the sidebar +\n             header pinned and the content area set to overflow:auto so it\n             scrolls independently. Browsers only reliably print whatever is\n             currently VISIBLE inside an overflow:auto container -- not the\n             rest of the content the user would otherwise have to scroll to\n             see -- which is exactly why printing used to produce what\n             looked like a screenshot of just the on-screen portion instead\n             of the full Marksheet/Report Card/etc. Switching to plain block\n             layout with overflow visible here lets the full content flow\n             and paginate normally across as many physical pages as it\n             needs, the way printing actually works. */\n          .app-shell { display: block !important; min-height: auto !important; }\n          .app-main { overflow: visible !important; }\n          /* Report Card: every pupil's full card (school details, pupil\n             info, subjects, grades, comments, signatures) stays together\n             as one unbroken block, and each card starts a fresh page --\n             except the last one, which should not leave a trailing blank\n             page after it. */\n          .report-card-sheet {\n            page-break-inside: avoid;\n            break-inside: avoid;\n            page-break-after: always;\n            break-after: page;\n          }\n          .report-card-sheet:last-child {\n            page-break-after: auto;\n            break-after: auto;\n          }\n          .report-card-sheet table,\n          .report-card-sheet tr,\n          .report-card-sheet thead,\n          .report-card-sheet tbody {\n            page-break-inside: avoid;\n            break-inside: avoid;\n          }\n          /* Monthly Slips: each \"page\" of up to 9 slips (3x3) prints as one\n             landscape A4 sheet -- a fixed 9cm x 6.3cm slip needs a wider page\n             than portrait A4 to fit 3 across, so this page only switches\n             orientation for these specific sheets, not the whole document. */\n          .monthly-slip-page {\n            page: monthly-slips-landscape;\n            page-break-after: always;\n            break-after: page;\n            page-break-inside: avoid;\n            break-inside: avoid;\n          }\n          .monthly-slip-page:last-child {\n            page-break-after: auto;\n            break-after: auto;\n          }\n        }\n        @page monthly-slips-landscape { size: A4 landscape; margin: 5mm; }\n        .monthly-slip-page {\n          display: grid;\n          grid-template-columns: repeat(3, 9cm);\n          grid-auto-rows: 6.3cm;\n          gap: 3mm;\n          justify-content: center;\n          margin: 0 auto 10mm;\n        }\n        /* Screen preview: stack report cards as plain blocks (not flex) so\n           the same page-break rules above apply predictably when printed. */\n        .report-card-list { display: block; }\n        .report-card-sheet { margin: 0 auto 24px; }\n        @media print {\n          .report-card-sheet { margin: 0 auto; }\n        }\n        input[type=number]::-webkit-inner-spin-button { opacity:1; }\n        * { box-sizing: border-box; }\n        table { border-collapse: collapse; }\n        th, td { border: 1px solid #d1d5db; }\n      "
                     })
                 ]
-            }),
-            /*#__PURE__*/ _jsx("style", {
-                children: "\n        @media print {\n          @page { size: A4 portrait; margin: 8mm; }\n          .no-print { display: none !important; }\n          .page-break { page-break-after: always; }\n          /* The app's on-screen layout is a flex shell with the sidebar +\n             header pinned and the content area set to overflow:auto so it\n             scrolls independently. Browsers only reliably print whatever is\n             currently VISIBLE inside an overflow:auto container -- not the\n             rest of the content the user would otherwise have to scroll to\n             see -- which is exactly why printing used to produce what\n             looked like a screenshot of just the on-screen portion instead\n             of the full Marksheet/Report Card/etc. Switching to plain block\n             layout with overflow visible here lets the full content flow\n             and paginate normally across as many physical pages as it\n             needs, the way printing actually works. */\n          .app-shell { display: block !important; min-height: auto !important; }\n          .app-main { overflow: visible !important; }\n          /* Report Card: every pupil's full card (school details, pupil\n             info, subjects, grades, comments, signatures) stays together\n             as one unbroken block, and each card starts a fresh page --\n             except the last one, which should not leave a trailing blank\n             page after it. */\n          .report-card-sheet {\n            page-break-inside: avoid;\n            break-inside: avoid;\n            page-break-after: always;\n            break-after: page;\n          }\n          .report-card-sheet:last-child {\n            page-break-after: auto;\n            break-after: auto;\n          }\n          .report-card-sheet table,\n          .report-card-sheet tr,\n          .report-card-sheet thead,\n          .report-card-sheet tbody {\n            page-break-inside: avoid;\n            break-inside: avoid;\n          }\n          /* Monthly Slips: each \"page\" of up to 9 slips (3x3) prints as one\n             landscape A4 sheet -- a fixed 9cm x 6.3cm slip needs a wider page\n             than portrait A4 to fit 3 across, so this page only switches\n             orientation for these specific sheets, not the whole document. */\n          .monthly-slip-page {\n            page: monthly-slips-landscape;\n            page-break-after: always;\n            break-after: page;\n            page-break-inside: avoid;\n            break-inside: avoid;\n          }\n          .monthly-slip-page:last-child {\n            page-break-after: auto;\n            break-after: auto;\n          }\n        }\n        @page monthly-slips-landscape { size: A4 landscape; margin: 5mm; }\n        .monthly-slip-page {\n          display: grid;\n          grid-template-columns: repeat(3, 9cm);\n          grid-auto-rows: 6.3cm;\n          gap: 3mm;\n          justify-content: center;\n          margin: 0 auto 10mm;\n        }\n        /* Screen preview: stack report cards as plain blocks (not flex) so\n           the same page-break rules above apply predictably when printed. */\n        .report-card-list { display: block; }\n        .report-card-sheet { margin: 0 auto 24px; }\n        @media print {\n          .report-card-sheet { margin: 0 auto; }\n        }\n        input[type=number]::-webkit-inner-spin-button { opacity:1; }\n        * { box-sizing: border-box; }\n        table { border-collapse: collapse; }\n        th, td { border: 1px solid #d1d5db; }\n      "
-            })
-        ]
             })
         ]
     });
@@ -20585,6 +20648,46 @@ function PleInfo(param) {
                     [field]: val
                 }
             }));
+    // ── One-click cleanup for photos saved before compression existed ──────
+    // Candidate photos saved before compressImageFile was added may still be
+    // sitting in shared storage at their full, uncompressed size (often
+    // several MB each) -- these are the single biggest known contributor to
+    // this project's database-size usage. This re-compresses every stored
+    // photo in place (same key, same records) without needing anyone to
+    // find and re-upload each one by hand. It's safe to run more than once:
+    // an already-small photo shrinks a little further and then stops
+    // changing size meaningfully.
+    const [shrinkingPhotos, setShrinkingPhotos] = useState(false);
+    const [shrinkResult, setShrinkResult] = useState(null);
+    const shrinkStoredPhotos = async ()=>{
+        setShrinkingPhotos(true);
+        setShrinkResult(null);
+        try {
+            const before = JSON.stringify(pleData).length;
+            const entries = Object.entries(pleData);
+            const updated = {
+                ...pleData
+            };
+            let count = 0;
+            for (const [sid, rec] of entries){
+                if (!(rec === null || rec === void 0 ? void 0 : rec.photo)) continue;
+                try {
+                    const smaller = await recompressStoredDataUrl(rec.photo);
+                    updated[sid] = {
+                        ...rec,
+                        photo: smaller
+                    };
+                    count++;
+                } catch (e) {} // an unreadable/corrupt stored photo is left as-is rather than lost
+            }
+            const after = JSON.stringify(updated).length;
+            setPleData(updated);
+            const savedMb = Math.max(0, (before - after) / (1024 * 1024));
+            setShrinkResult("Compressed ".concat(count, " photo(s) — freed roughly ").concat(savedMb.toFixed(1), " MB. This will be reflected once it finishes syncing."));
+        } finally{
+            setShrinkingPhotos(false);
+        }
+    };
     const updateResult = (sid, sub, val)=>{
         setPleData((prev)=>{
             var _prev_sid;
@@ -20973,6 +21076,39 @@ function PleInfo(param) {
                         children: label
                     }, t);
                 })
+            }),
+            /*#__PURE__*/ _jsxs("div", {
+                className: "no-print",
+                style: {
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 10,
+                    flexWrap: "wrap",
+                    fontSize: 12,
+                    color: "#6b7280",
+                    margin: "6px 0"
+                },
+                children: [
+                    /*#__PURE__*/ _jsx("button", {
+                        onClick: shrinkStoredPhotos,
+                        disabled: shrinkingPhotos,
+                        title: "Re-compresses every candidate photo already saved here to free up database space -- safe to run anytime.",
+                        style: {
+                            padding: "5px 10px",
+                            background: "white",
+                            border: "1px solid #d1d5db",
+                            borderRadius: 6,
+                            fontWeight: 600,
+                            fontSize: 12,
+                            cursor: shrinkingPhotos ? "default" : "pointer",
+                            opacity: shrinkingPhotos ? 0.6 : 1
+                        },
+                        children: shrinkingPhotos ? "Compressing…" : "🗜️ Shrink Stored Photos"
+                    }),
+                    shrinkResult && /*#__PURE__*/ _jsx("span", {
+                        children: shrinkResult
+                    })
+                ]
             }),
             /*#__PURE__*/ _jsxs("div", {
                 style: {
@@ -22035,17 +22171,23 @@ function PleInfo(param) {
                                                     /*#__PURE__*/ _jsx("input", {
                                                         type: "file",
                                                         accept: "image/*",
-                                                        onChange: (e)=>{
+                                                        onChange: async (e)=>{
                                                             var _e_target_files;
                                                             const file = (_e_target_files = e.target.files) === null || _e_target_files === void 0 ? void 0 : _e_target_files[0];
                                                             if (!file) return;
-                                                            const reader = new FileReader();
-                                                            reader.onload = ()=>{
-                                                                markEditing();
-                                                                updatePle(selectedStudent, "photo", reader.result);
-                                                            };
-                                                            reader.readAsDataURL(file);
                                                             e.target.value = "";
+                                                            // Resized/re-compressed BEFORE it ever reaches shared storage --
+                                                            // this is what keeps candidate photos from being the thing that
+                                                            // silently fills up the database. The photo is only ever shown
+                                                            // as a small 40x46 thumbnail, so 480px on the long edge is
+                                                            // already several times sharper than it's displayed.
+                                                            try {
+                                                                const compressed = await compressImageFile(file);
+                                                                markEditing();
+                                                                updatePle(selectedStudent, "photo", compressed);
+                                                            } catch (err) {
+                                                                alert("Could not process that photo -- please try a different image.");
+                                                            }
                                                         },
                                                         style: {
                                                             fontSize: 11,
@@ -26196,9 +26338,9 @@ function Reports(param) {
                 body += "</table>";
             }
             if (upperBreakdown.gradeTotal > 0) {
-                body += '<div class="section-title">UPPER PRIMARY \u2013 GRADE BREAKDOWN</div>';
+                body += '<div class="section-title">UPPER PRIMARY – GRADE BREAKDOWN</div>';
                 body += "<table><tr><th>Grade</th><th>Count</th><th>%</th></tr>".concat(upperBreakdown.gradeBreakdown.map((r)=>"<tr><td>".concat(escapeHtml(r.label), "</td><td>").concat(r.count, "</td><td>").concat(r.pct, "%</td></tr>")).join(""), "</table>");
-                body += '<div class="section-title">UPPER PRIMARY \u2013 DIVISION BREAKDOWN</div>';
+                body += '<div class="section-title">UPPER PRIMARY – DIVISION BREAKDOWN</div>';
                 body += "<table><tr><th>Division</th><th>Learners</th><th>%</th></tr>".concat(upperBreakdown.divisionBreakdown.map((r)=>"<tr><td>".concat(escapeHtml(r.label), "</td><td>").concat(r.count, "</td><td>").concat(r.pct, "%</td></tr>")).join(""), "</table>");
             }
             if (upperAchievers.length) {
@@ -26590,7 +26732,7 @@ function Reports(param) {
                                                 },
                                                 children: [
                                                     t.n,
-                                                    " learners assessed \u2022 ",
+                                                    " learners assessed • ",
                                                     note
                                                 ]
                                             }),
@@ -26677,7 +26819,7 @@ function Reports(param) {
                                             color: "#1e3a6e",
                                             marginBottom: 10
                                         },
-                                        children: "Upper Primary \u2013 Grade Breakdown"
+                                        children: "Upper Primary – Grade Breakdown"
                                     }),
                                     /*#__PURE__*/ _jsx("table", {
                                         style: {
@@ -26741,7 +26883,7 @@ function Reports(param) {
                                             color: "#1e3a6e",
                                             marginBottom: 10
                                         },
-                                        children: "Upper Primary \u2013 Division Breakdown"
+                                        children: "Upper Primary – Division Breakdown"
                                     }),
                                     /*#__PURE__*/ _jsx("table", {
                                         style: {
@@ -26809,7 +26951,7 @@ function Reports(param) {
                                     color: "#1e3a6e",
                                     marginBottom: 10
                                 },
-                                children: "\uD83E\uDD47 Division I Achievers by Class (P4-P7)"
+                                children: "🥇 Division I Achievers by Class (P4-P7)"
                             }),
                             upperAchievers.every((c)=>!c.div1.length) ? /*#__PURE__*/ _jsx("div", {
                                 style: {
@@ -27026,7 +27168,7 @@ function Reports(param) {
                                     color: "#1e3a6e",
                                     marginBottom: 10
                                 },
-                                children: "\uD83E\uDD47 Top Learner by Class (P1-P3)"
+                                children: "🥇 Top Learner by Class (P1-P3)"
                             }),
                             /*#__PURE__*/ _jsx("table", {
                                 style: {
@@ -28887,20 +29029,25 @@ function Settings(param) {
                                             /*#__PURE__*/ _jsx("input", {
                                                 type: "file",
                                                 accept: "image/*",
-                                                onChange: (e)=>{
+                                                onChange: async (e)=>{
                                                     var _e_target_files;
                                                     const file = (_e_target_files = e.target.files) === null || _e_target_files === void 0 ? void 0 : _e_target_files[0];
                                                     if (!file) return;
-                                                    const reader = new FileReader();
-                                                    reader.onload = (ev)=>{
+                                                    e.target.value = "";
+                                                    // Resized (kept as PNG, so transparency survives) before it
+                                                    // reaches shared storage -- a phone photo of a badge/crest can
+                                                    // otherwise be several MB for something only ever shown small
+                                                    // on a certificate header.
+                                                    try {
+                                                        const compressed = await compressImageFile(file, 600, 0.9, "image/png");
                                                         markEditing();
                                                         setSchool((prev)=>({
                                                                 ...prev,
-                                                                logo: ev.target.result
+                                                                logo: compressed
                                                             }));
-                                                    };
-                                                    reader.readAsDataURL(file);
-                                                    e.target.value = "";
+                                                    } catch (err) {
+                                                        alert("Could not process that image -- please try a different file.");
+                                                    }
                                                 },
                                                 style: {
                                                     fontSize: 12
