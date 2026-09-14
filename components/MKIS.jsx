@@ -321,6 +321,21 @@ const STORAGE_KEYS = [
     "mkis_examtimetable",
     "mkis_reports"
 ];
+// Every shared-storage key this app writes to, including the ones added
+// later that never got folded into STORAGE_KEYS above (PLE data, mock
+// exams, term/monthly reset backups, the sweeping rota, the audit log).
+// Used only by the Storage Size Breakdown tool in Settings -- it needs the
+// COMPLETE list to give an honest answer about where database size is
+// actually going, not just the keys the original poll loop knew about.
+const ALL_MKIS_KEYS = [
+    ...STORAGE_KEYS,
+    "mkis_pledata",
+    "mkis_mock_marks",
+    "mkis_term_reset_backups",
+    "mkis_monthly_reset_backups",
+    "mkis_sweeping_rota",
+    "mkis_audit_log"
+];
 // One-time migration: if a browser still has old localStorage data and the
 // shared store is empty, lift it into shared storage so nothing is lost.
 async function migrateLocalStorageOnce() {
@@ -28716,6 +28731,35 @@ function Settings(param) {
     const [newPw, setNewPw] = useState("");
     const [confirmPw, setConfirmPw] = useState("");
     const [pwMsg, setPwMsg] = useState("");
+    // ── Storage Size Breakdown ───────────────────────────────────────────
+    // Reads every shared-storage key directly and reports its actual byte
+    // size, largest first -- a measured answer to "what's actually filling
+    // up the database" instead of guessing from the code alone. Reads go
+    // straight to window.storage rather than relying on whatever's already
+    // loaded into this page's React state, so it reflects what's genuinely
+    // stored right now, from every part of the app, not just Settings.
+    const [storageBreakdown, setStorageBreakdown] = useState(null);
+    const [checkingStorage, setCheckingStorage] = useState(false);
+    const checkStorageBreakdown = async ()=>{
+        setCheckingStorage(true);
+        try {
+            const rows = await Promise.all(ALL_MKIS_KEYS.map(async (key)=>{
+                let bytes = 0;
+                try {
+                    const res = await window.storage.get(key, true);
+                    bytes = (res === null || res === void 0 ? void 0 : res.value) ? res.value.length : 0;
+                } catch (e) {} // treat an unreadable/missing key as 0 bytes rather than failing the whole report
+                return {
+                    key,
+                    bytes
+                };
+            }));
+            rows.sort((a, b)=>b.bytes - a.bytes);
+            setStorageBreakdown(rows);
+        } finally{
+            setCheckingStorage(false);
+        }
+    };
     const [dangerConfirm, setDangerConfirm] = useState(null); // null | 'students' | 'results' | 'everything'
     const [dangerInput, setDangerInput] = useState("");
     const [specialCls, setSpecialCls] = useState(ALL_CLASSES[0]);
@@ -28944,6 +28988,109 @@ function Settings(param) {
             gap: 20
         },
         children: [
+            /*#__PURE__*/ _jsxs("div", {
+                style: {
+                    background: "white",
+                    borderRadius: 12,
+                    padding: 20,
+                    border: "1px solid #e5e7eb"
+                },
+                children: [
+                    /*#__PURE__*/ _jsx("h3", {
+                        style: {
+                            margin: "0 0 6px",
+                            color: "#1e3a6e",
+                            fontSize: 15,
+                            fontWeight: 700
+                        },
+                        children: "🔍 Storage Size Breakdown"
+                    }),
+                    /*#__PURE__*/ _jsx("div", {
+                        style: {
+                            fontSize: 12,
+                            color: "#6b7280",
+                            marginBottom: 12,
+                            lineHeight: 1.5
+                        },
+                        children: "Shows exactly how many KB/MB each part of the system is using in shared storage right now -- the most reliable way to find out what's actually filling up the Supabase database, rather than guessing."
+                    }),
+                    /*#__PURE__*/ _jsx("button", {
+                        onClick: checkStorageBreakdown,
+                        disabled: checkingStorage,
+                        style: {
+                            padding: "8px 14px",
+                            background: "#1e3a6e",
+                            color: "white",
+                            border: "none",
+                            borderRadius: 6,
+                            fontWeight: 700,
+                            fontSize: 13,
+                            cursor: checkingStorage ? "default" : "pointer",
+                            opacity: checkingStorage ? 0.7 : 1
+                        },
+                        children: checkingStorage ? "Checking…" : "Check Now"
+                    }),
+                    storageBreakdown && /*#__PURE__*/ _jsxs("div", {
+                        style: {
+                            marginTop: 14
+                        },
+                        children: [
+                            /*#__PURE__*/ _jsxs("div", {
+                                style: {
+                                    fontSize: 13,
+                                    fontWeight: 700,
+                                    color: "#1e3a6e",
+                                    marginBottom: 8
+                                },
+                                children: [
+                                    "Total: ",
+                                    (storageBreakdown.reduce((sum, r)=>sum + r.bytes, 0) / (1024 * 1024)).toFixed(2),
+                                    " MB across ",
+                                    storageBreakdown.length,
+                                    " keys"
+                                ]
+                            }),
+                            /*#__PURE__*/ _jsx("table", {
+                                style: {
+                                    width: "100%",
+                                    borderCollapse: "collapse",
+                                    fontSize: 12
+                                },
+                                children: /*#__PURE__*/ _jsx("tbody", {
+                                    children: storageBreakdown.map((r)=>{
+                                        const mb = r.bytes / (1024 * 1024);
+                                        const display = mb >= 0.1 ? "".concat(mb.toFixed(2), " MB") : "".concat((r.bytes / 1024).toFixed(1), " KB");
+                                        return /*#__PURE__*/ _jsxs("tr", {
+                                            style: {
+                                                borderBottom: "1px solid #f3f4f6"
+                                            },
+                                            children: [
+                                                /*#__PURE__*/ _jsx("td", {
+                                                    style: {
+                                                        padding: "5px 8px 5px 0",
+                                                        color: "#374151",
+                                                        fontFamily: "monospace"
+                                                    },
+                                                    children: r.key
+                                                }),
+                                                /*#__PURE__*/ _jsx("td", {
+                                                    style: {
+                                                        padding: "5px 0",
+                                                        textAlign: "right",
+                                                        fontWeight: r.bytes > 5 * 1024 * 1024 ? 800 : 500,
+                                                        color: r.bytes > 20 * 1024 * 1024 ? "#dc2626" : r.bytes > 5 * 1024 * 1024 ? "#d97706" : "#374151"
+                                                    },
+                                                    children: display
+                                                })
+                                            ]
+                                        }, r.key);
+                                    })
+                                })
+                            })
+                        ]
+                    })
+                ]
+            }),
             /*#__PURE__*/ _jsxs("div", {
                 style: {
                     background: "white",
