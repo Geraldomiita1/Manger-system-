@@ -331,6 +331,7 @@ const ALL_MKIS_KEYS = [
     ...STORAGE_KEYS,
     "mkis_pledata",
     "mkis_mock_marks",
+    "mkis_pre_ple_marks",
     "mkis_term_reset_backups",
     "mkis_monthly_reset_backups",
     "mkis_sweeping_rota",
@@ -451,6 +452,7 @@ const KEY_LABEL = {
     mkis_examtimetable: "Exam Timetable",
     mkis_mock_marks: "Mock Results",
     mkis_pledata: "PLE Results",
+    mkis_pre_ple_marks: "Pre-PLE Results",
     mkis_reports: "Reports"
 };
 // ─── SHARED KEY SAVE QUEUE (module-level) ───────────────────────────────────
@@ -638,6 +640,10 @@ const MERGE_STRATEGIES = {
     // termMarks/monthlyMarks so one device saving PLE data for one pupil can
     // never wipe out a concurrent edit to a different pupil's record.
     mkis_pledata: (remote, local)=>deepMergeObjects(remote, local),
+    // Pre-PLE mock marks (SET 1-4) -- same shape and reasoning as
+    // mkis_mock_marks above: deep-merge so one device's save can never wipe
+    // out a concurrent edit to a different student/set/year branch.
+    mkis_pre_ple_marks: (remote, local)=>deepMergeObjects(remote, local),
     // Report narrative drafts, keyed by report identity -- deep-merged so one
     // device saving its Class Teacher Report draft can never wipe out a
     // concurrent edit to a different report (or a not-yet-seen remote edit
@@ -2772,8 +2778,7 @@ async function nodeToPdfPageSlices(node) {
 // to roughly 20-80KB -- a 50-100x reduction -- with no visible quality loss
 // at the sizes these photos are actually displayed/printed.
 function compressImageFile(file) {
-    let maxDim = arguments.length > 1 && arguments[1] !== void 0 ? arguments[1] : 480, quality = arguments.length > 2 && arguments[2] !== void 0 ? arguments[2] : 0.72,
-        format = arguments.length > 3 && arguments[3] !== void 0 ? arguments[3] : "image/jpeg";
+    let maxDim = arguments.length > 1 && arguments[1] !== void 0 ? arguments[1] : 480, quality = arguments.length > 2 && arguments[2] !== void 0 ? arguments[2] : 0.72, format = arguments.length > 3 && arguments[3] !== void 0 ? arguments[3] : "image/jpeg";
     return new Promise((resolve, reject)=>{
         const reader = new FileReader();
         reader.onerror = ()=>reject(reader.error);
@@ -5948,9 +5953,13 @@ export default function App() {
                                         students: students,
                                         setStudents: setStudents,
                                         school: school,
+                                        bands: bands,
+                                        specialBands: specialBands,
+                                        divisions: divisions,
                                         markEditing: markEditing,
                                         municipalPerf: municipalPerf,
-                                        setMunicipalPerf: setMunicipalPerf
+                                        setMunicipalPerf: setMunicipalPerf,
+                                        role: role
                                     }),
                                     page === "MANAGE REQUESTS" && role === "admin" && /*#__PURE__*/ _jsx(ManageRequests, {
                                         ...props
@@ -17734,10 +17743,113 @@ function pleRecommendation(name, gender, totalAgg, div) {
     if (div === "4") return "".concat(he, " has shown effort during the course of study. Recommended to continue with secondary education.");
     return "".concat(he, " has completed the Primary Leaving Examination. Encouraged to work harder in secondary school.");
 }
+// ─── PLE CERTIFICATE · DESIGN 1 (Blue / Red / Green "Achievement" style) ─────
+// Decorative artwork (swooshes, crest, medal, books, star rule) is drawn as SVG
+// *images* rather than CSS gradients -- gradients don't rasterize reliably through
+// html2canvas during PDF export, whereas SVG images do (same approach as
+// Design 4's zigzag and Design 5's chain border). Only the writing is real text.
+const PC = {
+    NAVY: "#0f2f7f",
+    BLUE: "#0f4fb0",
+    RED: "#d4111f",
+    GREEN: "#1a993a",
+    GOLD: "#d99a1c"
+};
+// Printed on the school-name line of the certificate body.
+const PLE_CERT_LOCATION = "IN TORORO MUNICIPALITY";
+const PC_FONT_BODY = "Georgia,'Times New Roman',serif";
+const PC_FONT_SCRIPT = "'Kaushan Script','Brush Script MT','Segoe Script','Lucida Handwriting',cursive";
+const pcSvgUri = (svg)=>"data:image/svg+xml;utf8,".concat(encodeURIComponent(svg));
+const pcStar = (cx, cy, ro, ri)=>{
+    let d = "";
+    for(let i = 0; i < 10; i++){
+        const a = -Math.PI / 2 + i * Math.PI / 5;
+        const r = i % 2 === 0 ? ro : ri;
+        d += (i ? "L" : "M") + (cx + r * Math.cos(a)).toFixed(2) + "," + (cy + r * Math.sin(a)).toFixed(2);
+    }
+    return d + "Z";
+};
+// Leaves laid along an arc (used for the laurel branches on the crest and medal).
+const pcLeaves = (cx, cy, r, a0, a1, n, len, wid, fill)=>{
+    let out = "";
+    for(let i = 0; i < n; i++){
+        const t = n === 1 ? 0 : i / (n - 1);
+        const a = (a0 + (a1 - a0) * t) * Math.PI / 180;
+        const px = cx + r * Math.cos(a);
+        const py = cy + r * Math.sin(a);
+        const rot = a * 180 / Math.PI + 90 + (i % 2 === 0 ? -38 : 38);
+        const ex = px + Math.cos(rot * Math.PI / 180) * len / 2;
+        const ey = py + Math.sin(rot * Math.PI / 180) * len / 2;
+        out += '<ellipse cx="' + ex.toFixed(1) + '" cy="' + ey.toFixed(1) + '" rx="' + (len / 2).toFixed(1) + '" ry="' + (wid / 2).toFixed(1) + '" fill="' + fill + '" transform="rotate(' + rot.toFixed(1) + " " + ex.toFixed(1) + " " + ey.toFixed(1) + ')"/>';
+    }
+    return out;
+};
+const pcArc = (cx, cy, r, a0, a1)=>{
+    const p = (a)=>[
+            cx + r * Math.cos(a * Math.PI / 180),
+            cy + r * Math.sin(a * Math.PI / 180)
+        ];
+    const [x0, y0] = p(a0);
+    const [x1, y1] = p(a1);
+    return "M" + x0.toFixed(1) + "," + y0.toFixed(1) + " A" + r + "," + r + " 0 0 1 " + x1.toFixed(1) + "," + y1.toFixed(1);
+};
+// Page background: blue frame, gold keyline, and the corner swooshes
+// (blue / red / green bands, top-left, bottom-left and bottom-right).
+// Authored on a 1024x1536 grid, then scaled to the A4 aspect ratio.
+const PC_BG_URI = pcSvgUri('<svg xmlns="http://www.w3.org/2000/svg" width="794" height="1123" viewBox="0 0 1024 1448.2">' + '<rect width="1024" height="1448.2" fill="#fff"/>' + '<g transform="scale(1 0.94284)">' + '<defs><clipPath id="in"><rect x="22" y="22" width="980" height="1492"/></clipPath></defs>' + '<g clip-path="url(#in)">' + // top-left: blue corner, then red, then green
+'<path d="M0,0 L462,0 C320,40 130,150 0,300 Z" fill="' + PC.GREEN + '"/>' + '<path d="M0,0 L405,0 C265,30 105,120 0,232 Z" fill="' + PC.RED + '"/>' + '<path d="M0,0 L340,0 C200,20 70,95 0,185 Z" fill="' + PC.BLUE + '"/>' + // bottom-left: green, red, blue corner
+'<path d="M0,1320 C80,1440 290,1515 540,1536 L0,1536 Z" fill="' + PC.GREEN + '"/>' + '<path d="M0,1385 C70,1470 240,1522 420,1536 L0,1536 Z" fill="' + PC.RED + '"/>' + '<path d="M0,1440 C60,1500 180,1530 300,1536 L0,1536 Z" fill="' + PC.BLUE + '"/>' + // bottom-right: red, green, big blue corner
+'<path d="M1024,1235 C1024,1400 800,1490 540,1512 L540,1536 L1024,1536 Z" fill="' + PC.RED + '"/>' + '<path d="M1024,1305 C990,1430 830,1498 640,1512 L640,1536 L1024,1536 Z" fill="' + PC.GREEN + '"/>' + '<path d="M1024,1345 C980,1450 880,1500 760,1512 L760,1536 L1024,1536 Z" fill="' + PC.BLUE + '"/>' + "</g>" + '<rect x="5" y="5" width="1014" height="1526" fill="none" stroke="' + PC.BLUE + '" stroke-width="10"/>' + '<rect x="22" y="22" width="980" height="1492" fill="none" stroke="' + PC.GOLD + '" stroke-width="3"/>' + "</g></svg>");
+// Crest: laurels, shield with torch + open book, and the red ribbon banner
+// (the ribbon text itself -- the PLE year -- is real text laid over it).
+const PC_CREST_URI = (()=>{
+    const leafFill = "#2a9d3e";
+    const branch = pcLeaves(186, 100, 112, 135, 232, 10, 27, 11, leafFill) + '<path d="' + pcArc(186, 100, 112, 135, 232) + '" fill="none" stroke="' + leafFill + '" stroke-width="2.5"/>';
+    const shield = "M96,10 L276,10 L276,112 C276,160 236,188 186,206 C136,188 96,160 96,112 Z";
+    return pcSvgUri('<svg xmlns="http://www.w3.org/2000/svg" width="380" height="250" viewBox="0 0 380 250">' + '<defs>' + '<linearGradient id="sk" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f4f9ff"/><stop offset="1" stop-color="#cfe6f3"/></linearGradient>' + '<clipPath id="sc"><path d="' + shield + '"/></clipPath>' + "</defs>" + "<g>" + branch + "</g>" + '<g transform="translate(372,0) scale(-1,1)">' + branch + "</g>" + '<path d="' + shield + '" fill="url(#sk)"/>' + '<g clip-path="url(#sc)">' + '<path d="M90,150 C130,124 240,124 282,146 L282,212 L90,212 Z" fill="#1f86b4"/>' + '<path d="M90,168 C140,146 232,146 282,166 L282,212 L90,212 Z" fill="#2ea043"/>' + "</g>" + '<path d="' + shield + '" fill="none" stroke="' + PC.BLUE + '" stroke-width="6" stroke-linejoin="round"/>' + // torch flame + cup
+'<path d="M186,16 C200,36 209,50 205,66 C202,79 194,85 186,85 C178,85 170,79 167,66 C164,52 175,44 180,31 C182,38 184,28 186,16 Z" fill="' + PC.RED + '"/>' + '<path d="M186,44 C194,54 197,62 194,70 C192,76 188,79 186,79 C182,79 178,76 177,70 C176,62 182,56 186,44 Z" fill="#ffb02e"/>' + '<rect x="167" y="84" width="38" height="7" rx="2" fill="' + PC.BLUE + '"/>' + '<path d="M172,91 L200,91 L194,104 L178,104 Z" fill="' + PC.BLUE + '"/>' + '<rect x="183" y="104" width="6" height="10" fill="' + PC.BLUE + '"/>' + // open book
+'<path d="M186,152 L130,141 L130,110 Q158,104 186,116 Z" fill="#fff" stroke="' + PC.BLUE + '" stroke-width="3" stroke-linejoin="round"/>' + '<path d="M186,152 L242,141 L242,110 Q214,104 186,116 Z" fill="#fff" stroke="' + PC.BLUE + '" stroke-width="3" stroke-linejoin="round"/>' + '<path d="M124,144 L186,157 L248,144 L248,152 L186,166 L124,152 Z" fill="' + PC.BLUE + '"/>' + '<path d="M138,120 Q158,116 178,124 M138,129 Q158,125 178,133 M194,124 Q214,116 234,120 M194,133 Q214,125 234,129" fill="none" stroke="#9db8ea" stroke-width="1.6"/>' + // banner
+'<path d="M2,190 L40,200 L40,246 L2,238 L16,214 Z" fill="#a30d18"/>' + '<path d="M378,190 L340,200 L340,246 L378,238 L364,214 Z" fill="#a30d18"/>' + '<path d="M26,196 Q186,222 354,196 L354,242 Q186,268 26,242 Z" fill="' + PC.RED + '"/>' + "</svg>");
+})();
+// Gold medal with laurel wreath, star and tri-colour ribbon tails.
+const PC_MEDAL_URI = (()=>{
+    let scallop = "";
+    const n = 30;
+    for(let i = 0; i < n * 2; i++){
+        const a = -Math.PI / 2 + i * Math.PI / n;
+        const r = i % 2 === 0 ? 70 : 65;
+        scallop += (i ? "L" : "M") + (85 + r * Math.cos(a)).toFixed(1) + "," + (80 + r * Math.sin(a)).toFixed(1);
+    }
+    scallop += "Z";
+    const leaf = "#8a5a0a";
+    const wreath = pcLeaves(85, 80, 38, 100, 228, 9, 14, 6.5, leaf) + '<path d="' + pcArc(85, 80, 38, 100, 228) + '" fill="none" stroke="' + leaf + '" stroke-width="1.6"/>';
+    return pcSvgUri('<svg xmlns="http://www.w3.org/2000/svg" width="170" height="230" viewBox="0 0 170 230">' + '<defs>' + '<linearGradient id="gd" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f8dc7a"/><stop offset="0.5" stop-color="#dfa326"/><stop offset="1" stop-color="#b9770e"/></linearGradient>' + '<linearGradient id="gi" x1="1" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fae9a2"/><stop offset="1" stop-color="#e0a92c"/></linearGradient>' + "</defs>" + // ribbon tails
+'<path d="M55,115 L92,123 L66,216 L46,203 L26,218 Z" fill="' + PC.BLUE + '"/>' + '<path d="M115,115 L78,123 L104,216 L124,203 L144,218 Z" fill="' + PC.BLUE + '"/>' + '<path d="M59,120 L34,212" stroke="' + PC.RED + '" stroke-width="5"/>' + '<path d="M85,127 L64,208" stroke="' + PC.GREEN + '" stroke-width="5"/>' + '<path d="M111,120 L136,212" stroke="' + PC.RED + '" stroke-width="5"/>' + '<path d="M85,127 L106,208" stroke="' + PC.GREEN + '" stroke-width="5"/>' + // medal
+'<path d="' + scallop + '" fill="url(#gd)" stroke="#b9770e" stroke-width="1.5" stroke-linejoin="round"/>' + '<circle cx="85" cy="80" r="55" fill="url(#gi)" stroke="#b9770e" stroke-width="2"/>' + '<circle cx="85" cy="80" r="49" fill="none" stroke="#b9770e" stroke-width="1" opacity="0.6"/>' + "<g>" + wreath + "</g>" + '<g transform="translate(170,0) scale(-1,1)">' + wreath + "</g>" + '<path d="' + pcStar(85, 80, 21, 8.5) + '" fill="#a8700d" stroke="#f3d77a" stroke-width="1"/>' + "</svg>");
+})();
+// Stack of three books (blue / green / red), bottom-left.
+const PC_BOOKS_URI = pcSvgUri('<svg xmlns="http://www.w3.org/2000/svg" width="220" height="160" viewBox="0 0 220 160">' + '<g transform="rotate(-9 110 100)">' + '<rect x="14" y="112" width="196" height="34" rx="5" fill="' + PC.RED + '"/><rect x="36" y="119" width="170" height="20" rx="2" fill="#fff" stroke="#dfe3ea"/><rect x="14" y="112" width="18" height="34" rx="5" fill="#a30d18"/>' + '<rect x="8" y="78" width="192" height="34" rx="5" fill="' + PC.GREEN + '"/><rect x="30" y="85" width="166" height="20" rx="2" fill="#fff" stroke="#dfe3ea"/><rect x="8" y="78" width="18" height="34" rx="5" fill="#12722a"/>' + '<path d="M22,44 L52,26 L196,32 L196,44 Z" fill="#3f7ad6"/>' + '<rect x="20" y="44" width="180" height="34" rx="5" fill="' + PC.BLUE + '"/><rect x="42" y="51" width="154" height="20" rx="2" fill="#fff" stroke="#dfe3ea"/><rect x="20" y="44" width="18" height="34" rx="5" fill="#0a3577"/>' + "</g></svg>");
+// Green rule with red / blue / red stars, under the title.
+const PC_RULE_URI = pcSvgUri('<svg xmlns="http://www.w3.org/2000/svg" width="630" height="50" viewBox="0 0 630 50">' + '<rect x="0" y="23.5" width="238" height="3" fill="' + PC.GREEN + '"/><rect x="392" y="23.5" width="238" height="3" fill="' + PC.GREEN + '"/>' + '<path d="' + pcStar(268, 27, 11, 4.6) + '" fill="' + PC.RED + '"/><path d="' + pcStar(360, 27, 11, 4.6) + '" fill="' + PC.RED + '"/>' + '<path d="' + pcStar(314, 25, 24, 10) + '" fill="' + PC.BLUE + '"/>' + "</svg>");
 function PleCertificateDesign1(param) {
     let { rec, school, year, pdfRef } = param;
     const s = rec;
     const he = s.gender === "F" ? "her" : "his";
+    // Script title font (everything else uses system serif fonts). Loaded once.
+    useEffect(()=>{
+        if (typeof document === "undefined" || document.getElementById("mkis-cert-fonts")) return;
+        const l = document.createElement("link");
+        l.id = "mkis-cert-fonts";
+        l.rel = "stylesheet";
+        l.href = "https://fonts.googleapis.com/css2?family=Kaushan+Script&display=swap";
+        document.head.appendChild(l);
+    }, []);
+    const schoolFs = Math.max(18, Math.min(34, Math.floor(640 / (Math.max((school.name || "").length, 1) * 0.78))));
+    const pupilLen = (s.name || "").length;
+    const pupilFs = pupilLen > 30 ? 20 : pupilLen > 24 ? 23 : 26;
+    const abs = {
+        position: "absolute"
+    };
     return /*#__PURE__*/ _jsxs("div", {
         ref: pdfRef,
         className: "ple-cert",
@@ -17746,196 +17858,204 @@ function PleCertificateDesign1(param) {
             height: "297mm",
             boxSizing: "border-box",
             background: "white",
-            fontFamily: "Georgia,serif",
+            fontFamily: PC_FONT_BODY,
+            color: PC.NAVY,
             position: "relative",
             overflow: "hidden",
-            display: "flex",
-            flexDirection: "column"
+            WebkitPrintColorAdjust: "exact",
+            printColorAdjust: "exact"
         },
         children: [
-            /*#__PURE__*/ _jsx("div", {
+            /*#__PURE__*/ _jsx("img", {
+                src: PC_BG_URI,
+                alt: "",
                 style: {
-                    position: "absolute",
-                    inset: 6,
-                    border: "7px double #b8860b",
-                    borderRadius: 6,
-                    pointerEvents: "none",
+                    ...abs,
+                    left: 0,
+                    top: 0,
+                    width: "100%",
+                    height: "100%",
                     zIndex: 0
+                }
+            }),
+            /*#__PURE__*/ _jsx("img", {
+                src: PC_BOOKS_URI,
+                alt: "",
+                style: {
+                    ...abs,
+                    left: 38,
+                    top: 975,
+                    width: 170,
+                    height: 124,
+                    zIndex: 1
+                }
+            }),
+            /*#__PURE__*/ _jsx("img", {
+                src: PC_CREST_URI,
+                alt: "",
+                style: {
+                    ...abs,
+                    left: 272,
+                    top: 22,
+                    width: 250,
+                    height: 164,
+                    zIndex: 1
                 }
             }),
             /*#__PURE__*/ _jsx("div", {
                 style: {
-                    position: "absolute",
-                    inset: 18,
-                    border: "1.5px solid #b8860b",
-                    borderRadius: 3,
-                    pointerEvents: "none",
-                    zIndex: 0
+                    ...abs,
+                    left: 300,
+                    top: 156,
+                    width: 194,
+                    height: 30,
+                    lineHeight: "30px",
+                    textAlign: "center",
+                    color: "#fff",
+                    fontWeight: 700,
+                    fontSize: 17,
+                    letterSpacing: 5,
+                    zIndex: 2
+                },
+                children: year
+            }),
+            /*#__PURE__*/ _jsx("img", {
+                src: PC_MEDAL_URI,
+                alt: "",
+                style: {
+                    ...abs,
+                    left: 317,
+                    top: 872,
+                    width: 160,
+                    height: 217,
+                    zIndex: 1
+                }
+            }),
+            s.photo && /*#__PURE__*/ _jsx("img", {
+                src: s.photo,
+                alt: "Candidate",
+                style: {
+                    ...abs,
+                    right: 52,
+                    top: 40,
+                    width: 84,
+                    height: 100,
+                    objectFit: "cover",
+                    borderRadius: 4,
+                    border: "3px solid ".concat(PC.NAVY),
+                    zIndex: 2
                 }
             }),
             /*#__PURE__*/ _jsxs("div", {
                 style: {
-                    position: "relative",
-                    zIndex: 1,
-                    padding: "28px 40px 24px",
+                    ...abs,
+                    left: 60,
+                    right: 60,
+                    top: 190,
+                    zIndex: 2,
                     display: "flex",
                     flexDirection: "column",
-                    height: "100%",
-                    boxSizing: "border-box"
+                    alignItems: "center",
+                    textAlign: "center"
                 },
                 children: [
+                    /*#__PURE__*/ _jsx("div", {
+                        style: {
+                            fontWeight: 900,
+                            fontSize: schoolFs,
+                            color: PC.NAVY,
+                            letterSpacing: 0.5,
+                            textTransform: "uppercase",
+                            lineHeight: 1.15,
+                            whiteSpace: "nowrap"
+                        },
+                        children: school.name
+                    }),
                     /*#__PURE__*/ _jsxs("div", {
                         style: {
-                            textAlign: "center",
-                            marginBottom: 18
+                            fontSize: 12.5,
+                            letterSpacing: 1,
+                            marginTop: 4,
+                            lineHeight: 1.4
                         },
                         children: [
-                            school.logo && /*#__PURE__*/ _jsx("img", {
-                                src: school.logo,
-                                alt: "logo",
+                            school.poBox,
+                            " \xa0|\xa0 Tel: ",
+                            school.tel || "N/A",
+                            " \xa0|\xa0 ",
+                            /*#__PURE__*/ _jsx("span", {
                                 style: {
-                                    width: 56,
-                                    height: 56,
-                                    objectFit: "contain",
-                                    display: "block",
-                                    margin: "0 auto 8px"
-                                }
-                            }),
-                            /*#__PURE__*/ _jsx("div", {
-                                style: {
-                                    fontWeight: 900,
-                                    fontSize: 28,
-                                    color: "#1e3a6e",
-                                    letterSpacing: 1.5,
-                                    textTransform: "uppercase",
-                                    lineHeight: 1.2
+                                    color: PC.BLUE,
+                                    fontStyle: "italic"
                                 },
-                                children: school.name
-                            }),
-                            /*#__PURE__*/ _jsxs("div", {
-                                style: {
-                                    fontSize: 14,
-                                    color: "#374151",
-                                    marginTop: 6,
-                                    lineHeight: 1.6
-                                },
-                                children: [
-                                    school.poBox,
-                                    " \xa0|\xa0 Tel: ",
-                                    school.tel || "N/A",
-                                    " \xa0|\xa0 ",
-                                    /*#__PURE__*/ _jsx("span", {
-                                        style: {
-                                            color: "#1d4ed8",
-                                            fontStyle: "italic"
-                                        },
-                                        children: school.email || ""
-                                    })
-                                ]
-                            }),
-                            /*#__PURE__*/ _jsx("div", {
-                                style: {
-                                    display: "flex",
-                                    justifyContent: "center",
-                                    gap: 12,
-                                    marginTop: 10,
-                                    fontSize: 25,
-                                    color: "#b8860b"
-                                },
-                                children: "★ ★ ★"
+                                children: school.email || ""
                             })
                         ]
                     }),
                     /*#__PURE__*/ _jsx("div", {
                         style: {
-                            textAlign: "center",
-                            margin: "12px 0 20px"
+                            fontFamily: PC_FONT_SCRIPT,
+                            fontSize: 64,
+                            lineHeight: 1.2,
+                            color: PC.RED,
+                            marginTop: 6,
+                            whiteSpace: "nowrap"
                         },
-                        children: /*#__PURE__*/ _jsx("div", {
-                            style: {
-                                display: "inline-block",
-                                borderBottom: "3px solid #b8860b",
-                                borderTop: "3px solid #b8860b",
-                                padding: "8px 0"
-                            },
-                            children: /*#__PURE__*/ _jsx("div", {
-                                style: {
-                                    fontSize: 28,
-                                    fontWeight: 900,
-                                    color: "#dc2626",
-                                    letterSpacing: 3,
-                                    textTransform: "uppercase"
-                                },
-                                children: "PLE Recommendation"
-                            })
-                        })
+                        children: "PLE Recommendation"
+                    }),
+                    /*#__PURE__*/ _jsx("img", {
+                        src: PC_RULE_URI,
+                        alt: "",
+                        style: {
+                            width: 470,
+                            height: 37,
+                            marginTop: 2
+                        }
                     }),
                     /*#__PURE__*/ _jsx("div", {
                         style: {
-                            textAlign: "center",
-                            fontSize: 16,
-                            marginBottom: 16,
-                            color: "#374151",
-                            fontStyle: "italic"
+                            fontSize: 14,
+                            letterSpacing: 4,
+                            textTransform: "uppercase",
+                            marginTop: 10,
+                            lineHeight: "20px"
                         },
                         children: "This is to certify that"
                     }),
-                    s.photo && /*#__PURE__*/ _jsx("div", {
+                    /*#__PURE__*/ _jsx("div", {
                         style: {
-                            textAlign: "center",
-                            marginBottom: 14
+                            marginTop: 12,
+                            width: 590,
+                            borderBottom: "1.5px solid ".concat(PC.NAVY),
+                            paddingBottom: 4,
+                            fontWeight: 900,
+                            fontSize: pupilFs,
+                            letterSpacing: 1,
+                            textTransform: "uppercase",
+                            lineHeight: 1.25,
+                            whiteSpace: "nowrap"
                         },
-                        children: /*#__PURE__*/ _jsx("img", {
-                            src: s.photo,
-                            alt: "Candidate",
-                            style: {
-                                width: 90,
-                                height: 105,
-                                objectFit: "cover",
-                                borderRadius: 6,
-                                border: "2.5px solid #1e3a6e"
-                            }
-                        })
+                        children: s.name
                     }),
-                    /*#__PURE__*/ _jsxs("div", {
+                    s.indexNo && /*#__PURE__*/ _jsxs("div", {
                         style: {
-                            textAlign: "center",
-                            marginBottom: 10
+                            fontSize: 15,
+                            marginTop: 6,
+                            lineHeight: "21px"
                         },
                         children: [
-                            /*#__PURE__*/ _jsx("span", {
-                                style: {
-                                    fontWeight: 900,
-                                    fontSize: 24,
-                                    borderBottom: "2.5px solid #1e3a6e",
-                                    paddingBottom: 3,
-                                    textTransform: "uppercase",
-                                    letterSpacing: 1.5
-                                },
-                                children: s.name
-                            }),
-                            s.indexNo && /*#__PURE__*/ _jsxs("div", {
-                                style: {
-                                    fontSize: 16,
-                                    marginTop: 8,
-                                    color: "#374151"
-                                },
-                                children: [
-                                    "Index No. ",
-                                    /*#__PURE__*/ _jsx("b", {
-                                        children: s.indexNo
-                                    })
-                                ]
+                            "Index No. ",
+                            /*#__PURE__*/ _jsx("b", {
+                                children: s.indexNo
                             })
                         ]
                     }),
                     /*#__PURE__*/ _jsxs("div", {
                         style: {
-                            textAlign: "center",
-                            fontSize: 16,
-                            color: "#374151",
-                            marginBottom: 24,
-                            lineHeight: 1.8
+                            fontSize: 15,
+                            lineHeight: "26px",
+                            marginTop: 10,
+                            maxWidth: 640
                         },
                         children: [
                             "successfully completed ",
@@ -17946,8 +18066,13 @@ function PleCertificateDesign1(param) {
                             }),
                             " at ",
                             /*#__PURE__*/ _jsxs("b", {
+                                style: {
+                                    display: "inline-block"
+                                },
                                 children: [
                                     school.name,
+                                    " ",
+                                    PLE_CERT_LOCATION,
                                     "."
                                 ]
                             })
@@ -17955,308 +18080,278 @@ function PleCertificateDesign1(param) {
                     }),
                     /*#__PURE__*/ _jsxs("div", {
                         style: {
-                            display: "flex",
-                            flexDirection: "column"
+                            display: "grid",
+                            gridTemplateColumns: "350px 1fr",
+                            gap: 30,
+                            width: "100%",
+                            marginTop: 12,
+                            textAlign: "left"
                         },
                         children: [
                             /*#__PURE__*/ _jsxs("div", {
                                 style: {
-                                    display: "grid",
-                                    gridTemplateColumns: "1fr 1fr",
-                                    gap: 24,
-                                    marginBottom: 20
+                                    border: "2px solid ".concat(PC.BLUE),
+                                    borderRadius: 10,
+                                    padding: "10px 16px 10px",
+                                    background: "#f5f8ff"
                                 },
                                 children: [
-                                    /*#__PURE__*/ _jsxs("div", {
+                                    /*#__PURE__*/ _jsx("div", {
                                         style: {
-                                            border: "2px solid #b8860b",
-                                            borderRadius: 10,
-                                            padding: "16px 18px",
-                                            background: "#fffbeb"
+                                            fontWeight: 900,
+                                            fontSize: 14,
+                                            textAlign: "center",
+                                            letterSpacing: 1.5,
+                                            textTransform: "uppercase",
+                                            borderBottom: "2px solid ".concat(PC.GREEN),
+                                            paddingBottom: 6,
+                                            marginBottom: 4
+                                        },
+                                        children: "PLE Results"
+                                    }),
+                                    /*#__PURE__*/ _jsxs("table", {
+                                        style: {
+                                            width: "100%",
+                                            borderCollapse: "collapse",
+                                            fontSize: 15
                                         },
                                         children: [
-                                            /*#__PURE__*/ _jsx("div", {
-                                                style: {
-                                                    fontWeight: 900,
-                                                    fontSize: 16,
-                                                    textAlign: "center",
-                                                    marginBottom: 14,
-                                                    borderBottom: "1.5px solid #b8860b",
-                                                    paddingBottom: 8,
-                                                    color: "#1e3a6e",
-                                                    letterSpacing: 1,
-                                                    textTransform: "uppercase"
-                                                },
-                                                children: "PLE Results"
+                                            /*#__PURE__*/ _jsx("thead", {
+                                                children: /*#__PURE__*/ _jsxs("tr", {
+                                                    children: [
+                                                        /*#__PURE__*/ _jsx("th", {
+                                                            style: {
+                                                                textAlign: "left",
+                                                                fontSize: 11.5,
+                                                                letterSpacing: 1,
+                                                                textTransform: "uppercase",
+                                                                padding: "3px 0",
+                                                                borderBottom: "1px solid #c9d7f2"
+                                                            },
+                                                            children: "Subject"
+                                                        }),
+                                                        /*#__PURE__*/ _jsx("th", {
+                                                            style: {
+                                                                textAlign: "center",
+                                                                fontSize: 11.5,
+                                                                letterSpacing: 1,
+                                                                textTransform: "uppercase",
+                                                                padding: "3px 0",
+                                                                borderBottom: "1px solid #c9d7f2"
+                                                            },
+                                                            children: "Agg"
+                                                        })
+                                                    ]
+                                                })
                                             }),
-                                            /*#__PURE__*/ _jsxs("table", {
+                                            /*#__PURE__*/ _jsx("tbody", {
+                                                children: PLE_SUBJECTS.map((sub)=>{
+                                                    var _s_results;
+                                                    return /*#__PURE__*/ _jsxs("tr", {
+                                                        children: [
+                                                            /*#__PURE__*/ _jsxs("td", {
+                                                                style: {
+                                                                    padding: "5px 0",
+                                                                    borderBottom: "1px solid #dde6f7"
+                                                                },
+                                                                children: [
+                                                                    pleSubLabel(sub),
+                                                                    ":"
+                                                                ]
+                                                            }),
+                                                            /*#__PURE__*/ _jsx("td", {
+                                                                style: {
+                                                                    textAlign: "center",
+                                                                    padding: "5px 0",
+                                                                    borderBottom: "1px solid #dde6f7",
+                                                                    fontWeight: 800,
+                                                                    fontSize: 17
+                                                                },
+                                                                children: ((_s_results = s.results) === null || _s_results === void 0 ? void 0 : _s_results[sub]) || "—"
+                                                            })
+                                                        ]
+                                                    }, sub);
+                                                })
+                                            })
+                                        ]
+                                    }),
+                                    /*#__PURE__*/ _jsxs("div", {
+                                        style: {
+                                            marginTop: 8,
+                                            borderTop: "2px solid ".concat(PC.GREEN),
+                                            paddingTop: 6
+                                        },
+                                        children: [
+                                            /*#__PURE__*/ _jsxs("div", {
                                                 style: {
-                                                    width: "100%",
-                                                    fontSize: 16,
-                                                    borderCollapse: "collapse"
+                                                    display: "flex",
+                                                    justifyContent: "space-between",
+                                                    alignItems: "baseline",
+                                                    fontSize: 16
                                                 },
                                                 children: [
-                                                    /*#__PURE__*/ _jsx("thead", {
-                                                        children: /*#__PURE__*/ _jsxs("tr", {
-                                                            children: [
-                                                                /*#__PURE__*/ _jsx("th", {
-                                                                    style: {
-                                                                        textAlign: "left",
-                                                                        borderBottom: "1px solid #e5e7eb",
-                                                                        paddingBottom: 6,
-                                                                        color: "#374151",
-                                                                        fontWeight: 700
-                                                                    },
-                                                                    children: "Subject"
-                                                                }),
-                                                                /*#__PURE__*/ _jsx("th", {
-                                                                    style: {
-                                                                        textAlign: "center",
-                                                                        borderBottom: "1px solid #e5e7eb",
-                                                                        paddingBottom: 6,
-                                                                        color: "#374151",
-                                                                        fontWeight: 700
-                                                                    },
-                                                                    children: "Agg"
-                                                                })
-                                                            ]
-                                                        })
+                                                    /*#__PURE__*/ _jsx("b", {
+                                                        children: "Total Agg:"
                                                     }),
-                                                    /*#__PURE__*/ _jsx("tbody", {
-                                                        children: PLE_SUBJECTS.map((sub)=>{
-                                                            var _s_results;
-                                                            return /*#__PURE__*/ _jsxs("tr", {
-                                                                children: [
-                                                                    /*#__PURE__*/ _jsxs("td", {
-                                                                        style: {
-                                                                            padding: "7px 0",
-                                                                            borderBottom: "1px solid #f3f4f6",
-                                                                            fontSize: 16
-                                                                        },
-                                                                        children: [
-                                                                            pleSubLabel(sub),
-                                                                            ":"
-                                                                        ]
-                                                                    }),
-                                                                    /*#__PURE__*/ _jsx("td", {
-                                                                        style: {
-                                                                            textAlign: "center",
-                                                                            padding: "7px 0",
-                                                                            borderBottom: "1px solid #f3f4f6",
-                                                                            fontWeight: 800,
-                                                                            fontSize: 18
-                                                                        },
-                                                                        children: ((_s_results = s.results) === null || _s_results === void 0 ? void 0 : _s_results[sub]) || "—"
-                                                                    })
-                                                                ]
-                                                            }, sub);
-                                                        })
+                                                    /*#__PURE__*/ _jsx("span", {
+                                                        style: {
+                                                            fontWeight: 900,
+                                                            fontSize: 19
+                                                        },
+                                                        children: s.totalAgg || "—"
                                                     })
                                                 ]
                                             }),
                                             /*#__PURE__*/ _jsxs("div", {
                                                 style: {
-                                                    marginTop: 14,
-                                                    borderTop: "2px solid #b8860b",
-                                                    paddingTop: 10
-                                                },
-                                                children: [
-                                                    /*#__PURE__*/ _jsxs("div", {
-                                                        style: {
-                                                            display: "flex",
-                                                            justifyContent: "space-between",
-                                                            fontSize: 17,
-                                                            marginBottom: 4
-                                                        },
-                                                        children: [
-                                                            /*#__PURE__*/ _jsx("span", {
-                                                                style: {
-                                                                    fontWeight: 700
-                                                                },
-                                                                children: "Total Agg:"
-                                                            }),
-                                                            /*#__PURE__*/ _jsx("span", {
-                                                                style: {
-                                                                    fontWeight: 900,
-                                                                    fontSize: 21
-                                                                },
-                                                                children: s.totalAgg || "—"
-                                                            })
-                                                        ]
-                                                    }),
-                                                    /*#__PURE__*/ _jsxs("div", {
-                                                        style: {
-                                                            display: "flex",
-                                                            justifyContent: "space-between",
-                                                            fontSize: 17
-                                                        },
-                                                        children: [
-                                                            /*#__PURE__*/ _jsx("span", {
-                                                                style: {
-                                                                    fontWeight: 700
-                                                                },
-                                                                children: "Division:"
-                                                            }),
-                                                            /*#__PURE__*/ _jsx("span", {
-                                                                style: {
-                                                                    fontWeight: 900,
-                                                                    fontSize: 21,
-                                                                    color: "#1e3a6e"
-                                                                },
-                                                                children: s.division || "—"
-                                                            })
-                                                        ]
-                                                    })
-                                                ]
-                                            })
-                                        ]
-                                    }),
-                                    /*#__PURE__*/ _jsx("div", {
-                                        style: {
-                                            display: "flex",
-                                            flexDirection: "column",
-                                            gap: 16,
-                                            fontSize: 16,
-                                            justifyContent: "flex-start",
-                                            paddingTop: 4
-                                        },
-                                        children: [
-                                            [
-                                                "LIN",
-                                                s.lin
-                                            ],
-                                            [
-                                                "Co-curricular Activities",
-                                                s.cocurricular
-                                            ],
-                                            [
-                                                "Leadership Position",
-                                                s.leadership
-                                            ],
-                                            [
-                                                "Conduct",
-                                                s.conduct || "Good"
-                                            ]
-                                        ].map((param)=>{
-                                            let [label, val] = param;
-                                            return /*#__PURE__*/ _jsxs("div", {
-                                                children: [
-                                                    /*#__PURE__*/ _jsxs("div", {
-                                                        style: {
-                                                            fontWeight: 700,
-                                                            color: "#374151",
-                                                            marginBottom: 3
-                                                        },
-                                                        children: [
-                                                            label,
-                                                            ":"
-                                                        ]
-                                                    }),
-                                                    /*#__PURE__*/ _jsx("div", {
-                                                        style: {
-                                                            fontStyle: "italic",
-                                                            color: "#2563eb",
-                                                            borderBottom: "1.5px solid #93c5fd",
-                                                            paddingBottom: 2,
-                                                            minHeight: 20
-                                                        },
-                                                        children: val || ""
-                                                    })
-                                                ]
-                                            }, label);
-                                        })
-                                    })
-                                ]
-                            }),
-                            /*#__PURE__*/ _jsx("div", {
-                                style: {
-                                    textAlign: "center",
-                                    fontSize: 16,
-                                    color: "#374151",
-                                    fontStyle: "italic",
-                                    lineHeight: 1.8,
-                                    padding: "14px 20px",
-                                    background: "#fffbeb",
-                                    borderRadius: 8,
-                                    border: "1px solid #fde68a",
-                                    marginBottom: 18
-                                },
-                                children: pleRecommendation(s.name, s.gender, s.totalAgg, s.division)
-                            }),
-                            /*#__PURE__*/ _jsx("div", {
-                                style: {
-                                    display: "flex",
-                                    justifyContent: "center",
-                                    gap: 14,
-                                    fontSize: 25,
-                                    color: "#b8860b",
-                                    marginBottom: 18
-                                },
-                                children: "★ ★ ★"
-                            }),
-                            /*#__PURE__*/ _jsxs("div", {
-                                style: {
-                                    display: "flex",
-                                    justifyContent: "space-between",
-                                    alignItems: "flex-end",
-                                    paddingTop: 14,
-                                    borderTop: "1px solid #d1d5db"
-                                },
-                                children: [
-                                    /*#__PURE__*/ _jsxs("div", {
-                                        children: [
-                                            /*#__PURE__*/ _jsx("div", {
-                                                style: {
-                                                    borderBottom: "1px solid #374151",
-                                                    width: 180,
-                                                    marginBottom: 6
-                                                }
-                                            }),
-                                            /*#__PURE__*/ _jsx("div", {
-                                                style: {
-                                                    fontWeight: 900,
-                                                    fontSize: 15,
-                                                    textTransform: "uppercase",
-                                                    letterSpacing: 0.5
-                                                },
-                                                children: school.headTeacher || "HEAD TEACHER"
-                                            }),
-                                            /*#__PURE__*/ _jsx("div", {
-                                                style: {
-                                                    fontSize: 14,
-                                                    color: "#6b7280",
+                                                    display: "flex",
+                                                    justifyContent: "space-between",
+                                                    alignItems: "baseline",
+                                                    fontSize: 16,
                                                     marginTop: 2
                                                 },
-                                                children: "Headteacher"
-                                            })
-                                        ]
-                                    }),
-                                    /*#__PURE__*/ _jsxs("div", {
-                                        style: {
-                                            textAlign: "right",
-                                            fontSize: 15
-                                        },
-                                        children: [
-                                            /*#__PURE__*/ _jsx("div", {
-                                                style: {
-                                                    color: "#374151",
-                                                    marginBottom: 6
-                                                },
-                                                children: "Date of Issuance:"
-                                            }),
-                                            /*#__PURE__*/ _jsx("div", {
-                                                style: {
-                                                    borderBottom: "1px solid #374151",
-                                                    width: 160,
-                                                    display: "inline-block"
-                                                },
-                                                children: "\xa0"
+                                                children: [
+                                                    /*#__PURE__*/ _jsx("b", {
+                                                        children: "Division:"
+                                                    }),
+                                                    /*#__PURE__*/ _jsx("span", {
+                                                        style: {
+                                                            fontWeight: 900,
+                                                            fontSize: 19,
+                                                            color: PC.RED
+                                                        },
+                                                        children: s.division || "—"
+                                                    })
+                                                ]
                                             })
                                         ]
                                     })
                                 ]
+                            }),
+                            /*#__PURE__*/ _jsx("div", {
+                                style: {
+                                    display: "flex",
+                                    flexDirection: "column",
+                                    gap: 11,
+                                    fontSize: 14.5,
+                                    paddingTop: 2
+                                },
+                                children: [
+                                    [
+                                        "LIN",
+                                        s.lin
+                                    ],
+                                    [
+                                        "Co-curricular Activities",
+                                        s.cocurricular
+                                    ],
+                                    [
+                                        "Leadership Position",
+                                        s.leadership
+                                    ],
+                                    [
+                                        "Conduct",
+                                        s.conduct || "Good"
+                                    ]
+                                ].map((param)=>{
+                                    let [label, val] = param;
+                                    return /*#__PURE__*/ _jsxs("div", {
+                                        children: [
+                                            /*#__PURE__*/ _jsxs("div", {
+                                                style: {
+                                                    fontWeight: 700,
+                                                    marginBottom: 2
+                                                },
+                                                children: [
+                                                    label,
+                                                    ":"
+                                                ]
+                                            }),
+                                            /*#__PURE__*/ _jsx("div", {
+                                                style: {
+                                                    fontStyle: "italic",
+                                                    color: PC.BLUE,
+                                                    borderBottom: "1.5px solid #9db8ea",
+                                                    paddingBottom: 2,
+                                                    minHeight: 20
+                                                },
+                                                children: val || ""
+                                            })
+                                        ]
+                                    }, label);
+                                })
                             })
                         ]
+                    }),
+                    /*#__PURE__*/ _jsx("div", {
+                        style: {
+                            width: "100%",
+                            marginTop: 12,
+                            padding: "8px 22px",
+                            background: "#f5f8ff",
+                            border: "1px solid #c9d7f2",
+                            borderRadius: 8,
+                            fontStyle: "italic",
+                            fontSize: 14,
+                            lineHeight: 1.55
+                        },
+                        children: pleRecommendation(s.name, s.gender, s.totalAgg, s.division)
+                    })
+                ]
+            }),
+            /*#__PURE__*/ _jsxs("div", {
+                style: {
+                    ...abs,
+                    left: 92,
+                    top: 925,
+                    width: 200,
+                    textAlign: "center",
+                    borderTop: "1.5px solid ".concat(PC.NAVY),
+                    paddingTop: 5,
+                    zIndex: 2
+                },
+                children: [
+                    /*#__PURE__*/ _jsx("div", {
+                        style: {
+                            fontWeight: 900,
+                            fontSize: 14,
+                            textTransform: "uppercase",
+                            letterSpacing: 0.5,
+                            lineHeight: "18px"
+                        },
+                        children: school.headTeacher || "HEAD TEACHER"
+                    }),
+                    /*#__PURE__*/ _jsx("div", {
+                        style: {
+                            fontSize: 13,
+                            lineHeight: "16px"
+                        },
+                        children: "Headteacher"
+                    })
+                ]
+            }),
+            /*#__PURE__*/ _jsxs("div", {
+                style: {
+                    ...abs,
+                    left: 502,
+                    top: 883,
+                    width: 200,
+                    textAlign: "center",
+                    zIndex: 2
+                },
+                children: [
+                    /*#__PURE__*/ _jsx("div", {
+                        style: {
+                            fontSize: 14,
+                            lineHeight: "20px"
+                        },
+                        children: "Date of Issuance:"
+                    }),
+                    /*#__PURE__*/ _jsx("div", {
+                        style: {
+                            height: 22,
+                            borderBottom: "1.5px solid ".concat(PC.NAVY)
+                        }
                     })
                 ]
             })
@@ -20394,7 +20489,7 @@ function PleCertificateDesign5(param) {
 const CERT_DESIGNS = [
     {
         id: 1,
-        label: "Design 1 — Gold & Navy",
+        label: "Design 1 — Blue, Red & Green (Achievement style)",
         Component: PleCertificateDesign1
     },
     {
@@ -20418,8 +20513,14 @@ const CERT_DESIGNS = [
         Component: PleCertificateDesign5
     }
 ];
+const PRE_PLE_SETS = [
+    "SET 1",
+    "SET 2",
+    "SET 3",
+    "SET 4"
+];
 function PleInfo(param) {
-    let { students, setStudents, school, markEditing, municipalPerf, setMunicipalPerf } = param;
+    let { students, setStudents, school, bands: defaultBands, specialBands, divisions, markEditing, municipalPerf, setMunicipalPerf, role } = param;
     var _municipalPerf_mpExamType, _CERT_DESIGNS_find, _p7Students_find, _p7Students_find1, _pleData_selectedStudent, _pleData_selectedStudent1;
     const [tab, setTab] = useState("records");
     const [pleData, setPleData] = useState({});
@@ -20496,6 +20597,314 @@ function PleInfo(param) {
             clearInterval(id);
         };
     }, []);
+    // ── PRE-PLE (SET 1-4) -- a class mark-entry sheet for P7, in the same
+    // format as the Mock Exam sheet (MockInfo), rather than the per-pupil
+    // aggregate-only records the PLE Results tab uses. Kept on its own
+    // shared-storage key (mkis_pre_ple_marks) and synced the same way as
+    // Mock marks: load once, debounced save on change, and a background
+    // poll guarded by a "mid-edit" window so one device's typing is never
+    // clobbered by another device's saved marks.
+    const [prePleSet, setPrePleSet] = useState(PRE_PLE_SETS[0]);
+    const [prePleYear, setPrePleYear] = useState(school.year || String(new Date().getFullYear()));
+    const [prePleMarks, setPrePleMarks] = useState({});
+    const [prePleLoaded, setPrePleLoaded] = useState(false);
+    const [prePleSortByPos, setPrePleSortByPos] = useState(false);
+    const [prePleShowResults, setPrePleShowResults] = useState(true);
+    const [prePlePdfBusy, setPrePlePdfBusy] = useState(false);
+    const [showPrePleResetConfirm, setShowPrePleResetConfirm] = useState(false);
+    const prePleSheetRef = useRef(null);
+    const prePleEditingUntilRef = useRef(0);
+    const lastSeenPrePleRef = useRef("");
+    const prePleLatestRef = useRef(prePleMarks);
+    prePleLatestRef.current = prePleMarks;
+    const prePleAuditDetailRef = useRef("");
+    useEffect(()=>{
+        let alive = true;
+        loadShared("mkis_pre_ple_marks", {}).then((m)=>{
+            if (!alive) return;
+            const val = m || {};
+            lastSeenPrePleRef.current = JSON.stringify(val);
+            setPrePleMarks(val);
+            setPrePleLoaded(true);
+        });
+        return ()=>{
+            alive = false;
+        };
+    }, []);
+    useEffect(()=>{
+        if (!prePleLoaded) return;
+        const str = JSON.stringify(prePleMarks);
+        if (str === lastSeenPrePleRef.current) return;
+        const detail = prePleAuditDetailRef.current || "Pre-PLE Results updated";
+        prePleAuditDetailRef.current = "";
+        const id = setTimeout(()=>{
+            queueSharedSave("mkis_pre_ple_marks", prePleLatestRef, setPrePleMarks, lastSeenPrePleRef, detail);
+        }, 700);
+        return ()=>clearTimeout(id);
+    }, [
+        prePleMarks,
+        prePleLoaded
+    ]);
+    useEffect(()=>{
+        const POLL_MS = 4000;
+        let stopped = false;
+        const id = setInterval(async ()=>{
+            if (stopped) return;
+            if (Date.now() < prePleEditingUntilRef.current) return; // mid-edit, don't disturb
+            if (isKeySaveInFlight("mkis_pre_ple_marks")) return; // a save is still mid read-merge-write; wait for it
+            const remote = await loadShared("mkis_pre_ple_marks", undefined);
+            if (stopped || remote === undefined) return;
+            const remoteStr = JSON.stringify(remote);
+            if (remoteStr !== lastSeenPrePleRef.current) {
+                lastSeenPrePleRef.current = remoteStr;
+                setPrePleMarks(remote);
+            }
+        }, POLL_MS);
+        return ()=>{
+            stopped = true;
+            clearInterval(id);
+        };
+    }, []);
+    const prePleStudents = useMemo(()=>students.filter((s)=>s.className === "P7").sort((a, b)=>a.name.localeCompare(b.name)), [
+        students
+    ]);
+    const prePleBands = useMemo(()=>bandsForClass("P7", defaultBands, specialBands, prePleSet, prePleYear), [
+        defaultBands,
+        specialBands,
+        prePleSet,
+        prePleYear
+    ]);
+    const prePleMk = "".concat(prePleSet, "__").concat(prePleYear);
+    const updatePrePleMark = (sid, sub, val)=>{
+        markEditing && markEditing();
+        prePleEditingUntilRef.current = Date.now() + 2500;
+        setPrePleMarks((prev)=>{
+            var _prev_sid;
+            return {
+                ...prev,
+                [sid]: {
+                    ...prev[sid],
+                    [prePleMk]: {
+                        ...(_prev_sid = prev[sid]) === null || _prev_sid === void 0 ? void 0 : _prev_sid[prePleMk],
+                        [sub]: val
+                    }
+                }
+            };
+        });
+    };
+    const resetPrePleClass = ()=>{
+        markEditing && markEditing();
+        prePleEditingUntilRef.current = Date.now() + 2500;
+        prePleAuditDetailRef.current = "Pre-PLE Results reset — P7 ".concat(prePleMk);
+        setPrePleMarks((prev)=>{
+            const next = {
+                ...prev
+            };
+            prePleStudents.forEach((s)=>{
+                if (next[s.id] && next[s.id][prePleMk]) {
+                    next[s.id] = {
+                        ...next[s.id],
+                        [prePleMk]: null
+                    };
+                }
+            });
+            return next;
+        });
+        setShowPrePleResetConfirm(false);
+    };
+    const prePleRows = useMemo(()=>prePleStudents.map((s)=>{
+            const rec = prePleMarks[s.id] && prePleMarks[s.id][prePleMk] || {};
+            const perSub = UPPER_SUBJECTS.map((sub)=>{
+                const exam = rec[sub];
+                const isX = exam === "X" || exam === "x";
+                const agg = isX ? undefined : aggOf(exam, prePleBands);
+                const gl = !isX ? gradeLabel(exam, prePleBands) : undefined;
+                return {
+                    sub,
+                    exam,
+                    agg,
+                    isX,
+                    max: 100,
+                    gradeLabel: gl
+                };
+            });
+            const hasX = perSub.some((p)=>p.isX);
+            const hasF9 = perSub.some((p)=>p.agg === 9);
+            const totMk = perSub.reduce((a, p)=>{
+                var _p_exam;
+                return a + ((_p_exam = p.exam) !== null && _p_exam !== void 0 ? _p_exam : 0);
+            }, 0);
+            const totAgg = hasX ? "X" : perSub.reduce((a, p)=>a + (p.agg || 0), 0);
+            const div = hasX ? "X" : typeof totAgg === "number" ? divisionOf(totAgg, 4, divisions, hasF9) : "X";
+            return {
+                s,
+                perSub,
+                totMk,
+                totAgg,
+                div,
+                hasX
+            };
+        }), [
+        prePleStudents,
+        prePleMarks,
+        prePleMk,
+        prePleBands,
+        divisions
+    ]);
+    const prePlePositions = useMemo(()=>rankWithTies(prePleRows.map((r)=>r.totMk > 0 ? r.totMk : null), prePleRows.map((r)=>typeof r.totAgg === "number" ? r.totAgg : null)), [
+        prePleRows
+    ]);
+    const prePleIndexedRows = useMemo(()=>prePleRows.map((r, i)=>({
+                ...r,
+                pos: prePlePositions[i]
+            })), [
+        prePleRows,
+        prePlePositions
+    ]);
+    const prePleSortedRows = useMemo(()=>[
+            ...prePleIndexedRows
+        ].sort((a, b)=>{
+            if (a.pos === "-") return 1;
+            if (b.pos === "-") return -1;
+            return a.pos - b.pos;
+        }), [
+        prePleIndexedRows
+    ]);
+    const prePleDisplayRows = prePleSortByPos ? prePleSortedRows : prePleIndexedRows;
+    const prePleGradeKeys = prePleBands.map((b)=>b.grade);
+    const prePleSubjectAnalysis = useMemo(()=>UPPER_SUBJECTS.map((sub)=>{
+            const gradeCounts = {};
+            prePleGradeKeys.forEach((g)=>{
+                gradeCounts[g] = 0;
+            });
+            let xCount = 0;
+            prePleRows.forEach((r)=>{
+                const p = r.perSub.find((p)=>p.sub === sub);
+                if (p && p.isX) {
+                    xCount++;
+                } else if (p && p.gradeLabel) {
+                    gradeCounts[p.gradeLabel] = (gradeCounts[p.gradeLabel] || 0) + 1;
+                }
+            });
+            return {
+                sub,
+                gradeCounts,
+                xCount,
+                total: prePleRows.length
+            };
+        }), [
+        prePleRows,
+        prePleGradeKeys
+    ]);
+    const prePleDivCounts = {
+        I: 0,
+        II: 0,
+        III: 0,
+        IV: 0,
+        U: 0,
+        X: 0
+    };
+    prePleSortedRows.forEach((r)=>{
+        const d = r.hasX ? "X" : r.div;
+        if (d === "X") prePleDivCounts.X++;
+        else if (prePleDivCounts[d] !== undefined) prePleDivCounts[d]++;
+        else prePleDivCounts.U++;
+    });
+    const exportPrePleWord = ()=>{
+        const rowsHtml = prePleDisplayRows.map((r, i)=>"\n      <tr>\n        <td>".concat(i + 1, '</td><td class="name-cell">').concat(escapeHtml(r.s.name), "</td>\n        ").concat(r.perSub.map((p)=>{
+                var _p_exam, _p_agg;
+                return "<td>".concat(prePleShowResults ? escapeHtml((_p_exam = p.exam) !== null && _p_exam !== void 0 ? _p_exam : "") : "", "</td><td>").concat(prePleShowResults ? escapeHtml(p.isX ? "X" : (_p_agg = p.agg) !== null && _p_agg !== void 0 ? _p_agg : "") : "", "</td>");
+            }).join(""), "\n        <td>").concat(prePleShowResults ? escapeHtml(r.totMk || "") : "", "</td>\n        <td>").concat(prePleShowResults ? escapeHtml(r.hasX ? "X" : r.totAgg || "") : "", "</td><td>").concat(prePleShowResults ? escapeHtml(r.hasX ? "X" : r.totMk ? r.div : "") : "", "</td>\n        <td>").concat(prePleShowResults && r.pos !== "-" ? escapeHtml(String(r.pos)) : "", "</td>\n      </tr>")).join("");
+        let body = '\n      <div class="title">'.concat(escapeHtml(school.name), '</div>\n      <div class="subtitle">PRE-PLE ').concat(escapeHtml(prePleSet), " ").concat(prePleShowResults ? "" : "— BLANK MARK SHEET", " — P7, ").concat(escapeHtml(String(prePleYear)), '</div>\n      <table>\n        <thead>\n          <tr>\n            <th rowspan="2">S/N</th>\n            <th rowspan="2">NAME OF PUPIL</th>\n            ').concat(UPPER_SUBJECTS.map((s)=>'<th colspan="2">'.concat(escapeHtml(s), "</th>")).join(""), '\n            <th rowspan="2">TOT MK</th>\n            <th rowspan="2">TOT AGG</th><th rowspan="2">DIV</th>\n            <th rowspan="2">POS</th>\n          </tr>\n          <tr>\n            ').concat(UPPER_SUBJECTS.map(()=>"<th>MARK</th><th>AGG</th>").join(""), "\n          </tr>\n        </thead>\n        <tbody>").concat(rowsHtml, "</tbody>\n      </table>");
+        if (prePleShowResults && (prePleSubjectAnalysis === null || prePleSubjectAnalysis === void 0 ? void 0 : prePleSubjectAnalysis.length)) {
+            const aHead = [
+                "SUBJECT",
+                ...prePleGradeKeys,
+                "X",
+                "TOTAL"
+            ];
+            const aRows = prePleSubjectAnalysis.map((sa)=>[
+                    sa.sub,
+                    ...prePleGradeKeys.map((g)=>sa.gradeCounts[g] || 0),
+                    sa.xCount || 0,
+                    sa.total
+                ]);
+            const gHead = [
+                "NO. OF PUPILS",
+                "DIV I",
+                "DIV II",
+                "DIV III",
+                "DIV IV",
+                "U",
+                "X"
+            ];
+            const gRow = [
+                prePleStudents.length,
+                prePleDivCounts.I,
+                prePleDivCounts.II,
+                prePleDivCounts.III,
+                prePleDivCounts.IV,
+                prePleDivCounts.U,
+                prePleDivCounts.X
+            ];
+            body += '<div class="section-title">A. Subject Performance Analysis</div>'.concat(htmlTable(aHead, aRows));
+            body += '<div class="section-title">B. General Performance Analysis</div>'.concat(htmlTable(gHead, [
+                gRow
+            ]));
+        }
+        downloadWordHtml("PRE-PLE ".concat(prePleSet, " - P7"), body, "P7_PRE-PLE_".concat(safeFileName(prePleSet), "_").concat(prePleYear).concat(prePleShowResults ? "" : "_Blank", ".doc"), {
+            pageSize: "297mm 210mm"
+        });
+    };
+    const exportPrePleExcel = ()=>{
+        const headerRow1 = [
+            "S/N",
+            "NAME OF PUPIL",
+            ...UPPER_SUBJECTS.flatMap((s)=>[
+                    s,
+                    ""
+                ]),
+            "TOT MK",
+            "TOT AGG",
+            "DIV",
+            "POS"
+        ];
+        const headerRow2 = [
+            "",
+            "",
+            ...UPPER_SUBJECTS.flatMap(()=>[
+                    "MARK",
+                    "AGG"
+                ]),
+            "",
+            "",
+            "",
+            ""
+        ];
+        const dataRows = prePleDisplayRows.map((r, i)=>{
+            var _p_exam, _p_agg;
+            return [
+                i + 1,
+                r.s.name,
+                ...r.perSub.flatMap((p)=>[
+                        prePleShowResults ? (_p_exam = p.exam) !== null && _p_exam !== void 0 ? _p_exam : "" : "",
+                        prePleShowResults ? p.isX ? "X" : (_p_agg = p.agg) !== null && _p_agg !== void 0 ? _p_agg : "" : ""
+                    ]),
+                prePleShowResults ? r.totMk || "" : "",
+                prePleShowResults ? r.hasX ? "X" : r.totAgg || "" : "",
+                prePleShowResults ? r.hasX ? "X" : r.totMk ? r.div : "" : "",
+                prePleShowResults && r.pos !== "-" ? r.pos : ""
+            ];
+        });
+        const ws = XLSX.utils.aoa_to_sheet([
+            headerRow1,
+            headerRow2,
+            ...dataRows
+        ]);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Pre-PLE ".concat(prePleSet));
+        XLSX.writeFile(wb, "P7_PRE-PLE_".concat(safeFileName(prePleSet), "_").concat(prePleYear).concat(prePleShowResults ? "" : "_Blank", ".xlsx"));
+    };
     // imported rows that didn't match any student (flagged red)
     const [unmatched, setUnmatched] = useState([]); // [{ name, indexNo, sex, results, totalAgg, division }]
     const [year, setYear] = useState(school.year || String(new Date().getFullYear()));
@@ -21066,6 +21475,10 @@ function PleInfo(param) {
                     [
                         "records",
                         "📋 PLE Results"
+                    ],
+                    [
+                        "preple",
+                        "📝 Pre-PLE"
                     ],
                     [
                         "certificates",
@@ -22087,6 +22500,419 @@ function PleInfo(param) {
                             })
                         ]
                     }),
+                    tab === "preple" && (!prePleLoaded ? /*#__PURE__*/ _jsx("div", {
+                        style: {
+                            padding: 20,
+                            color: "#9ca3af"
+                        },
+                        children: "Loading…"
+                    }) : /*#__PURE__*/ _jsxs("div", {
+                        children: [
+                            /*#__PURE__*/ _jsxs("div", {
+                                className: "no-print",
+                                style: {
+                                    display: "flex",
+                                    gap: 10,
+                                    marginBottom: 16,
+                                    flexWrap: "wrap",
+                                    alignItems: "flex-end",
+                                    justifyContent: "space-between"
+                                },
+                                children: [
+                                    /*#__PURE__*/ _jsxs("div", {
+                                        style: {
+                                            display: "flex",
+                                            gap: 10,
+                                            flexWrap: "wrap",
+                                            alignItems: "flex-end"
+                                        },
+                                        children: [
+                                            /*#__PURE__*/ _jsx(Sel, {
+                                                label: "Pre-PLE",
+                                                value: prePleSet,
+                                                onChange: setPrePleSet,
+                                                opts: PRE_PLE_SETS
+                                            }),
+                                            /*#__PURE__*/ _jsxs("div", {
+                                                children: [
+                                                    /*#__PURE__*/ _jsx("label", {
+                                                        style: lbl,
+                                                        children: "Year"
+                                                    }),
+                                                    /*#__PURE__*/ _jsx("input", {
+                                                        type: "number",
+                                                        value: prePleYear,
+                                                        onChange: (e)=>setPrePleYear(e.target.value),
+                                                        style: {
+                                                            ...inp,
+                                                            width: 90
+                                                        }
+                                                    })
+                                                ]
+                                            })
+                                        ]
+                                    }),
+                                    /*#__PURE__*/ _jsxs("div", {
+                                        style: {
+                                            display: "flex",
+                                            gap: 8,
+                                            flexWrap: "wrap",
+                                            alignItems: "center"
+                                        },
+                                        children: [
+                                            /*#__PURE__*/ _jsxs("span", {
+                                                style: {
+                                                    background: "#dbeafe",
+                                                    color: "#1e40af",
+                                                    borderRadius: 20,
+                                                    padding: "4px 12px",
+                                                    fontSize: 12,
+                                                    fontWeight: 700
+                                                },
+                                                children: [
+                                                    prePleStudents.length,
+                                                    " candidates - P7"
+                                                ]
+                                            }),
+                                            /*#__PURE__*/ _jsx("button", {
+                                                onClick: ()=>setPrePleSortByPos((v)=>!v),
+                                                style: prePleSortByPos ? btnPrimary : btnGhost,
+                                                children: prePleSortByPos ? "🔤 Show A–Z" : "📊 Sort Highest → Lowest"
+                                            }),
+                                            /*#__PURE__*/ _jsx("button", {
+                                                onClick: ()=>setPrePleShowResults((v)=>!v),
+                                                style: prePleShowResults ? btnGhost : btnWarning,
+                                                children: prePleShowResults ? "🙈 Hide Results (Blank Sheet)" : "👁️ Show Results"
+                                            }),
+                                            /*#__PURE__*/ _jsx("button", {
+                                                onClick: exportPrePleWord,
+                                                style: btnWord,
+                                                children: "📄 Export Word"
+                                            }),
+                                            /*#__PURE__*/ _jsx("button", {
+                                                onClick: exportPrePleExcel,
+                                                style: {
+                                                    ...btnPrimary,
+                                                    background: "linear-gradient(135deg,#15803d,#16a34a)"
+                                                },
+                                                children: "📊 Export Excel"
+                                            }),
+                                            /*#__PURE__*/ _jsx("button", {
+                                                disabled: prePlePdfBusy,
+                                                onClick: async ()=>{
+                                                    setPrePlePdfBusy(true);
+                                                    try {
+                                                        await downloadNodesAsPdf([
+                                                            prePleSheetRef.current
+                                                        ], "P7_PRE-PLE_".concat(safeFileName(prePleSet), "_").concat(prePleYear).concat(prePleShowResults ? "" : "_Blank", ".pdf"), "landscape");
+                                                    } finally{
+                                                        setPrePlePdfBusy(false);
+                                                    }
+                                                },
+                                                style: prePlePdfBusy ? btnPdfBusy : btnPdf,
+                                                children: prePlePdfBusy ? "⏳ Generating..." : "📕 Export PDF"
+                                            }),
+                                            /*#__PURE__*/ _jsx("button", {
+                                                onClick: ()=>window.print(),
+                                                style: btnPrimary,
+                                                children: "🖨️ Print"
+                                            }),
+                                            role === "admin" && /*#__PURE__*/ _jsxs("button", {
+                                                onClick: ()=>setShowPrePleResetConfirm(true),
+                                                style: btnDanger,
+                                                children: [
+                                                    "♻️ Reset ",
+                                                    prePleSet,
+                                                    " — P7"
+                                                ]
+                                            })
+                                        ]
+                                    })
+                                ]
+                            }),
+                            showPrePleResetConfirm && /*#__PURE__*/ _jsxs("div", {
+                                className: "no-print",
+                                style: {
+                                    background: "#fef2f2",
+                                    border: "1px solid #fecaca",
+                                    borderRadius: 8,
+                                    padding: 14,
+                                    marginBottom: 14,
+                                    display: "flex",
+                                    gap: 10,
+                                    alignItems: "center",
+                                    flexWrap: "wrap"
+                                },
+                                children: [
+                                    /*#__PURE__*/ _jsxs("span", {
+                                        style: {
+                                            fontWeight: 700,
+                                            color: "#991b1b"
+                                        },
+                                        children: [
+                                            "Reset all ",
+                                            prePleSet,
+                                            " (",
+                                            prePleYear,
+                                            ") marks for P7? This cannot be undone."
+                                        ]
+                                    }),
+                                    /*#__PURE__*/ _jsx("button", {
+                                        onClick: resetPrePleClass,
+                                        style: btnDanger,
+                                        children: "Yes, Reset"
+                                    }),
+                                    /*#__PURE__*/ _jsx("button", {
+                                        onClick: ()=>setShowPrePleResetConfirm(false),
+                                        style: btnGhost,
+                                        children: "Cancel"
+                                    })
+                                ]
+                            }),
+                            /*#__PURE__*/ _jsxs("div", {
+                                ref: prePleSheetRef,
+                                style: {
+                                    overflowX: "auto"
+                                },
+                                children: [
+                                    /*#__PURE__*/ _jsxs("div", {
+                                        style: {
+                                            textAlign: "center",
+                                            marginBottom: 12
+                                        },
+                                        children: [
+                                            school.logo && /*#__PURE__*/ _jsx("img", {
+                                                src: school.logo,
+                                                alt: "School badge",
+                                                style: {
+                                                    width: 56,
+                                                    height: 56,
+                                                    objectFit: "contain",
+                                                    display: "block",
+                                                    margin: "0 auto 6px"
+                                                }
+                                            }),
+                                            /*#__PURE__*/ _jsx("div", {
+                                                style: {
+                                                    fontWeight: 900,
+                                                    fontSize: 16,
+                                                    color: "#1e3a6e",
+                                                    textTransform: "uppercase",
+                                                    letterSpacing: 0.5
+                                                },
+                                                children: school.name
+                                            }),
+                                            /*#__PURE__*/ _jsxs("div", {
+                                                style: {
+                                                    fontSize: 11,
+                                                    color: "#6b7280",
+                                                    marginTop: 2
+                                                },
+                                                children: [
+                                                    school.poBox,
+                                                    school.tel ? " | Tel: ".concat(school.tel) : ""
+                                                ]
+                                            })
+                                        ]
+                                    }),
+                                    /*#__PURE__*/ _jsxs("div", {
+                                        style: {
+                                            textAlign: "center",
+                                            marginBottom: 10,
+                                            fontWeight: 800,
+                                            fontSize: 14,
+                                            color: "#1e3a6e",
+                                            textTransform: "uppercase",
+                                            letterSpacing: 0.5
+                                        },
+                                        children: [
+                                            "PRE-PLE ",
+                                            prePleSet,
+                                            " ",
+                                            prePleShowResults ? "" : "— Blank Mark Sheet",
+                                            " — P7, ",
+                                            prePleYear
+                                        ]
+                                    }),
+                                    /*#__PURE__*/ _jsxs("table", {
+                                        style: {
+                                            width: "100%",
+                                            fontSize: 12,
+                                            minWidth: 900
+                                        },
+                                        children: [
+                                            /*#__PURE__*/ _jsxs("thead", {
+                                                children: [
+                                                    /*#__PURE__*/ _jsxs("tr", {
+                                                        style: {
+                                                            background: "#1e3a6e",
+                                                            color: "white"
+                                                        },
+                                                        children: [
+                                                            /*#__PURE__*/ _jsx("th", {
+                                                                style: th,
+                                                                rowSpan: 2,
+                                                                children: "S/N"
+                                                            }),
+                                                            /*#__PURE__*/ _jsx("th", {
+                                                                style: {
+                                                                    ...th,
+                                                                    textAlign: "left",
+                                                                    minWidth: 160
+                                                                },
+                                                                rowSpan: 2,
+                                                                children: "NAME OF PUPIL"
+                                                            }),
+                                                            UPPER_SUBJECTS.map((s)=>/*#__PURE__*/ _jsx("th", {
+                                                                    style: th,
+                                                                    colSpan: 2,
+                                                                    children: s
+                                                                }, s)),
+                                                            /*#__PURE__*/ _jsx("th", {
+                                                                style: th,
+                                                                rowSpan: 2,
+                                                                children: "TOT MK"
+                                                            }),
+                                                            /*#__PURE__*/ _jsx("th", {
+                                                                style: th,
+                                                                rowSpan: 2,
+                                                                children: "TOT AGG"
+                                                            }),
+                                                            /*#__PURE__*/ _jsx("th", {
+                                                                style: th,
+                                                                rowSpan: 2,
+                                                                children: "DIV"
+                                                            }),
+                                                            /*#__PURE__*/ _jsx("th", {
+                                                                style: th,
+                                                                rowSpan: 2,
+                                                                children: "POS"
+                                                            })
+                                                        ]
+                                                    }),
+                                                    /*#__PURE__*/ _jsx("tr", {
+                                                        style: {
+                                                            background: "#1e3a6e",
+                                                            color: "white"
+                                                        },
+                                                        children: UPPER_SUBJECTS.map((s)=>/*#__PURE__*/ _jsxs(React.Fragment, {
+                                                                children: [
+                                                                    /*#__PURE__*/ _jsx("th", {
+                                                                        style: {
+                                                                            ...th,
+                                                                            fontSize: 10
+                                                                        },
+                                                                        children: "MARK"
+                                                                    }),
+                                                                    /*#__PURE__*/ _jsx("th", {
+                                                                        style: {
+                                                                            ...th,
+                                                                            fontSize: 10
+                                                                        },
+                                                                        children: "AGG"
+                                                                    })
+                                                                ]
+                                                            }, s))
+                                                    })
+                                                ]
+                                            }),
+                                            /*#__PURE__*/ _jsx("tbody", {
+                                                children: prePleDisplayRows.map((r, i)=>/*#__PURE__*/ _jsxs("tr", {
+                                                        style: {
+                                                            background: i % 2 === 0 ? "white" : "#f8fafc"
+                                                        },
+                                                        children: [
+                                                            /*#__PURE__*/ _jsx("td", {
+                                                                style: td,
+                                                                children: i + 1
+                                                            }),
+                                                            /*#__PURE__*/ _jsx("td", {
+                                                                style: {
+                                                                    ...td,
+                                                                    fontWeight: 600,
+                                                                    textAlign: "left"
+                                                                },
+                                                                children: r.s.name
+                                                            }),
+                                                            r.perSub.map((p)=>{
+                                                                var _p_agg;
+                                                                return /*#__PURE__*/ _jsxs(React.Fragment, {
+                                                                    children: [
+                                                                        /*#__PURE__*/ _jsx("td", {
+                                                                            style: td,
+                                                                            children: prePleShowResults ? /*#__PURE__*/ _jsx(MarkInput, {
+                                                                                value: p.exam,
+                                                                                existingVal: p.exam,
+                                                                                max: p.max,
+                                                                                style: markInput,
+                                                                                onCommit: (newVal)=>updatePrePleMark(r.s.id, p.sub, newVal)
+                                                                            }) : /*#__PURE__*/ _jsx("div", {
+                                                                                style: {
+                                                                                    width: markInput.width,
+                                                                                    height: 20,
+                                                                                    borderBottom: "1px solid #9ca3af",
+                                                                                    margin: "0 auto"
+                                                                                }
+                                                                            })
+                                                                        }),
+                                                                        /*#__PURE__*/ _jsx("td", {
+                                                                            style: {
+                                                                                ...td,
+                                                                                color: p.isX ? "#dc2626" : "inherit"
+                                                                            },
+                                                                            children: prePleShowResults ? p.isX ? "X" : (_p_agg = p.agg) !== null && _p_agg !== void 0 ? _p_agg : "-" : /*#__PURE__*/ _jsx("div", {
+                                                                                style: {
+                                                                                    width: 20,
+                                                                                    height: 16,
+                                                                                    borderBottom: "1px solid #9ca3af",
+                                                                                    margin: "0 auto"
+                                                                                }
+                                                                            })
+                                                                        })
+                                                                    ]
+                                                                }, p.sub);
+                                                            }),
+                                                            /*#__PURE__*/ _jsx("td", {
+                                                                style: {
+                                                                    ...td,
+                                                                    fontWeight: 700,
+                                                                    background: "#ede9fe"
+                                                                },
+                                                                children: prePleShowResults ? r.totMk || "-" : ""
+                                                            }),
+                                                            /*#__PURE__*/ _jsx("td", {
+                                                                style: {
+                                                                    ...td,
+                                                                    fontWeight: 700,
+                                                                    background: "#ede9fe"
+                                                                },
+                                                                children: prePleShowResults ? r.hasX ? "X" : r.totAgg || "-" : ""
+                                                            }),
+                                                            /*#__PURE__*/ _jsx("td", {
+                                                                style: {
+                                                                    ...td,
+                                                                    fontWeight: 700
+                                                                },
+                                                                children: prePleShowResults ? r.hasX ? "X" : r.totMk ? r.div : "-" : ""
+                                                            }),
+                                                            /*#__PURE__*/ _jsx("td", {
+                                                                style: {
+                                                                    ...td,
+                                                                    fontWeight: 700
+                                                                },
+                                                                children: prePleShowResults && r.pos !== "-" ? /*#__PURE__*/ _jsx(PositionBadge, {
+                                                                    pos: r.pos
+                                                                }) : "-"
+                                                            })
+                                                        ]
+                                                    }, r.s.id))
+                                            })
+                                        ]
+                                    })
+                                ]
+                            })
+                        ]
+                    })),
                     tab === "certificates" && /*#__PURE__*/ _jsxs("div", {
                         children: [
                             /*#__PURE__*/ _jsxs("div", {
@@ -31336,7 +32162,8 @@ function AuditLog() {
             mkis_municipalperf: "Municipal Performance",
             mkis_examtimetable: "Exam Timetable",
             mkis_mock_marks: "Mock Results",
-            mkis_pledata: "PLE Results"
+            mkis_pledata: "PLE Results",
+            mkis_pre_ple_marks: "Pre-PLE Results"
         })[key] || key;
     const filtered = rows.filter((r)=>!filter.trim() || (r.key || "").toLowerCase().includes(filter.trim().toLowerCase())).filter((r)=>!whoFilter.trim() || (r.who || "").toLowerCase().includes(whoFilter.trim().toLowerCase())).slice(0, limit);
     const exportCsv = ()=>{
