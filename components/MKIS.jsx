@@ -17800,19 +17800,22 @@ const PC_BG_URI = pcSvgUri('<svg xmlns="http://www.w3.org/2000/svg" width="794" 
 '<path d="M0,0 L462,0 C320,40 130,150 0,300 Z" fill="' + PC.GREEN + '"/>' + '<path d="M0,0 L405,0 C265,30 105,120 0,232 Z" fill="' + PC.RED + '"/>' + '<path d="M0,0 L340,0 C200,20 70,95 0,185 Z" fill="' + PC.BLUE + '"/>' + // bottom-left: green, red, blue corner
 '<path d="M0,1320 C80,1440 290,1515 540,1536 L0,1536 Z" fill="' + PC.GREEN + '"/>' + '<path d="M0,1385 C70,1470 240,1522 420,1536 L0,1536 Z" fill="' + PC.RED + '"/>' + '<path d="M0,1440 C60,1500 180,1530 300,1536 L0,1536 Z" fill="' + PC.BLUE + '"/>' + // bottom-right: red, green, big blue corner
 '<path d="M1024,1235 C1024,1400 800,1490 540,1512 L540,1536 L1024,1536 Z" fill="' + PC.RED + '"/>' + '<path d="M1024,1305 C990,1430 830,1498 640,1512 L640,1536 L1024,1536 Z" fill="' + PC.GREEN + '"/>' + '<path d="M1024,1345 C980,1450 880,1500 760,1512 L760,1536 L1024,1536 Z" fill="' + PC.BLUE + '"/>' + "</g>" + '<rect x="5" y="5" width="1014" height="1526" fill="none" stroke="' + PC.BLUE + '" stroke-width="10"/>' + '<rect x="22" y="22" width="980" height="1492" fill="none" stroke="' + PC.GOLD + '" stroke-width="3"/>' + "</g></svg>");
-// Crest: laurels, shield with torch + open book, and the red ribbon banner
-// (the ribbon text itself -- the PLE year -- is real text laid over it).
+// Fallback crest (laurels, shield with torch + open book) -- only used when the
+// school has no uploaded badge/logo; otherwise the school's own badge is shown.
 const PC_CREST_URI = (()=>{
     const leafFill = "#2a9d3e";
     const branch = pcLeaves(186, 100, 112, 135, 232, 10, 27, 11, leafFill) + '<path d="' + pcArc(186, 100, 112, 135, 232) + '" fill="none" stroke="' + leafFill + '" stroke-width="2.5"/>';
     const shield = "M96,10 L276,10 L276,112 C276,160 236,188 186,206 C136,188 96,160 96,112 Z";
-    return pcSvgUri('<svg xmlns="http://www.w3.org/2000/svg" width="380" height="250" viewBox="0 0 380 250">' + '<defs>' + '<linearGradient id="sk" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f4f9ff"/><stop offset="1" stop-color="#cfe6f3"/></linearGradient>' + '<clipPath id="sc"><path d="' + shield + '"/></clipPath>' + "</defs>" + "<g>" + branch + "</g>" + '<g transform="translate(372,0) scale(-1,1)">' + branch + "</g>" + '<path d="' + shield + '" fill="url(#sk)"/>' + '<g clip-path="url(#sc)">' + '<path d="M90,150 C130,124 240,124 282,146 L282,212 L90,212 Z" fill="#1f86b4"/>' + '<path d="M90,168 C140,146 232,146 282,166 L282,212 L90,212 Z" fill="#2ea043"/>' + "</g>" + '<path d="' + shield + '" fill="none" stroke="' + PC.BLUE + '" stroke-width="6" stroke-linejoin="round"/>' + // torch flame + cup
+    return pcSvgUri('<svg xmlns="http://www.w3.org/2000/svg" width="380" height="215" viewBox="0 0 380 215">' + '<defs>' + '<linearGradient id="sk" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f4f9ff"/><stop offset="1" stop-color="#cfe6f3"/></linearGradient>' + '<clipPath id="sc"><path d="' + shield + '"/></clipPath>' + "</defs>" + "<g>" + branch + "</g>" + '<g transform="translate(372,0) scale(-1,1)">' + branch + "</g>" + '<path d="' + shield + '" fill="url(#sk)"/>' + '<g clip-path="url(#sc)">' + '<path d="M90,150 C130,124 240,124 282,146 L282,212 L90,212 Z" fill="#1f86b4"/>' + '<path d="M90,168 C140,146 232,146 282,166 L282,212 L90,212 Z" fill="#2ea043"/>' + "</g>" + '<path d="' + shield + '" fill="none" stroke="' + PC.BLUE + '" stroke-width="6" stroke-linejoin="round"/>' + // torch flame + cup
 '<path d="M186,16 C200,36 209,50 205,66 C202,79 194,85 186,85 C178,85 170,79 167,66 C164,52 175,44 180,31 C182,38 184,28 186,16 Z" fill="' + PC.RED + '"/>' + '<path d="M186,44 C194,54 197,62 194,70 C192,76 188,79 186,79 C182,79 178,76 177,70 C176,62 182,56 186,44 Z" fill="#ffb02e"/>' + '<rect x="167" y="84" width="38" height="7" rx="2" fill="' + PC.BLUE + '"/>' + '<path d="M172,91 L200,91 L194,104 L178,104 Z" fill="' + PC.BLUE + '"/>' + '<rect x="183" y="104" width="6" height="10" fill="' + PC.BLUE + '"/>' + // open book
-'<path d="M186,152 L130,141 L130,110 Q158,104 186,116 Z" fill="#fff" stroke="' + PC.BLUE + '" stroke-width="3" stroke-linejoin="round"/>' + '<path d="M186,152 L242,141 L242,110 Q214,104 186,116 Z" fill="#fff" stroke="' + PC.BLUE + '" stroke-width="3" stroke-linejoin="round"/>' + '<path d="M124,144 L186,157 L248,144 L248,152 L186,166 L124,152 Z" fill="' + PC.BLUE + '"/>' + '<path d="M138,120 Q158,116 178,124 M138,129 Q158,125 178,133 M194,124 Q214,116 234,120 M194,133 Q214,125 234,129" fill="none" stroke="#9db8ea" stroke-width="1.6"/>' + // banner
-'<path d="M2,190 L40,200 L40,246 L2,238 L16,214 Z" fill="#a30d18"/>' + '<path d="M378,190 L340,200 L340,246 L378,238 L364,214 Z" fill="#a30d18"/>' + '<path d="M26,196 Q186,222 354,196 L354,242 Q186,268 26,242 Z" fill="' + PC.RED + '"/>' + "</svg>");
+'<path d="M186,152 L130,141 L130,110 Q158,104 186,116 Z" fill="#fff" stroke="' + PC.BLUE + '" stroke-width="3" stroke-linejoin="round"/>' + '<path d="M186,152 L242,141 L242,110 Q214,104 186,116 Z" fill="#fff" stroke="' + PC.BLUE + '" stroke-width="3" stroke-linejoin="round"/>' + '<path d="M124,144 L186,157 L248,144 L248,152 L186,166 L124,152 Z" fill="' + PC.BLUE + '"/>' + '<path d="M138,120 Q158,116 178,124 M138,129 Q158,125 178,133 M194,124 Q214,116 234,120 M194,133 Q214,125 234,129" fill="none" stroke="#9db8ea" stroke-width="1.6"/>' + "</svg>");
 })();
-// Gold medal with laurel wreath, star and tri-colour ribbon tails.
-const PC_MEDAL_URI = (()=>{
+// Gold medal with laurel wreath and star. The PLE year is printed on the two
+// ribbon tails (first half on the left tail, second half on the right).
+const pcMedalUri = (year)=>{
+    const yr = String(year == null ? "" : year).replace(/[&<>]/g, "");
+    const half = Math.ceil(yr.length / 2);
+    const yrTxt = (x, rot, t)=>'<text x="' + x + '" y="175" transform="rotate(' + rot + " " + x + ' 170)" text-anchor="middle" font-family="Georgia,Times New Roman,serif" font-weight="700" font-size="20" letter-spacing="1" fill="#fff">' + t + "</text>";
     let scallop = "";
     const n = 30;
     for(let i = 0; i < n * 2; i++){
@@ -17824,9 +17827,9 @@ const PC_MEDAL_URI = (()=>{
     const leaf = "#8a5a0a";
     const wreath = pcLeaves(85, 80, 38, 100, 228, 9, 14, 6.5, leaf) + '<path d="' + pcArc(85, 80, 38, 100, 228) + '" fill="none" stroke="' + leaf + '" stroke-width="1.6"/>';
     return pcSvgUri('<svg xmlns="http://www.w3.org/2000/svg" width="170" height="230" viewBox="0 0 170 230">' + '<defs>' + '<linearGradient id="gd" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f8dc7a"/><stop offset="0.5" stop-color="#dfa326"/><stop offset="1" stop-color="#b9770e"/></linearGradient>' + '<linearGradient id="gi" x1="1" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fae9a2"/><stop offset="1" stop-color="#e0a92c"/></linearGradient>' + "</defs>" + // ribbon tails
-'<path d="M55,115 L92,123 L66,216 L46,203 L26,218 Z" fill="' + PC.BLUE + '"/>' + '<path d="M115,115 L78,123 L104,216 L124,203 L144,218 Z" fill="' + PC.BLUE + '"/>' + '<path d="M59,120 L34,212" stroke="' + PC.RED + '" stroke-width="5"/>' + '<path d="M85,127 L64,208" stroke="' + PC.GREEN + '" stroke-width="5"/>' + '<path d="M111,120 L136,212" stroke="' + PC.RED + '" stroke-width="5"/>' + '<path d="M85,127 L106,208" stroke="' + PC.GREEN + '" stroke-width="5"/>' + // medal
-'<path d="' + scallop + '" fill="url(#gd)" stroke="#b9770e" stroke-width="1.5" stroke-linejoin="round"/>' + '<circle cx="85" cy="80" r="55" fill="url(#gi)" stroke="#b9770e" stroke-width="2"/>' + '<circle cx="85" cy="80" r="49" fill="none" stroke="#b9770e" stroke-width="1" opacity="0.6"/>' + "<g>" + wreath + "</g>" + '<g transform="translate(170,0) scale(-1,1)">' + wreath + "</g>" + '<path d="' + pcStar(85, 80, 21, 8.5) + '" fill="#a8700d" stroke="#f3d77a" stroke-width="1"/>' + "</svg>");
-})();
+'<path d="M48,115 L96,125 L70,224 L50,208 L24,224 Z" fill="' + PC.BLUE + '"/>' + '<path d="M122,115 L74,125 L100,224 L120,208 L146,224 Z" fill="' + PC.BLUE + '"/>' + '<path d="M52,121 L30,216" stroke="' + PC.RED + '" stroke-width="3"/>' + '<path d="M91,128 L66,218" stroke="' + PC.GREEN + '" stroke-width="3"/>' + '<path d="M118,121 L140,216" stroke="' + PC.RED + '" stroke-width="3"/>' + '<path d="M79,128 L104,218" stroke="' + PC.GREEN + '" stroke-width="3"/>' + // medal
+'<path d="' + scallop + '" fill="url(#gd)" stroke="#b9770e" stroke-width="1.5" stroke-linejoin="round"/>' + '<circle cx="85" cy="80" r="55" fill="url(#gi)" stroke="#b9770e" stroke-width="2"/>' + '<circle cx="85" cy="80" r="49" fill="none" stroke="#b9770e" stroke-width="1" opacity="0.6"/>' + "<g>" + wreath + "</g>" + '<g transform="translate(170,0) scale(-1,1)">' + wreath + "</g>" + '<path d="' + pcStar(85, 80, 21, 8.5) + '" fill="#a8700d" stroke="#f3d77a" stroke-width="1"/>' + yrTxt(60, 14, yr.slice(0, half)) + yrTxt(110, -14, yr.slice(half)) + "</svg>");
+};
 // Stack of three books (blue / green / red), bottom-left.
 const PC_BOOKS_URI = pcSvgUri('<svg xmlns="http://www.w3.org/2000/svg" width="220" height="160" viewBox="0 0 220 160">' + '<g transform="rotate(-9 110 100)">' + '<rect x="14" y="112" width="196" height="34" rx="5" fill="' + PC.RED + '"/><rect x="36" y="119" width="170" height="20" rx="2" fill="#fff" stroke="#dfe3ea"/><rect x="14" y="112" width="18" height="34" rx="5" fill="#a30d18"/>' + '<rect x="8" y="78" width="192" height="34" rx="5" fill="' + PC.GREEN + '"/><rect x="30" y="85" width="166" height="20" rx="2" fill="#fff" stroke="#dfe3ea"/><rect x="8" y="78" width="18" height="34" rx="5" fill="#12722a"/>' + '<path d="M22,44 L52,26 L196,32 L196,44 Z" fill="#3f7ad6"/>' + '<rect x="20" y="44" width="180" height="34" rx="5" fill="' + PC.BLUE + '"/><rect x="42" y="51" width="154" height="20" rx="2" fill="#fff" stroke="#dfe3ea"/><rect x="20" y="44" width="18" height="34" rx="5" fill="#0a3577"/>' + "</g></svg>");
 // Green rule with red / blue / red stars, under the title.
@@ -17844,6 +17847,7 @@ function PleCertificateDesign1(param) {
         l.href = "https://fonts.googleapis.com/css2?family=Kaushan+Script&display=swap";
         document.head.appendChild(l);
     }, []);
+    const medalUri = useMemo(()=>pcMedalUri(year), [year]);
     const schoolFs = Math.max(18, Math.min(34, Math.floor(640 / (Math.max((school.name || "").length, 1) * 0.78))));
     const pupilLen = (s.name || "").length;
     const pupilFs = pupilLen > 30 ? 20 : pupilLen > 24 ? 23 : 26;
@@ -17890,37 +17894,32 @@ function PleCertificateDesign1(param) {
                     zIndex: 1
                 }
             }),
-            /*#__PURE__*/ _jsx("img", {
+            school.logo ? /*#__PURE__*/ _jsx("img", {
+                src: school.logo,
+                alt: "School badge",
+                style: {
+                    ...abs,
+                    left: 321,
+                    top: 26,
+                    width: 152,
+                    height: 152,
+                    objectFit: "contain",
+                    zIndex: 1
+                }
+            }) : /*#__PURE__*/ _jsx("img", {
                 src: PC_CREST_URI,
                 alt: "",
                 style: {
                     ...abs,
                     left: 272,
-                    top: 22,
+                    top: 30,
                     width: 250,
-                    height: 164,
+                    height: 141,
                     zIndex: 1
                 }
             }),
-            /*#__PURE__*/ _jsx("div", {
-                style: {
-                    ...abs,
-                    left: 300,
-                    top: 156,
-                    width: 194,
-                    height: 30,
-                    lineHeight: "30px",
-                    textAlign: "center",
-                    color: "#fff",
-                    fontWeight: 700,
-                    fontSize: 17,
-                    letterSpacing: 5,
-                    zIndex: 2
-                },
-                children: year
-            }),
             /*#__PURE__*/ _jsx("img", {
-                src: PC_MEDAL_URI,
+                src: medalUri,
                 alt: "",
                 style: {
                     ...abs,
