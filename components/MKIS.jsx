@@ -18357,10 +18357,64 @@ function PleCertificateDesign1(param) {
         ]
     });
 }
+// ─── PLE CERTIFICATE · DESIGN 2 (Orange & Red "Achievement" style) ───────────
+// The frame and corner ribbons are an SVG image (not CSS gradients) so they
+// rasterize reliably through html2canvas for PDF export. Only the writing is
+// real text. Re-uses pcSvgUri and PLE_CERT_LOCATION defined with Design 1 above.
+const D2C = {
+    RED: "#e0391b",
+    ORANGE: "#ff7a00",
+    GOLD: "#eba500",
+    INK: "#1b1b1b",
+    PALE: "#fff6ef",
+    LINE: "#f6d3bf"
+};
+const D2_SANS = "'Montserrat','Segoe UI',Arial,sans-serif";
+const D2_SERIF = "'Playfair Display','Georgia','Times New Roman',serif";
+const D2_SCRIPT = "'Yellowtail','Brush Script MT','Segoe Script','Lucida Handwriting',cursive";
+// "NAKATO MARY GRACE" -> "Nakato Mary Grace" (the script font reads badly in all caps)
+const d2TitleCase = (n)=>String(n || "").toLowerCase().replace(/(^|[\s'’\-.])([a-z])/g, (m, a, b)=>a + b.toUpperCase());
+// Orange-to-red frame plus two curled-ribbon corners (top-left, bottom-right).
+// Authored on a 1440x1880 grid, scaled to the A4 aspect ratio.
+const D2_BG_URI = (()=>{
+    const corner = // soft paper shadows
+    '<g filter="url(#bl)" opacity="0.4"><path d="M84,326 C156,328 266,310 324,224 C354,178 381,154 402,138 C324,134 241,156 171,216 C131,250 106,288 84,326 Z" fill="#6a5a90"/>' + '<path d="M560,0 C520,74 420,134 330,168 C250,198 140,252 60,334" fill="none" stroke="#6a5a90" stroke-width="10"/></g>' + // diagonal stripes
+    '<path d="M0,215 L195,0 L250,0 L0,268 Z" fill="url(#y1)"/>' + '<path d="M0,268 L250,0 L312,0 L0,335 Z" fill="url(#y2)"/>' + '<path d="M0,335 L312,0 L362,0 L0,400 Z" fill="url(#y3)"/>' + // curled leaf
+    '<path d="M78,316 C150,318 260,300 318,215 C348,170 375,148 396,132 C318,128 235,150 165,210 C125,244 100,282 78,316 Z" fill="url(#lf)"/>';
+    return pcSvgUri('<svg xmlns="http://www.w3.org/2000/svg" width="794" height="1123" viewBox="0 0 1440 2036.5">' + "<defs>" + '<linearGradient id="fr" gradientUnits="userSpaceOnUse" x1="52" y1="0" x2="1392" y2="0"><stop offset="0" stop-color="#ff6a00"/><stop offset="0.55" stop-color="#f4401a"/><stop offset="1" stop-color="#e8102a"/></linearGradient>' + '<linearGradient id="y1" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ffd800"/><stop offset="1" stop-color="#ff9a00"/></linearGradient>' + '<linearGradient id="y2" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ff9a00"/><stop offset="1" stop-color="#ff5a14"/></linearGradient>' + '<linearGradient id="y3" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ff5a14"/><stop offset="1" stop-color="#e8102a"/></linearGradient>' + '<linearGradient id="lf" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#e93a1c"/><stop offset="1" stop-color="#ff6d00"/></linearGradient>' + '<filter id="bl" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="7"/></filter>' + "</defs>" + '<rect width="1440" height="2036.5" fill="#fff"/>' + '<g transform="scale(1 1.0832)">' + // frame (gaps where the ribbons curl over the corners)
+    '<path d="M500,62 L535,38 L1392,38 L1392,62 Z" fill="url(#fr)"/>' + '<rect x="1368" y="38" width="24" height="1462" fill="url(#fr)"/>' + '<path d="M52,345 L78,322 L78,1815 L52,1815 Z" fill="url(#fr)"/>' + '<path d="M52,1790 L910,1790 L910,1815 L52,1815 Z" fill="url(#fr)"/>' + corner + '<g transform="rotate(180 720 940)">' + corner + "</g>" + "</g></svg>");
+})();
 function PleCertificateDesign2(param) {
     let { rec, school, year, pdfRef } = param;
     const s = rec;
     const he = s.gender === "F" ? "her" : "his";
+    // Fonts (Playfair Display headings, Montserrat text, Yellowtail script name). Loaded once.
+    useEffect(()=>{
+        if (typeof document === "undefined" || document.getElementById("mkis-cert-fonts-d2")) return;
+        const l = document.createElement("link");
+        l.id = "mkis-cert-fonts-d2";
+        l.rel = "stylesheet";
+        l.href = "https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;800&family=Montserrat:wght@400;600;700&family=Yellowtail&display=swap";
+        document.head.appendChild(l);
+    }, []);
+    const displayName = d2TitleCase(s.name);
+    const nameFs = Math.max(38, Math.min(66, Math.floor(620 / (Math.max(displayName.length, 1) * 0.5))));
+    const schoolFs = Math.max(15, Math.min(24, Math.floor(600 / (Math.max((school.name || "").length, 1) * 0.9))));
+    const abs = {
+        position: "absolute"
+    };
+    const heading = {
+        fontFamily: D2_SERIF,
+        fontWeight: 700,
+        color: D2C.RED,
+        whiteSpace: "nowrap"
+    };
+    const label = {
+        fontWeight: 700,
+        fontSize: 12.5,
+        color: D2C.RED,
+        letterSpacing: 0.3
+    };
     return /*#__PURE__*/ _jsxs("div", {
         ref: pdfRef,
         className: "ple-cert",
@@ -18369,333 +18423,263 @@ function PleCertificateDesign2(param) {
             height: "297mm",
             boxSizing: "border-box",
             background: "white",
-            fontFamily: "'Segoe UI',system-ui,sans-serif",
-            overflow: "hidden",
+            fontFamily: D2_SANS,
+            color: D2C.INK,
             position: "relative",
-            display: "flex",
-            flexDirection: "column"
+            overflow: "hidden",
+            WebkitPrintColorAdjust: "exact",
+            printColorAdjust: "exact"
         },
         children: [
-            /*#__PURE__*/ _jsx("div", {
+            /*#__PURE__*/ _jsx("img", {
+                src: D2_BG_URI,
+                alt: "",
                 style: {
-                    position: "absolute",
-                    inset: 10,
-                    border: "9px solid #1e3a6e",
-                    borderRadius: 14,
-                    pointerEvents: "none",
-                    zIndex: 3
+                    ...abs,
+                    left: 0,
+                    top: 0,
+                    width: "100%",
+                    height: "100%",
+                    zIndex: 0
                 }
             }),
-            /*#__PURE__*/ _jsx("div", {
+            s.photo && /*#__PURE__*/ _jsx("img", {
+                src: s.photo,
+                alt: "Candidate",
                 style: {
-                    position: "absolute",
-                    inset: 21,
-                    border: "2.5px solid #22c55e",
-                    borderRadius: 8,
-                    pointerEvents: "none",
-                    zIndex: 3
-                }
-            }),
-            /*#__PURE__*/ _jsx("div", {
-                style: {
-                    position: "absolute",
-                    inset: 27,
-                    border: "1px solid #0ea5e9",
-                    borderRadius: 5,
-                    pointerEvents: "none",
-                    zIndex: 3
-                }
-            }),
-            /*#__PURE__*/ _jsx("div", {
-                style: {
-                    position: "absolute",
-                    top: 15,
-                    left: 15,
-                    width: 12,
-                    height: 12,
-                    borderRadius: "50%",
-                    background: "#0ea5e9",
-                    zIndex: 4
-                }
-            }),
-            /*#__PURE__*/ _jsx("div", {
-                style: {
-                    position: "absolute",
-                    top: 15,
-                    right: 15,
-                    width: 12,
-                    height: 12,
-                    borderRadius: "50%",
-                    background: "#22c55e",
-                    zIndex: 4
-                }
-            }),
-            /*#__PURE__*/ _jsx("div", {
-                style: {
-                    position: "absolute",
-                    bottom: 15,
-                    left: 15,
-                    width: 12,
-                    height: 12,
-                    borderRadius: "50%",
-                    background: "#22c55e",
-                    zIndex: 4
-                }
-            }),
-            /*#__PURE__*/ _jsx("div", {
-                style: {
-                    position: "absolute",
-                    bottom: 15,
-                    right: 15,
-                    width: 12,
-                    height: 12,
-                    borderRadius: "50%",
-                    background: "#0ea5e9",
-                    zIndex: 4
+                    ...abs,
+                    right: 62,
+                    top: 70,
+                    width: 80,
+                    height: 96,
+                    objectFit: "cover",
+                    borderRadius: 4,
+                    border: "3px solid ".concat(D2C.RED),
+                    zIndex: 2
                 }
             }),
             /*#__PURE__*/ _jsxs("div", {
                 style: {
-                    position: "relative",
-                    zIndex: 1,
-                    margin: 34,
+                    ...abs,
+                    left: 70,
+                    right: 70,
+                    top: 68,
+                    zIndex: 2,
                     display: "flex",
                     flexDirection: "column",
-                    flex: 1,
-                    borderRadius: 6,
-                    overflow: "hidden"
+                    alignItems: "center",
+                    textAlign: "center"
                 },
                 children: [
+                    // keep the header clear of the corner artwork when a school has no logo
+                    !school.logo && /*#__PURE__*/ _jsx("div", {
+                        style: {
+                            height: 96
+                        }
+                    }),
+                    school.logo && /*#__PURE__*/ _jsx("img", {
+                        src: school.logo,
+                        alt: "logo",
+                        style: {
+                            width: 96,
+                            height: 96,
+                            objectFit: "contain"
+                        }
+                    }),
+                    /*#__PURE__*/ _jsx("div", {
+                        style: {
+                            fontFamily: D2_SERIF,
+                            fontWeight: 800,
+                            fontSize: schoolFs,
+                            color: D2C.RED,
+                            textTransform: "uppercase",
+                            letterSpacing: 0.5,
+                            lineHeight: 1.2,
+                            marginTop: 5,
+                            whiteSpace: "nowrap"
+                        },
+                        children: school.name
+                    }),
                     /*#__PURE__*/ _jsxs("div", {
                         style: {
-                            background: "linear-gradient(135deg,#1e3a6e 0%,#1e40af 55%,#0ea5e9 100%)",
-                            color: "white",
-                            padding: "30px 36px",
-                            textAlign: "center",
-                            flexShrink: 0
+                            fontSize: 11,
+                            marginTop: 3,
+                            lineHeight: 1.4
                         },
                         children: [
-                            school.logo && /*#__PURE__*/ _jsx("img", {
-                                src: school.logo,
-                                alt: "logo",
-                                style: {
-                                    width: 52,
-                                    height: 52,
-                                    objectFit: "contain",
-                                    display: "block",
-                                    margin: "0 auto 8px"
-                                }
+                            school.poBox,
+                            " \xa0|\xa0 Tel: ",
+                            school.tel || "",
+                            " \xa0|\xa0 ",
+                            school.email || ""
+                        ]
+                    }),
+                    /*#__PURE__*/ _jsx("div", {
+                        style: {
+                            ...heading,
+                            fontSize: 34,
+                            lineHeight: 1.15,
+                            marginTop: 12
+                        },
+                        children: "Primary Leaving Examination"
+                    }),
+                    /*#__PURE__*/ _jsxs("div", {
+                        style: {
+                            ...heading,
+                            fontSize: 44,
+                            fontWeight: 800,
+                            lineHeight: 1.1
+                        },
+                        children: [
+                            "Recommendation ",
+                            year
+                        ]
+                    }),
+                    /*#__PURE__*/ _jsx("div", {
+                        style: {
+                            fontSize: 15,
+                            marginTop: 16,
+                            lineHeight: "22px"
+                        },
+                        children: "This is to certify that"
+                    }),
+                    /*#__PURE__*/ _jsx("div", {
+                        style: {
+                            fontFamily: D2_SCRIPT,
+                            fontSize: nameFs,
+                            lineHeight: 1.25,
+                            color: D2C.GOLD,
+                            textShadow: "0 0 6px rgba(255, 214, 90, 0.55)",
+                            whiteSpace: "nowrap",
+                            marginTop: 2
+                        },
+                        children: displayName
+                    }),
+                    s.indexNo && /*#__PURE__*/ _jsxs("div", {
+                        style: {
+                            fontSize: 14,
+                            marginTop: 2,
+                            lineHeight: "20px"
+                        },
+                        children: [
+                            "Index No: ",
+                            /*#__PURE__*/ _jsx("b", {
+                                children: s.indexNo
+                            })
+                        ]
+                    }),
+                    /*#__PURE__*/ _jsxs("div", {
+                        style: {
+                            fontSize: 14.5,
+                            lineHeight: "23px",
+                            marginTop: 8,
+                            maxWidth: 560
+                        },
+                        children: [
+                            "successfully completed ",
+                            he,
+                            " Primary Leaving Examination (PLE) in ",
+                            /*#__PURE__*/ _jsx("b", {
+                                children: year
                             }),
-                            /*#__PURE__*/ _jsx("div", {
+                            " at ",
+                            /*#__PURE__*/ _jsxs("b", {
                                 style: {
-                                    fontWeight: 900,
-                                    fontSize: 26,
-                                    letterSpacing: 1.5,
-                                    marginBottom: 6
-                                },
-                                children: school.name
-                            }),
-                            /*#__PURE__*/ _jsxs("div", {
-                                style: {
-                                    fontSize: 14,
-                                    opacity: 0.88,
-                                    marginBottom: 12
+                                    display: "inline-block"
                                 },
                                 children: [
-                                    school.poBox,
-                                    " \xa0|\xa0 Tel: ",
-                                    school.tel || "",
-                                    " \xa0|\xa0 ",
-                                    school.email || ""
-                                ]
-                            }),
-                            /*#__PURE__*/ _jsxs("div", {
-                                style: {
-                                    display: "inline-block",
-                                    background: "rgba(255,255,255,0.18)",
-                                    borderRadius: 24,
-                                    padding: "7px 28px",
-                                    fontSize: 15,
-                                    fontWeight: 800,
-                                    letterSpacing: 2,
-                                    textTransform: "uppercase",
-                                    border: "1.5px solid rgba(255,255,255,0.4)"
-                                },
-                                children: [
-                                    "Primary Leaving Examination — Recommendation ",
-                                    year
+                                    school.name,
+                                    " ",
+                                    PLE_CERT_LOCATION,
+                                    "."
                                 ]
                             })
                         ]
                     }),
                     /*#__PURE__*/ _jsxs("div", {
                         style: {
-                            flex: 1,
-                            display: "flex",
-                            flexDirection: "column",
-                            padding: "28px 36px",
-                            gap: 0
+                            display: "grid",
+                            gridTemplateColumns: "300px 1fr",
+                            gap: 28,
+                            width: "100%",
+                            marginTop: 16,
+                            textAlign: "left"
                         },
                         children: [
                             /*#__PURE__*/ _jsxs("div", {
                                 style: {
-                                    background: "#f0fdf4",
-                                    border: "2px solid #22c55e",
-                                    borderRadius: 12,
-                                    padding: "18px 24px",
-                                    marginBottom: 22,
-                                    textAlign: "center"
+                                    border: "1.5px solid ".concat(D2C.LINE),
+                                    borderRadius: 10,
+                                    padding: "10px 16px 10px",
+                                    background: D2C.PALE
                                 },
                                 children: [
                                     /*#__PURE__*/ _jsx("div", {
                                         style: {
-                                            fontSize: 14,
-                                            color: "#15803d",
+                                            fontFamily: D2_SERIF,
                                             fontWeight: 700,
-                                            marginBottom: 6,
-                                            textTransform: "uppercase",
-                                            letterSpacing: 1.5
+                                            fontSize: 16,
+                                            color: D2C.RED,
+                                            textAlign: "center",
+                                            borderBottom: "2px solid ".concat(D2C.ORANGE),
+                                            paddingBottom: 5,
+                                            marginBottom: 2
                                         },
-                                        children: "This is to certify that"
-                                    }),
-                                    s.photo && /*#__PURE__*/ _jsx("div", {
-                                        style: {
-                                            marginBottom: 8
-                                        },
-                                        children: /*#__PURE__*/ _jsx("img", {
-                                            src: s.photo,
-                                            alt: "Candidate",
-                                            style: {
-                                                width: 88,
-                                                height: 100,
-                                                objectFit: "cover",
-                                                borderRadius: 6,
-                                                border: "2px solid #22c55e"
-                                            }
-                                        })
+                                        children: "PLE Results"
                                     }),
                                     /*#__PURE__*/ _jsx("div", {
                                         style: {
-                                            fontWeight: 900,
-                                            fontSize: 25,
-                                            color: "#1e3a6e",
-                                            textTransform: "uppercase",
-                                            letterSpacing: 1.5,
-                                            marginBottom: 6
+                                            fontSize: 13.5
                                         },
-                                        children: s.name
-                                    }),
-                                    s.indexNo && /*#__PURE__*/ _jsxs("div", {
-                                        style: {
-                                            fontSize: 15,
-                                            color: "#374151",
-                                            marginBottom: 6
-                                        },
-                                        children: [
-                                            "Index No: ",
-                                            /*#__PURE__*/ _jsx("b", {
-                                                children: s.indexNo
-                                            })
-                                        ]
-                                    }),
-                                    /*#__PURE__*/ _jsxs("div", {
-                                        style: {
-                                            fontSize: 15,
-                                            color: "#374151",
-                                            lineHeight: 1.8
-                                        },
-                                        children: [
-                                            "successfully completed ",
-                                            he,
-                                            " Primary Leaving Examination (PLE) in ",
-                                            /*#__PURE__*/ _jsx("b", {
-                                                children: year
-                                            }),
-                                            " at ",
-                                            /*#__PURE__*/ _jsxs("b", {
-                                                children: [
-                                                    school.name,
-                                                    "."
-                                                ]
-                                            })
-                                        ]
-                                    })
-                                ]
-                            }),
-                            /*#__PURE__*/ _jsxs("div", {
-                                style: {
-                                    display: "grid",
-                                    gridTemplateColumns: "1fr 1fr",
-                                    gap: 20,
-                                    marginBottom: 22,
-                                    flex: 1
-                                },
-                                children: [
-                                    /*#__PURE__*/ _jsxs("div", {
-                                        style: {
-                                            background: "#eff6ff",
-                                            borderRadius: 12,
-                                            padding: "16px 18px",
-                                            border: "1.5px solid #bfdbfe",
-                                            display: "flex",
-                                            flexDirection: "column"
-                                        },
-                                        children: [
-                                            /*#__PURE__*/ _jsx("div", {
+                                        children: PLE_SUBJECTS.map((sub)=>{
+                                            var _s_results;
+                                            return /*#__PURE__*/ _jsxs("div", {
                                                 style: {
-                                                    fontWeight: 800,
-                                                    fontSize: 16,
-                                                    color: "#1e40af",
-                                                    marginBottom: 14,
-                                                    textTransform: "uppercase",
-                                                    letterSpacing: 0.5
-                                                },
-                                                children: "📊 PLE Results"
-                                            }),
-                                            PLE_SUBJECTS.map((sub)=>{
-                                                var _s_results;
-                                                return /*#__PURE__*/ _jsxs("div", {
-                                                    style: {
-                                                        display: "flex",
-                                                        justifyContent: "space-between",
-                                                        fontSize: 16,
-                                                        padding: "8px 0",
-                                                        borderBottom: "1px solid #dbeafe"
-                                                    },
-                                                    children: [
-                                                        /*#__PURE__*/ _jsx("span", {
-                                                            style: {
-                                                                color: "#374151"
-                                                            },
-                                                            children: pleSubLabel(sub)
-                                                        }),
-                                                        /*#__PURE__*/ _jsx("span", {
-                                                            style: {
-                                                                fontWeight: 900,
-                                                                fontSize: 18,
-                                                                color: "#1e40af"
-                                                            },
-                                                            children: ((_s_results = s.results) === null || _s_results === void 0 ? void 0 : _s_results[sub]) || "—"
-                                                        })
-                                                    ]
-                                                }, sub);
-                                            }),
-                                            /*#__PURE__*/ _jsxs("div", {
-                                                style: {
-                                                    marginTop: "auto",
                                                     display: "flex",
                                                     justifyContent: "space-between",
-                                                    fontWeight: 900,
-                                                    fontSize: 20,
-                                                    color: "#1e3a6e",
-                                                    borderTop: "2px solid #1e40af",
-                                                    paddingTop: 10
+                                                    alignItems: "baseline",
+                                                    padding: "5px 0",
+                                                    borderBottom: "1px solid ".concat(D2C.LINE)
                                                 },
                                                 children: [
                                                     /*#__PURE__*/ _jsx("span", {
+                                                        children: pleSubLabel(sub)
+                                                    }),
+                                                    /*#__PURE__*/ _jsx("b", {
+                                                        style: {
+                                                            fontSize: 15.5
+                                                        },
+                                                        children: ((_s_results = s.results) === null || _s_results === void 0 ? void 0 : _s_results[sub]) || "—"
+                                                    })
+                                                ]
+                                            }, sub);
+                                        })
+                                    }),
+                                    /*#__PURE__*/ _jsxs("div", {
+                                        style: {
+                                            marginTop: 6,
+                                            borderTop: "2px solid ".concat(D2C.ORANGE),
+                                            paddingTop: 5,
+                                            fontSize: 14
+                                        },
+                                        children: [
+                                            /*#__PURE__*/ _jsxs("div", {
+                                                style: {
+                                                    display: "flex",
+                                                    justifyContent: "space-between",
+                                                    alignItems: "baseline"
+                                                },
+                                                children: [
+                                                    /*#__PURE__*/ _jsx("b", {
+                                                        style: {
+                                                            color: D2C.RED
+                                                        },
                                                         children: "Total Agg"
                                                     }),
-                                                    /*#__PURE__*/ _jsx("span", {
+                                                    /*#__PURE__*/ _jsx("b", {
+                                                        style: {
+                                                            fontSize: 18
+                                                        },
                                                         children: s.totalAgg || "—"
                                                     })
                                                 ]
@@ -18704,165 +18688,141 @@ function PleCertificateDesign2(param) {
                                                 style: {
                                                     display: "flex",
                                                     justifyContent: "space-between",
-                                                    fontWeight: 900,
-                                                    fontSize: 20,
-                                                    color: "#dc2626",
-                                                    marginTop: 4
+                                                    alignItems: "baseline",
+                                                    marginTop: 2
                                                 },
                                                 children: [
-                                                    /*#__PURE__*/ _jsx("span", {
+                                                    /*#__PURE__*/ _jsx("b", {
+                                                        style: {
+                                                            color: D2C.RED
+                                                        },
                                                         children: "Division"
                                                     }),
-                                                    /*#__PURE__*/ _jsx("span", {
+                                                    /*#__PURE__*/ _jsx("b", {
+                                                        style: {
+                                                            fontSize: 18
+                                                        },
                                                         children: s.division || "—"
                                                     })
                                                 ]
                                             })
                                         ]
-                                    }),
-                                    /*#__PURE__*/ _jsx("div", {
-                                        style: {
-                                            display: "flex",
-                                            flexDirection: "column",
-                                            gap: 14,
-                                            fontSize: 15
-                                        },
-                                        children: [
-                                            [
-                                                "LIN",
-                                                s.lin
-                                            ],
-                                            [
-                                                "Co-curricular Activities",
-                                                s.cocurricular
-                                            ],
-                                            [
-                                                "Leadership Position",
-                                                s.leadership
-                                            ],
-                                            [
-                                                "Conduct",
-                                                s.conduct || "Good"
-                                            ]
-                                        ].map((param)=>{
-                                            let [label, val] = param;
-                                            return /*#__PURE__*/ _jsxs("div", {
-                                                style: {
-                                                    background: "#f8fafc",
-                                                    borderRadius: 10,
-                                                    padding: "12px 14px",
-                                                    border: "1px solid #e5e7eb",
-                                                    flex: 1
-                                                },
-                                                children: [
-                                                    /*#__PURE__*/ _jsx("div", {
-                                                        style: {
-                                                            fontWeight: 700,
-                                                            color: "#374151",
-                                                            fontSize: 13,
-                                                            textTransform: "uppercase",
-                                                            letterSpacing: 0.5,
-                                                            marginBottom: 5
-                                                        },
-                                                        children: label
-                                                    }),
-                                                    /*#__PURE__*/ _jsx("div", {
-                                                        style: {
-                                                            color: "#1d4ed8",
-                                                            fontWeight: 700,
-                                                            fontSize: 16
-                                                        },
-                                                        children: val || /*#__PURE__*/ _jsx("span", {
-                                                            style: {
-                                                                color: "#9ca3af"
-                                                            },
-                                                            children: "—"
-                                                        })
-                                                    })
-                                                ]
-                                            }, label);
-                                        })
                                     })
                                 ]
                             }),
                             /*#__PURE__*/ _jsx("div", {
                                 style: {
-                                    background: "#fefce8",
-                                    borderRadius: 10,
-                                    padding: "14px 20px",
-                                    border: "1.5px solid #fde68a",
-                                    textAlign: "center",
-                                    fontSize: 16,
-                                    color: "#374151",
-                                    fontStyle: "italic",
-                                    lineHeight: 1.8,
-                                    marginBottom: 20
-                                },
-                                children: pleRecommendation(s.name, s.gender, s.totalAgg, s.division)
-                            }),
-                            /*#__PURE__*/ _jsxs("div", {
-                                style: {
                                     display: "flex",
-                                    justifyContent: "space-between",
-                                    alignItems: "flex-end",
-                                    paddingTop: 16,
-                                    borderTop: "2.5px solid #1e3a6e"
+                                    flexDirection: "column",
+                                    gap: 10,
+                                    fontSize: 13.5,
+                                    paddingTop: 2
                                 },
                                 children: [
-                                    /*#__PURE__*/ _jsxs("div", {
+                                    [
+                                        "LIN",
+                                        s.lin
+                                    ],
+                                    [
+                                        "Co-curricular Activities",
+                                        s.cocurricular
+                                    ],
+                                    [
+                                        "Leadership Position",
+                                        s.leadership
+                                    ],
+                                    [
+                                        "Conduct",
+                                        s.conduct || "Good"
+                                    ]
+                                ].map((param)=>{
+                                    let [lbl, val] = param;
+                                    return /*#__PURE__*/ _jsxs("div", {
                                         children: [
                                             /*#__PURE__*/ _jsx("div", {
                                                 style: {
-                                                    borderBottom: "1px solid #374151",
-                                                    width: 200,
-                                                    marginBottom: 6
-                                                }
+                                                    ...label,
+                                                    marginBottom: 2
+                                                },
+                                                children: lbl
                                             }),
                                             /*#__PURE__*/ _jsx("div", {
                                                 style: {
-                                                    fontWeight: 900,
-                                                    fontSize: 15,
-                                                    color: "#1e3a6e",
-                                                    textTransform: "uppercase",
-                                                    letterSpacing: 0.5
+                                                    borderBottom: "1.5px solid ".concat(D2C.LINE),
+                                                    paddingBottom: 2,
+                                                    minHeight: 19
                                                 },
-                                                children: school.headTeacher || "HEAD TEACHER"
-                                            }),
-                                            /*#__PURE__*/ _jsxs("div", {
-                                                style: {
-                                                    fontSize: 14,
-                                                    color: "#6b7280",
-                                                    marginTop: 2
-                                                },
-                                                children: [
-                                                    "Headteacher, ",
-                                                    school.name
-                                                ]
+                                                children: val || "—"
                                             })
                                         ]
-                                    }),
-                                    /*#__PURE__*/ _jsxs("div", {
-                                        style: {
-                                            textAlign: "right",
-                                            fontSize: 15,
-                                            color: "#374151"
-                                        },
-                                        children: [
-                                            "Date of Issuance:",
-                                            /*#__PURE__*/ _jsx("br", {}),
-                                            /*#__PURE__*/ _jsx("span", {
-                                                style: {
-                                                    borderBottom: "1px solid #374151",
-                                                    display: "inline-block",
-                                                    width: 160,
-                                                    marginTop: 8
-                                                },
-                                                children: "\xa0"
-                                            })
-                                        ]
-                                    })
-                                ]
+                                    }, lbl);
+                                })
                             })
+                        ]
+                    }),
+                    /*#__PURE__*/ _jsx("div", {
+                        style: {
+                            maxWidth: 540,
+                            marginTop: 20,
+                            fontSize: 13.5,
+                            lineHeight: 1.6
+                        },
+                        children: pleRecommendation(s.name, s.gender, s.totalAgg, s.division)
+                    })
+                ]
+            }),
+            /*#__PURE__*/ _jsxs("div", {
+                style: {
+                    ...abs,
+                    left: 70,
+                    right: 70,
+                    top: 856,
+                    textAlign: "center",
+                    fontSize: 14.5,
+                    zIndex: 2
+                },
+                children: [
+                    "Date of Issuance: ",
+                    /*#__PURE__*/ _jsx("span", {
+                        style: {
+                            display: "inline-block",
+                            width: 170,
+                            borderBottom: "1.5px solid ".concat(D2C.INK)
+                        },
+                        children: "\xa0"
+                    })
+                ]
+            }),
+            /*#__PURE__*/ _jsxs("div", {
+                style: {
+                    ...abs,
+                    left: 217,
+                    top: 918,
+                    width: 360,
+                    textAlign: "center",
+                    borderTop: "2px solid ".concat(D2C.INK),
+                    paddingTop: 6,
+                    zIndex: 2
+                },
+                children: [
+                    /*#__PURE__*/ _jsx("div", {
+                        style: {
+                            ...heading,
+                            fontSize: 20,
+                            lineHeight: 1.3,
+                            textTransform: "uppercase",
+                            letterSpacing: 0.5
+                        },
+                        children: school.headTeacher || "HEAD TEACHER"
+                    }),
+                    /*#__PURE__*/ _jsxs("div", {
+                        style: {
+                            fontSize: 13,
+                            lineHeight: "18px"
+                        },
+                        children: [
+                            "Headteacher, ",
+                            school.name
                         ]
                     })
                 ]
@@ -18870,10 +18830,52 @@ function PleCertificateDesign2(param) {
         ]
     });
 }
+// ─── PLE CERTIFICATE · DESIGN 3 (Blue Wave "Appreciation" style) ─────────────
+// The wave artwork is an SVG image (not CSS gradients) so it rasterizes reliably
+// through html2canvas for PDF export. Only the writing is real text.
+// Re-uses pcSvgUri and PLE_CERT_LOCATION defined with Design 1 above.
+const D3C = {
+    NAVY: "#0a2472",
+    BLUE: "#0b8ff0",
+    MID: "#1f5fc0",
+    TEXT: "#3c4d86"
+};
+const D3_SANS = "'Montserrat','Segoe UI',Arial,sans-serif";
+const D3_SCRIPT = "'Great Vibes','Brush Script MT','Segoe Script','Lucida Handwriting',cursive";
+// "NAKATO MARY GRACE" -> "Nakato Mary Grace" (the script font reads badly in all caps)
+const d3TitleCase = (n)=>String(n || "").toLowerCase().replace(/(^|[\s'’\-.])([a-z])/g, (m, a, b)=>a + b.toUpperCase());
+// Blue waves: top (with grey ripple + right-hand crescent) and bottom (left
+// swoosh + right corner). Authored on a 1440x1977 grid, scaled to A4.
+const D3_BG_URI = pcSvgUri('<svg xmlns="http://www.w3.org/2000/svg" width="794" height="1123" viewBox="0 0 1440 2036.5">' + "<defs>" + '<linearGradient id="a" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#0a2a8f"/><stop offset="0.55" stop-color="#0b57c9"/><stop offset="1" stop-color="#0c92f2"/></linearGradient>' + '<linearGradient id="c" x1="0" y1="0" x2="1" y2="0.6"><stop offset="0" stop-color="#0d8ff0"/><stop offset="0.5" stop-color="#0b57c9"/><stop offset="1" stop-color="#0a2a8f"/></linearGradient>' + '<linearGradient id="n" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#0a2a8f"/><stop offset="1" stop-color="#0b57c9"/></linearGradient>' + '<linearGradient id="b" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#0d8ff0"/><stop offset="0.5" stop-color="#0b57c9"/><stop offset="1" stop-color="#0a2a8f"/></linearGradient>' + '<linearGradient id="r" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#0b57c9"/><stop offset="1" stop-color="#0a2a8f"/></linearGradient>' + "</defs>" + '<rect width="1440" height="2036.5" fill="#fff"/>' + '<g transform="scale(1 1.03015)">' + // top
+'<path d="M0,0 L1440,0 L1440,100 C1250,48 1000,48 765,118 C590,180 420,300 210,258 C120,238 50,205 0,165 Z" fill="url(#a)"/>' + '<path d="M0,208 C110,300 280,300 450,262 C530,244 590,215 625,186 C560,255 430,340 250,362 C130,372 50,362 0,362 Z" fill="#e4e8f0"/>' + '<path d="M772,128 C1000,66 1250,66 1440,112 L1440,352 C1330,235 1090,150 772,128 Z" fill="url(#c)"/>' + // bottom-left
+'<path d="M0,1640 C140,1770 430,1880 725,1905 C470,1900 170,1840 0,1776 Z" fill="url(#n)"/>' + '<path d="M0,1792 C230,1880 470,1930 800,1938 C1050,1942 1250,1920 1440,1885 L1440,1977 L0,1977 Z" fill="url(#b)"/>' + '<path d="M0,1885 C300,1940 600,1975 900,1990" fill="none" stroke="#fff" stroke-width="9"/>' + // bottom-right
+'<path d="M850,1848 C1050,1770 1250,1690 1440,1700 L1440,1812 C1250,1788 1040,1778 840,1850 Z" fill="#e4e8f0"/>' + '<path d="M840,1850 C1040,1778 1250,1788 1440,1812 L1440,1977 L905,1977 C885,1930 862,1890 840,1850 Z" fill="url(#r)"/>' + "</g></svg>");
 function PleCertificateDesign3(param) {
     let { rec, school, year, pdfRef } = param;
     const s = rec;
     const he = s.gender === "F" ? "her" : "his";
+    // Fonts (Montserrat text, Great Vibes script name). Loaded once.
+    useEffect(()=>{
+        if (typeof document === "undefined" || document.getElementById("mkis-cert-fonts-d3")) return;
+        const l = document.createElement("link");
+        l.id = "mkis-cert-fonts-d3";
+        l.rel = "stylesheet";
+        l.href = "https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;800&family=Great+Vibes&display=swap";
+        document.head.appendChild(l);
+    }, []);
+    const displayName = d3TitleCase(s.name);
+    const nameFs = Math.max(36, Math.min(64, Math.floor(600 / (Math.max(displayName.length, 1) * 0.5))));
+    const schoolFs = Math.max(15, Math.min(26, Math.floor(640 / (Math.max((school.name || "").length, 1) * 0.9))));
+    const abs = {
+        position: "absolute"
+    };
+    const label = {
+        fontWeight: 700,
+        fontSize: 13,
+        textTransform: "uppercase",
+        letterSpacing: 1,
+        color: D3C.NAVY
+    };
     return /*#__PURE__*/ _jsxs("div", {
         ref: pdfRef,
         className: "ple-cert",
@@ -18881,188 +18883,173 @@ function PleCertificateDesign3(param) {
             width: "210mm",
             height: "297mm",
             boxSizing: "border-box",
-            fontFamily: "Georgia,serif",
-            background: "#fdfaf5",
-            overflow: "hidden",
+            background: "white",
+            fontFamily: D3_SANS,
+            color: D3C.TEXT,
             position: "relative",
-            display: "flex",
-            flexDirection: "column"
+            overflow: "hidden",
+            WebkitPrintColorAdjust: "exact",
+            printColorAdjust: "exact"
         },
         children: [
-            /*#__PURE__*/ _jsx("div", {
+            /*#__PURE__*/ _jsx("img", {
+                src: D3_BG_URI,
+                alt: "",
                 style: {
-                    position: "absolute",
-                    inset: 0,
-                    border: "13px solid #7b1c1c",
-                    pointerEvents: "none",
-                    zIndex: 2
+                    ...abs,
+                    left: 0,
+                    top: 0,
+                    width: "100%",
+                    height: "100%",
+                    zIndex: 0
                 }
             }),
-            /*#__PURE__*/ _jsx("div", {
+            s.photo && /*#__PURE__*/ _jsx("img", {
+                src: s.photo,
+                alt: "Candidate",
                 style: {
-                    position: "absolute",
-                    inset: 20,
-                    border: "2px solid #d4af37",
-                    pointerEvents: "none",
+                    ...abs,
+                    right: 46,
+                    top: 30,
+                    width: 78,
+                    height: 94,
+                    objectFit: "cover",
+                    borderRadius: 4,
+                    border: "3px solid #fff",
+                    boxShadow: "0 1px 4px rgba(0,0,0,0.35)",
                     zIndex: 2
                 }
             }),
             /*#__PURE__*/ _jsxs("div", {
                 style: {
-                    position: "relative",
-                    zIndex: 1,
-                    padding: "32px 44px 28px",
+                    ...abs,
+                    left: 60,
+                    right: 60,
+                    top: 106,
+                    zIndex: 2,
                     display: "flex",
                     flexDirection: "column",
-                    height: "100%",
-                    boxSizing: "border-box"
+                    alignItems: "center",
+                    textAlign: "center"
                 },
                 children: [
-                    /*#__PURE__*/ _jsxs("div", {
+                    // keep the header clear of the corner artwork when a school has no logo
+                    !school.logo && /*#__PURE__*/ _jsx("div", {
                         style: {
-                            textAlign: "center",
-                            borderBottom: "2.5px solid #d4af37",
-                            paddingBottom: 14,
-                            marginBottom: 18
+                            height: 100
+                        }
+                    }),
+                    school.logo && /*#__PURE__*/ _jsx("img", {
+                        src: school.logo,
+                        alt: "logo",
+                        style: {
+                            width: 100,
+                            height: 100,
+                            objectFit: "contain"
+                        }
+                    }),
+                    /*#__PURE__*/ _jsx("div", {
+                        style: {
+                            fontWeight: 800,
+                            fontSize: schoolFs,
+                            color: D3C.NAVY,
+                            letterSpacing: 0.5,
+                            textTransform: "uppercase",
+                            lineHeight: 1.2,
+                            marginTop: 6,
+                            whiteSpace: "nowrap"
                         },
-                        children: [
-                            school.logo && /*#__PURE__*/ _jsx("img", {
-                                src: school.logo,
-                                alt: "logo",
-                                style: {
-                                    width: 52,
-                                    height: 52,
-                                    objectFit: "contain",
-                                    display: "block",
-                                    margin: "0 auto 8px"
-                                }
-                            }),
-                            /*#__PURE__*/ _jsx("div", {
-                                style: {
-                                    fontWeight: 900,
-                                    fontSize: 26,
-                                    color: "#7b1c1c",
-                                    textTransform: "uppercase",
-                                    letterSpacing: 2,
-                                    lineHeight: 1.3
-                                },
-                                children: school.name
-                            }),
-                            /*#__PURE__*/ _jsxs("div", {
-                                style: {
-                                    fontSize: 14,
-                                    color: "#374151",
-                                    marginTop: 6
-                                },
-                                children: [
-                                    school.poBox,
-                                    " \xa0\xb7\xa0 Tel: ",
-                                    school.tel || "",
-                                    " \xa0\xb7\xa0 ",
-                                    school.email || ""
-                                ]
-                            })
-                        ]
+                        children: school.name
                     }),
                     /*#__PURE__*/ _jsxs("div", {
                         style: {
-                            textAlign: "center",
-                            marginBottom: 20
+                            fontSize: 11.5,
+                            marginTop: 3,
+                            lineHeight: 1.4
                         },
                         children: [
-                            /*#__PURE__*/ _jsx("div", {
-                                style: {
-                                    fontSize: 28,
-                                    fontWeight: 900,
-                                    color: "#7b1c1c",
-                                    textTransform: "uppercase",
-                                    letterSpacing: 3
-                                },
-                                children: "PLE Recommendation"
-                            }),
-                            /*#__PURE__*/ _jsxs("div", {
-                                style: {
-                                    fontSize: 14,
-                                    color: "#6b7280",
-                                    marginTop: 5,
-                                    fontStyle: "italic"
-                                },
-                                children: [
-                                    "Uganda National Examinations Board — ",
-                                    year
-                                ]
-                            })
+                            school.poBox,
+                            " \xa0\xb7\xa0 Tel: ",
+                            school.tel || "",
+                            " \xa0\xb7\xa0 ",
+                            school.email || ""
                         ]
                     }),
                     /*#__PURE__*/ _jsx("div", {
                         style: {
-                            textAlign: "center",
-                            fontSize: 16,
-                            margin: "0 0 14px",
-                            color: "#374151",
-                            fontStyle: "italic"
+                            fontWeight: 800,
+                            fontSize: 40,
+                            lineHeight: 1.1,
+                            color: D3C.NAVY,
+                            textTransform: "uppercase",
+                            marginTop: 12,
+                            whiteSpace: "nowrap"
                         },
-                        children: "This is to certify that"
-                    }),
-                    s.photo && /*#__PURE__*/ _jsx("div", {
-                        style: {
-                            textAlign: "center",
-                            marginBottom: 14
-                        },
-                        children: /*#__PURE__*/ _jsx("img", {
-                            src: s.photo,
-                            alt: "Candidate",
-                            style: {
-                                width: 88,
-                                height: 100,
-                                objectFit: "cover",
-                                borderRadius: 6,
-                                border: "2px solid #7b1c1c"
-                            }
-                        })
+                        children: "PLE Recommendation"
                     }),
                     /*#__PURE__*/ _jsxs("div", {
                         style: {
-                            textAlign: "center",
-                            marginBottom: 14
+                            fontWeight: 700,
+                            fontSize: 16,
+                            lineHeight: "22px",
+                            color: D3C.BLUE,
+                            textTransform: "uppercase",
+                            letterSpacing: 0.5,
+                            marginTop: 4
                         },
                         children: [
-                            /*#__PURE__*/ _jsx("div", {
+                            "Uganda National Examinations Board — ",
+                            year
+                        ]
+                    }),
+                    /*#__PURE__*/ _jsx("div", {
+                        style: {
+                            fontWeight: 700,
+                            fontSize: 15,
+                            letterSpacing: 1.5,
+                            textTransform: "uppercase",
+                            color: D3C.NAVY,
+                            marginTop: 20,
+                            lineHeight: "20px"
+                        },
+                        children: "This is to certify that"
+                    }),
+                    /*#__PURE__*/ _jsx("div", {
+                        style: {
+                            marginTop: 6,
+                            width: 600,
+                            borderBottom: "2px solid ".concat(D3C.MID),
+                            paddingBottom: 2,
+                            fontFamily: D3_SCRIPT,
+                            fontSize: nameFs,
+                            lineHeight: 1.2,
+                            color: D3C.NAVY,
+                            whiteSpace: "nowrap"
+                        },
+                        children: displayName
+                    }),
+                    s.indexNo && /*#__PURE__*/ _jsxs("div", {
+                        style: {
+                            fontSize: 14,
+                            marginTop: 8,
+                            lineHeight: "20px"
+                        },
+                        children: [
+                            "Index No. ",
+                            /*#__PURE__*/ _jsx("b", {
                                 style: {
-                                    display: "inline-block",
-                                    background: "#7b1c1c",
-                                    color: "white",
-                                    padding: "9px 36px",
-                                    borderRadius: 5,
-                                    fontWeight: 900,
-                                    fontSize: 23,
-                                    textTransform: "uppercase",
-                                    letterSpacing: 2
+                                    color: D3C.NAVY
                                 },
-                                children: s.name
-                            }),
-                            s.indexNo && /*#__PURE__*/ _jsxs("div", {
-                                style: {
-                                    fontSize: 16,
-                                    color: "#374151",
-                                    marginTop: 10
-                                },
-                                children: [
-                                    "Index No. ",
-                                    /*#__PURE__*/ _jsx("b", {
-                                        children: s.indexNo
-                                    })
-                                ]
+                                children: s.indexNo
                             })
                         ]
                     }),
                     /*#__PURE__*/ _jsxs("div", {
                         style: {
-                            textAlign: "center",
-                            fontSize: 16,
-                            color: "#374151",
-                            marginBottom: 22,
-                            lineHeight: 1.9
+                            fontSize: 14.5,
+                            lineHeight: "23px",
+                            marginTop: 8,
+                            maxWidth: 620
                         },
                         children: [
                             "successfully completed ",
@@ -19071,261 +19058,252 @@ function PleCertificateDesign3(param) {
                             /*#__PURE__*/ _jsx("br", {}),
                             "in ",
                             /*#__PURE__*/ _jsx("b", {
+                                style: {
+                                    color: D3C.NAVY
+                                },
                                 children: year
                             }),
                             " at ",
-                            /*#__PURE__*/ _jsx("b", {
+                            /*#__PURE__*/ _jsxs("b", {
                                 style: {
-                                    color: "#7b1c1c"
+                                    color: D3C.NAVY,
+                                    display: "inline-block"
                                 },
-                                children: school.name
+                                children: [
+                                    school.name,
+                                    " ",
+                                    PLE_CERT_LOCATION,
+                                    "."
+                                ]
                             })
                         ]
                     }),
                     /*#__PURE__*/ _jsxs("div", {
                         style: {
-                            flex: 1,
-                            display: "flex",
-                            flexDirection: "column",
-                            justifyContent: "space-between"
+                            display: "grid",
+                            gridTemplateColumns: "320px 1fr",
+                            gap: 32,
+                            width: "100%",
+                            marginTop: 20,
+                            textAlign: "left"
                         },
                         children: [
                             /*#__PURE__*/ _jsxs("div", {
                                 style: {
-                                    display: "grid",
-                                    gridTemplateColumns: "1fr 1fr",
-                                    gap: 26,
-                                    marginBottom: 20
+                                    border: "1.5px solid #c7d8f5",
+                                    borderRadius: 10,
+                                    padding: "10px 16px 10px",
+                                    background: "#f4f8ff"
                                 },
                                 children: [
+                                    /*#__PURE__*/ _jsx("div", {
+                                        style: {
+                                            ...label,
+                                            textAlign: "center",
+                                            letterSpacing: 2,
+                                            borderBottom: "2px solid ".concat(D3C.MID),
+                                            paddingBottom: 6,
+                                            marginBottom: 2
+                                        },
+                                        children: "PLE Results"
+                                    }),
+                                    /*#__PURE__*/ _jsx("div", {
+                                        style: {
+                                            fontSize: 14
+                                        },
+                                        children: PLE_SUBJECTS.map((sub)=>{
+                                            var _s_results;
+                                            return /*#__PURE__*/ _jsxs("div", {
+                                                style: {
+                                                    display: "flex",
+                                                    justifyContent: "space-between",
+                                                    alignItems: "baseline",
+                                                    padding: "5px 0",
+                                                    borderBottom: "1px solid #d9e4f8"
+                                                },
+                                                children: [
+                                                    /*#__PURE__*/ _jsxs("span", {
+                                                        children: [
+                                                            pleSubLabel(sub),
+                                                            ":"
+                                                        ]
+                                                    }),
+                                                    /*#__PURE__*/ _jsx("b", {
+                                                        style: {
+                                                            fontSize: 16,
+                                                            color: D3C.NAVY
+                                                        },
+                                                        children: ((_s_results = s.results) === null || _s_results === void 0 ? void 0 : _s_results[sub]) || "—"
+                                                    })
+                                                ]
+                                            }, sub);
+                                        })
+                                    }),
                                     /*#__PURE__*/ _jsxs("div", {
                                         style: {
-                                            border: "1.5px solid #d4af37",
-                                            borderRadius: 8,
-                                            overflow: "hidden"
+                                            marginTop: 6,
+                                            borderTop: "2px solid ".concat(D3C.MID),
+                                            paddingTop: 5,
+                                            fontSize: 14.5
                                         },
                                         children: [
-                                            /*#__PURE__*/ _jsx("div", {
+                                            /*#__PURE__*/ _jsxs("div", {
                                                 style: {
-                                                    background: "#7b1c1c",
-                                                    color: "white",
-                                                    fontWeight: 900,
-                                                    fontSize: 15,
-                                                    padding: "9px 14px",
-                                                    textAlign: "center",
-                                                    letterSpacing: 1.5,
-                                                    textTransform: "uppercase"
+                                                    display: "flex",
+                                                    justifyContent: "space-between",
+                                                    alignItems: "baseline"
                                                 },
-                                                children: "PLE Results"
+                                                children: [
+                                                    /*#__PURE__*/ _jsx("b", {
+                                                        style: {
+                                                            color: D3C.NAVY
+                                                        },
+                                                        children: "Total Agg:"
+                                                    }),
+                                                    /*#__PURE__*/ _jsx("b", {
+                                                        style: {
+                                                            fontSize: 18,
+                                                            color: D3C.NAVY
+                                                        },
+                                                        children: s.totalAgg || "—"
+                                                    })
+                                                ]
                                             }),
                                             /*#__PURE__*/ _jsxs("div", {
                                                 style: {
-                                                    padding: "14px 18px",
-                                                    background: "#fffbeb"
+                                                    display: "flex",
+                                                    justifyContent: "space-between",
+                                                    alignItems: "baseline",
+                                                    marginTop: 2
                                                 },
                                                 children: [
-                                                    PLE_SUBJECTS.map((sub)=>{
-                                                        var _s_results;
-                                                        return /*#__PURE__*/ _jsxs("div", {
-                                                            style: {
-                                                                display: "flex",
-                                                                justifyContent: "space-between",
-                                                                fontSize: 16,
-                                                                padding: "7px 0",
-                                                                borderBottom: "1px solid #fde68a"
-                                                            },
-                                                            children: [
-                                                                /*#__PURE__*/ _jsxs("span", {
-                                                                    children: [
-                                                                        pleSubLabel(sub),
-                                                                        ":"
-                                                                    ]
-                                                                }),
-                                                                /*#__PURE__*/ _jsx("span", {
-                                                                    style: {
-                                                                        fontWeight: 900,
-                                                                        fontSize: 20
-                                                                    },
-                                                                    children: ((_s_results = s.results) === null || _s_results === void 0 ? void 0 : _s_results[sub]) || "—"
-                                                                })
-                                                            ]
-                                                        }, sub);
-                                                    }),
-                                                    /*#__PURE__*/ _jsxs("div", {
+                                                    /*#__PURE__*/ _jsx("b", {
                                                         style: {
-                                                            marginTop: 12,
-                                                            paddingTop: 10,
-                                                            borderTop: "2px solid #d4af37",
-                                                            display: "flex",
-                                                            justifyContent: "space-between",
-                                                            fontWeight: 900,
-                                                            fontSize: 20
+                                                            color: D3C.NAVY
                                                         },
-                                                        children: [
-                                                            /*#__PURE__*/ _jsx("span", {
-                                                                children: "Total Agg:"
-                                                            }),
-                                                            /*#__PURE__*/ _jsx("span", {
-                                                                children: s.totalAgg || "—"
-                                                            })
-                                                        ]
+                                                        children: "Division:"
                                                     }),
-                                                    /*#__PURE__*/ _jsxs("div", {
+                                                    /*#__PURE__*/ _jsx("b", {
                                                         style: {
-                                                            display: "flex",
-                                                            justifyContent: "space-between",
-                                                            fontWeight: 900,
-                                                            fontSize: 20,
-                                                            color: "#7b1c1c",
-                                                            marginTop: 5
+                                                            fontSize: 18,
+                                                            color: D3C.BLUE
                                                         },
-                                                        children: [
-                                                            /*#__PURE__*/ _jsx("span", {
-                                                                children: "Division:"
-                                                            }),
-                                                            /*#__PURE__*/ _jsx("span", {
-                                                                children: s.division || "—"
-                                                            })
-                                                        ]
+                                                        children: s.division || "—"
                                                     })
                                                 ]
                                             })
                                         ]
-                                    }),
-                                    /*#__PURE__*/ _jsx("div", {
-                                        style: {
-                                            display: "flex",
-                                            flexDirection: "column",
-                                            gap: 16,
-                                            fontSize: 16,
-                                            justifyContent: "center"
-                                        },
-                                        children: [
-                                            [
-                                                "LIN",
-                                                s.lin
-                                            ],
-                                            [
-                                                "Co-curricular Activities",
-                                                s.cocurricular
-                                            ],
-                                            [
-                                                "Leadership Position",
-                                                s.leadership
-                                            ],
-                                            [
-                                                "Conduct",
-                                                s.conduct || "Good"
-                                            ]
-                                        ].map((param)=>{
-                                            let [label, val] = param;
-                                            return /*#__PURE__*/ _jsxs("div", {
-                                                children: [
-                                                    /*#__PURE__*/ _jsxs("div", {
-                                                        style: {
-                                                            fontWeight: 800,
-                                                            color: "#7b1c1c",
-                                                            marginBottom: 4,
-                                                            fontSize: 15
-                                                        },
-                                                        children: [
-                                                            label,
-                                                            ":"
-                                                        ]
-                                                    }),
-                                                    /*#__PURE__*/ _jsx("div", {
-                                                        style: {
-                                                            borderBottom: "1.5px solid #d4af37",
-                                                            color: "#1d4ed8",
-                                                            fontStyle: "italic",
-                                                            paddingBottom: 3,
-                                                            minHeight: 20,
-                                                            fontSize: 16
-                                                        },
-                                                        children: val || ""
-                                                    })
-                                                ]
-                                            }, label);
-                                        })
                                     })
                                 ]
                             }),
                             /*#__PURE__*/ _jsx("div", {
                                 style: {
-                                    textAlign: "center",
-                                    fontSize: 16,
-                                    color: "#374151",
-                                    fontStyle: "italic",
-                                    marginBottom: 16,
-                                    lineHeight: 1.9,
-                                    padding: "12px 16px",
-                                    background: "#fffbeb",
-                                    borderRadius: 8,
-                                    border: "1px solid #fde68a"
-                                },
-                                children: pleRecommendation(s.name, s.gender, s.totalAgg, s.division)
-                            }),
-                            /*#__PURE__*/ _jsxs("div", {
-                                style: {
                                     display: "flex",
-                                    justifyContent: "space-between",
-                                    alignItems: "flex-end",
-                                    borderTop: "1.5px solid #d4af37",
-                                    paddingTop: 14
+                                    flexDirection: "column",
+                                    gap: 10,
+                                    fontSize: 13.5,
+                                    paddingTop: 2
                                 },
                                 children: [
-                                    /*#__PURE__*/ _jsxs("div", {
+                                    [
+                                        "LIN",
+                                        s.lin
+                                    ],
+                                    [
+                                        "Co-curricular Activities",
+                                        s.cocurricular
+                                    ],
+                                    [
+                                        "Leadership Position",
+                                        s.leadership
+                                    ],
+                                    [
+                                        "Conduct",
+                                        s.conduct || "Good"
+                                    ]
+                                ].map((param)=>{
+                                    let [lbl, val] = param;
+                                    return /*#__PURE__*/ _jsxs("div", {
                                         children: [
-                                            /*#__PURE__*/ _jsx("div", {
+                                            /*#__PURE__*/ _jsxs("div", {
                                                 style: {
-                                                    borderBottom: "1px solid #374151",
-                                                    width: 200,
-                                                    marginBottom: 6
-                                                }
+                                                    ...label,
+                                                    fontSize: 12,
+                                                    marginBottom: 2
+                                                },
+                                                children: [
+                                                    lbl,
+                                                    ":"
+                                                ]
                                             }),
                                             /*#__PURE__*/ _jsx("div", {
                                                 style: {
-                                                    fontWeight: 900,
-                                                    fontSize: 15,
-                                                    color: "#7b1c1c",
-                                                    textTransform: "uppercase",
-                                                    letterSpacing: 0.5
+                                                    color: D3C.MID,
+                                                    borderBottom: "1.5px solid #b9cdf0",
+                                                    paddingBottom: 2,
+                                                    minHeight: 19
                                                 },
-                                                children: school.headTeacher || "HEAD TEACHER"
-                                            }),
-                                            /*#__PURE__*/ _jsx("div", {
-                                                style: {
-                                                    fontSize: 14,
-                                                    color: "#6b7280",
-                                                    marginTop: 2
-                                                },
-                                                children: "Headteacher"
+                                                children: val || ""
                                             })
                                         ]
-                                    }),
-                                    /*#__PURE__*/ _jsxs("div", {
-                                        style: {
-                                            textAlign: "right",
-                                            fontSize: 15,
-                                            color: "#374151"
-                                        },
-                                        children: [
-                                            "Date of Issuance:",
-                                            /*#__PURE__*/ _jsx("br", {}),
-                                            /*#__PURE__*/ _jsx("span", {
-                                                style: {
-                                                    borderBottom: "1px solid #374151",
-                                                    display: "inline-block",
-                                                    width: 160,
-                                                    marginTop: 8
-                                                },
-                                                children: "\xa0"
-                                            })
-                                        ]
-                                    })
-                                ]
+                                    }, lbl);
+                                })
                             })
                         ]
+                    }),
+                    /*#__PURE__*/ _jsx("div", {
+                        style: {
+                            maxWidth: 600,
+                            marginTop: 24,
+                            fontSize: 13.5,
+                            lineHeight: 1.6
+                        },
+                        children: pleRecommendation(s.name, s.gender, s.totalAgg, s.division)
+                    })
+                ]
+            }),
+            /*#__PURE__*/ _jsx("div", {
+                style: {
+                    ...abs,
+                    left: 131,
+                    top: 915,
+                    width: 200,
+                    textAlign: "center",
+                    borderTop: "2px solid ".concat(D3C.MID),
+                    paddingTop: 6,
+                    zIndex: 2
+                },
+                children: /*#__PURE__*/ _jsx("div", {
+                    style: label,
+                    children: "Date of Issuance:"
+                })
+            }),
+            /*#__PURE__*/ _jsxs("div", {
+                style: {
+                    ...abs,
+                    left: 466,
+                    top: 915,
+                    width: 200,
+                    textAlign: "center",
+                    borderTop: "2px solid ".concat(D3C.MID),
+                    paddingTop: 6,
+                    zIndex: 2
+                },
+                children: [
+                    /*#__PURE__*/ _jsx("div", {
+                        style: {
+                            ...label,
+                            letterSpacing: 0.5,
+                            lineHeight: "18px"
+                        },
+                        children: school.headTeacher || "HEAD TEACHER"
+                    }),
+                    /*#__PURE__*/ _jsx("div", {
+                        style: {
+                            fontSize: 12,
+                            lineHeight: "16px"
+                        },
+                        children: "Headteacher"
                     })
                 ]
             })
@@ -20593,12 +20571,12 @@ const CERT_DESIGNS = [
     },
     {
         id: 2,
-        label: "Design 2 — Modern Blue/Green",
+        label: "Design 2 — Orange & Red (Achievement style)",
         Component: PleCertificateDesign2
     },
     {
         id: 3,
-        label: "Design 3 — Maroon & Gold",
+        label: "Design 3 — Blue Wave (Appreciation style)",
         Component: PleCertificateDesign3
     },
     {
