@@ -20562,13 +20562,12 @@ function PleCertificateDesign5(param) {
     });
 }
 // ─── PLE CERTIFICATE · WORD (DESIGN-AWARE) ───────────────────────────────────
-// "Download Word" now follows whichever certificate design is selected. Word can't
-// draw the SVG frames used on screen, so the frame/corner artwork of the chosen
-// design is rasterised to a PNG and anchored behind the text as a full-page
-// picture (positioned relative to the page, sent behind the text). Every line of
-// writing stays real, editable Word text. Sizes mirror the on-screen designs
-// (px x 0.75 = pt). The school logo is given explicit width/height attributes
-// (Word ignores CSS sizing on pictures and otherwise shows them at native size).
+// "Download Word" follows whichever certificate design is selected and now writes a
+// real .docx. Word can't draw the SVG frames used on screen, so the frame/corner
+// artwork of the chosen design is rasterised to a JPEG and placed in the page header
+// as a picture anchored to the PAGE and sent behind the text (see the .docx writer
+// below). Every line of writing stays real, editable Word text. Sizes mirror the
+// on-screen designs (px x 0.75 = pt).
 const WORD_CERT_THEMES = {
     1: {
         bg: PC_BG_URI, m: [34, 30, 24], logo: 110, schoolPt: 16.5, bodyPt: 10.5, contactPt: 9,
@@ -20644,16 +20643,116 @@ function pleImageSize(src) {
         img.src = src;
     });
 }
-const PLE_VML_SHAPETYPE = '<v:shapetype id="_x0000_t75" coordsize="21600,21600" o:spt="75" o:preferrelative="t" path="m@4@5l@4@11@9@11@9@5xe" filled="f" stroked="f"><v:stroke joinstyle="miter"/><v:formulas><v:f eqn="if lineDrawn pixelLineWidth 0"/><v:f eqn="sum @0 1 0"/><v:f eqn="sum 0 0 @1"/><v:f eqn="prod @2 1 2"/><v:f eqn="prod @3 21600 pixelWidth"/><v:f eqn="prod @3 21600 pixelHeight"/><v:f eqn="sum @0 0 1"/><v:f eqn="prod @6 1 2"/><v:f eqn="prod @7 21600 pixelWidth"/><v:f eqn="sum @8 21600 0"/><v:f eqn="prod @7 21600 pixelHeight"/><v:f eqn="sum @10 21600 0"/></v:formulas><v:path o:extrusionok="f" gradientshapeok="t" o:connecttype="rect"/><o:lock v:ext="edit" aspectratio="t"/></v:shapetype>';
-// Full-page picture anchored to the PAGE and sent behind the text, written the way Word
-// itself saves it (VML shape + fallback <img>), so it floats instead of taking up a page.
-function pleWordBgShape(bg, n) {
-    return '<p style="margin:0;font-size:1pt;line-height:1pt;"><span style="mso-no-proof:yes"><!--[if gte vml 1]>' + (n === 0 ? PLE_VML_SHAPETYPE : "") + '<v:shape id="mkisbg' + n + '" o:spid="_x0000_s' + (2050 + n) + '" type="#_x0000_t75" style=\'position:absolute;margin-left:0;margin-top:0;width:595.3pt;height:841.9pt;z-index:-251658240;mso-position-horizontal-relative:page;mso-position-vertical-relative:page\'><v:imagedata src="' + bg + '" o:title=""/><w:wrap anchorx="page" anchory="page"/></v:shape><![endif]--><![if !vml]><img width="794" height="1123" src="' + bg + '" v:shapes="mkisbg' + n + '"><![endif]></span></p>';
+// ── Real .docx writer for the certificates ──────────────────────────────────
+// Why not HTML/MHTML any more: Word's HTML importer can't reliably show a
+// full-page background picture (VML / cid: references end up as "The picture
+// can't be displayed" -- an empty box where the frame should be). So the
+// certificates are now written as a genuine .docx (a zip of XML parts built with
+// JSZip, which this app already uses). The frame/corner artwork is rasterised
+// to a JPEG and stored ONCE in the page header as a picture anchored to the PAGE
+// and sent behind the text, so it repeats on every certificate page and can't
+// be nudged by accident while editing. All writing stays real, editable Word text.
+const DX_SAFE_FONTS = [
+    "Georgia", "Times New Roman", "Arial", "Segoe UI", "Bookman Old Style", "Calibri",
+    "Cambria", "Verdana", "Tahoma", "Trebuchet MS", "Palatino Linotype", "Garamond", "Century Gothic"
+];
+// First font of a CSS stack that Word installs everywhere (web fonts like
+// Montserrat/Playfair are not in Word, so they would silently fall back anyway).
+function dxFont(stack) {
+    // Cormorant Garamond is a narrow web font; Times New Roman is the closest safe stand-in.
+    if (/cormorant/i.test(String(stack || "").split(",")[0])) return "Times New Roman";
+    const names = String(stack || "").split(",").map((s)=>s.trim().replace(/^['"]|['"]$/g, ""));
+    for (const n of names){
+        const hit = DX_SAFE_FONTS.find((f)=>f.toLowerCase() === n.toLowerCase());
+        if (hit) return hit;
+    }
+    return "Times New Roman";
 }
-function pleWordCertHtml(rec, school, year, t, bg, logoSz, idx) {
-    const pt = (px)=>Math.round(px * 75) / 100 + "pt";
-    const E = escapeHtml;
-    const bp = t.bodyPt + "pt";
+function dxEsc(s) {
+    return String(s !== null && s !== void 0 ? s : "").replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+function dxColor(c) {
+    let h = String(c || "").replace("#", "");
+    if (h.length === 3) h = h.split("").map((x)=>x + x).join("");
+    return /^[0-9a-fA-F]{6}$/.test(h) ? h.toUpperCase() : "000000";
+}
+const dxTw = (pt)=>Math.round(pt * 20);
+// One text run. o: font, sz (pt), b, i, caps, color, shd (fill), br (line break instead of text)
+function dxRun(text, o) {
+    o = o || {};
+    const font = dxEsc(o.font || "Times New Roman");
+    let rp = '<w:rFonts w:ascii="' + font + '" w:hAnsi="' + font + '" w:eastAsia="' + font + '" w:cs="' + font + '"/>';
+    if (o.b) rp += "<w:b/><w:bCs/>";
+    if (o.i) rp += "<w:i/><w:iCs/>";
+    if (o.caps) rp += "<w:caps/>";
+    if (o.color) rp += '<w:color w:val="' + dxColor(o.color) + '"/>';
+    if (o.sz) rp += '<w:sz w:val="' + Math.round(o.sz * 2) + '"/><w:szCs w:val="' + Math.round(o.sz * 2) + '"/>';
+    if (o.shd) rp += '<w:shd w:val="clear" w:color="auto" w:fill="' + dxColor(o.shd) + '"/>';
+    if (o.br) return "<w:r><w:rPr>" + rp + "</w:rPr><w:br/></w:r>";
+    return "<w:r><w:rPr>" + rp + '</w:rPr><w:t xml:space="preserve">' + dxEsc(text) + "</w:t></w:r>";
+}
+// One paragraph. runs: array of run objects ({t, ...run options}) or raw XML strings.
+// o: align, before/after (pt), line (multiple), exact (pt), indL/indR (twips), bdrTop/bdrBottom
+// ({sz,color,space}), pageBreakBefore, run (default run options), mark (paragraph-mark size pt)
+function dxPara(runs, o) {
+    o = o || {};
+    let pp = "";
+    if (o.pageBreakBefore) pp += "<w:pageBreakBefore/>";
+    if (o.bdrTop || o.bdrBottom) {
+        pp += "<w:pBdr>";
+        if (o.bdrTop) pp += '<w:top w:val="single" w:sz="' + o.bdrTop.sz + '" w:space="' + (o.bdrTop.space || 0) + '" w:color="' + dxColor(o.bdrTop.color) + '"/>';
+        if (o.bdrBottom) pp += '<w:bottom w:val="single" w:sz="' + o.bdrBottom.sz + '" w:space="' + (o.bdrBottom.space || 0) + '" w:color="' + dxColor(o.bdrBottom.color) + '"/>';
+        pp += "</w:pBdr>";
+    }
+    let sp = '<w:spacing w:before="' + dxTw(o.before || 0) + '" w:after="' + dxTw(o.after || 0) + '"';
+    if (o.exact) sp += ' w:line="' + dxTw(o.exact) + '" w:lineRule="exact"';
+    else sp += ' w:line="' + Math.round((o.line || 1) * 240) + '" w:lineRule="auto"';
+    pp += sp + "/>";
+    if (o.indL || o.indR) pp += '<w:ind w:left="' + Math.round(o.indL || 0) + '" w:right="' + Math.round(o.indR || 0) + '"/>';
+    pp += '<w:jc w:val="' + (o.align || "left") + '"/>';
+    if (o.mark) pp += '<w:rPr><w:sz w:val="' + Math.round(o.mark * 2) + '"/><w:szCs w:val="' + Math.round(o.mark * 2) + '"/></w:rPr>';
+    const base = o.run || {};
+    const body = (runs || []).map((r)=>typeof r === "string" ? r : dxRun(r.t, Object.assign({}, base, r))).join("");
+    return "<w:p><w:pPr>" + pp + "</w:pPr>" + body + "</w:p>";
+}
+// Tiny empty paragraph used as vertical spacing (Word tables have no margin-top).
+const dxSpacer = (pt)=>dxPara([], { exact: Math.max(pt, 1), mark: 1 });
+const dxBorderXml = (tag, b)=>b ? "<w:" + tag + ' w:val="single" w:sz="' + b.sz + '" w:space="0" w:color="' + dxColor(b.color) + '"/>' : "<w:" + tag + ' w:val="nil"/>';
+// One table cell. o: borders {top,left,bottom,right} each {sz,color}|null, fill, mar {t,l,b,r} twips, vAlign
+function dxCell(content, w, o) {
+    o = o || {};
+    const bd = o.borders || {};
+    let tp = '<w:tcW w:w="' + Math.round(w) + '" w:type="dxa"/>';
+    tp += "<w:tcBorders>" + dxBorderXml("top", bd.top) + dxBorderXml("left", bd.left) + dxBorderXml("bottom", bd.bottom) + dxBorderXml("right", bd.right) + "</w:tcBorders>";
+    if (o.fill) tp += '<w:shd w:val="clear" w:color="auto" w:fill="' + dxColor(o.fill) + '"/>';
+    const m = o.mar || { t: 0, l: 0, b: 0, r: 0 };
+    tp += '<w:tcMar><w:top w:w="' + m.t + '" w:type="dxa"/><w:left w:w="' + m.l + '" w:type="dxa"/><w:bottom w:w="' + m.b + '" w:type="dxa"/><w:right w:w="' + m.r + '" w:type="dxa"/></w:tcMar>';
+    tp += '<w:vAlign w:val="' + (o.vAlign || "top") + '"/>';
+    return "<w:tc><w:tcPr>" + tp + "</w:tcPr>" + content + "</w:tc>";
+}
+// rows: array of arrays of cell XML strings; widths: column widths (twips)
+function dxTable(rows, widths) {
+    const total = widths.reduce((a, b)=>a + b, 0);
+    return '<w:tbl><w:tblPr><w:tblW w:w="' + Math.round(total) + '" w:type="dxa"/><w:jc w:val="center"/><w:tblLayout w:type="fixed"/>' + '<w:tblCellMar><w:top w:w="0" w:type="dxa"/><w:left w:w="0" w:type="dxa"/><w:bottom w:w="0" w:type="dxa"/><w:right w:w="0" w:type="dxa"/></w:tblCellMar></w:tblPr>' + "<w:tblGrid>" + widths.map((w)=>'<w:gridCol w:w="' + Math.round(w) + '"/>').join("") + "</w:tblGrid>" + rows.map((r)=>"<w:tr><w:trPr><w:cantSplit/></w:trPr>" + r.join("") + "</w:tr>").join("") + "</w:tbl>";
+}
+// Picture that flows with the text (school logo). Size in CSS px (1px = 9525 EMU).
+function dxInlinePic(rid, wPx, hPx, id, name) {
+    const cx = Math.round(wPx * 9525), cy = Math.round(hPx * 9525);
+    return "<w:r><w:drawing><wp:inline distT=\"0\" distB=\"0\" distL=\"0\" distR=\"0\"><wp:extent cx=\"" + cx + "\" cy=\"" + cy + "\"/><wp:effectExtent l=\"0\" t=\"0\" r=\"0\" b=\"0\"/>" + "<wp:docPr id=\"" + id + "\" name=\"" + name + "\" descr=\"School logo\"/><wp:cNvGraphicFramePr><a:graphicFrameLocks noChangeAspect=\"1\"/></wp:cNvGraphicFramePr>" + "<a:graphic><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/picture\"><pic:pic><pic:nvPicPr><pic:cNvPr id=\"" + id + "\" name=\"" + name + "\"/><pic:cNvPicPr/></pic:nvPicPr>" + "<pic:blipFill><a:blip r:embed=\"" + rid + "\"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>" + "<pic:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"" + cx + "\" cy=\"" + cy + "\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>";
+}
+// Full-page picture anchored to the PAGE (not the text), behind the text.
+function dxPageBackground(rid) {
+    const cx = 7560000, cy = 10692000; // A4 = 210mm x 297mm in EMU
+    return dxPara([
+        "<w:r><w:drawing><wp:anchor distT=\"0\" distB=\"0\" distL=\"0\" distR=\"0\" simplePos=\"0\" relativeHeight=\"0\" behindDoc=\"1\" locked=\"1\" layoutInCell=\"1\" allowOverlap=\"1\">" + "<wp:simplePos x=\"0\" y=\"0\"/><wp:positionH relativeFrom=\"page\"><wp:posOffset>0</wp:posOffset></wp:positionH><wp:positionV relativeFrom=\"page\"><wp:posOffset>0</wp:posOffset></wp:positionV>" + "<wp:extent cx=\"" + cx + "\" cy=\"" + cy + "\"/><wp:effectExtent l=\"0\" t=\"0\" r=\"0\" b=\"0\"/><wp:wrapNone/>" + "<wp:docPr id=\"1\" name=\"Certificate frame\" descr=\"Certificate frame\"/><wp:cNvGraphicFramePr><a:graphicFrameLocks noChangeAspect=\"1\"/></wp:cNvGraphicFramePr>" + "<a:graphic><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/picture\"><pic:pic><pic:nvPicPr><pic:cNvPr id=\"1\" name=\"frame.jpeg\"/><pic:cNvPicPr/></pic:nvPicPr>" + "<pic:blipFill><a:blip r:embed=\"" + rid + "\"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>" + "<pic:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"" + cx + "\" cy=\"" + cy + "\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:anchor></w:drawing></w:r>"
+    ], { exact: 1, mark: 1 });
+}
+// One certificate's paragraphs/tables. Mirrors WORD_CERT_THEMES (sizes are px x 0.75 = pt).
+// textW = usable page width in twips; logoRid/logoSz = school logo (or null); first = first certificate?
+function pleDocxCertBody(rec, school, year, t, textW, logoRid, logoSz, first, picId) {
+    const ptn = (px)=>Math.round(px * 75) / 100;
+    const bp = t.bodyPt;
+    const fBody = dxFont(t.font), fName = dxFont(t.nameFont);
     const he = rec.gender === "F" ? "her" : "his";
     const herHim = rec.gender === "F" ? "her" : "him";
     const heShe = rec.gender === "F" ? "She" : "He";
@@ -20661,13 +20760,21 @@ function pleWordCertHtml(rec, school, year, t, bg, logoSz, idx) {
     const nm = t.nameCase === "title" ? rawName.toLowerCase().replace(/(^|[\s'’\-.])([a-z])/g, (m, a, b)=>a + b.toUpperCase()) : rawName;
     const contacts = [
         school.poBox,
-        school.tel ? "Tel: ".concat(school.tel) : "",
+        school.tel ? "Tel: " + school.tel : "",
         school.email
     ].filter(Boolean).join("  |  ");
-    const p = (style, inner)=>'<p style="margin:0;text-align:center;line-height:1.15;' + style + '">' + inner + "</p>";
-    const val = (sub)=>E(String(rec.results && rec.results[sub] || "—"));
-    const noBox = "border:none;background:none;";
-    const respStyle = "color:" + t.resp + ";" + (t.respBold ? "font-weight:bold;" : "");
+    const val = (sub)=>String(rec.results && rec.results[sub] || "—");
+    let pbPending = !first; // every certificate after the first starts on a fresh page
+    const P = (runs, o)=>{
+        const oo = Object.assign({ align: "center", line: 1.15, run: { font: fBody, sz: bp, color: "#111111" } }, o);
+        if (pbPending) {
+            oo.pageBreakBefore = true;
+            pbPending = false;
+        }
+        return dxPara(runs, oo);
+    };
+    const NB = "\u00A0";
+    const respBold = !!t.respBold;
     const details = [
         ["LIN", rec.lin],
         [t.strip ? "LEADERSHIP POSITION(S)" : "Leadership Position", rec.leadership],
@@ -20683,75 +20790,188 @@ function pleWordCertHtml(rec, school, year, t, bg, logoSz, idx) {
         details[1] = details[2];
         details[2] = tmp;
     }
-    const detailBlock = (d)=>p("text-align:left;font-weight:bold;color:" + t.label + ";font-size:" + bp + ";margin-top:4pt;", E(d[0])) + p("text-align:left;border-bottom:0.75pt solid " + t.line + ";font-size:" + bp + ";padding-bottom:1pt;" + respStyle, E(String(d[1] || "—")));
-    let h = '<div style="text-align:center;font-family:' + t.font + ';color:#111;">';
-    if (bg) h += pleWordBgShape(bg, idx);
-    if (school.logo && logoSz) h += p("", '<img width="' + logoSz.w + '" height="' + logoSz.h + '" src="' + school.logo + '" style="width:' + logoSz.w + "px;height:" + logoSz.h + 'px;">');
-    h += p("font-size:" + t.schoolPt + "pt" + ";font-weight:bold;text-transform:uppercase;color:" + t.school + ";margin-top:4pt;", E(school.name || ""));
-    if (t.motto && school.motto) h += p("font-style:italic;font-size:" + bp + ";color:" + D5C.GOLD_D + ";", '"' + E(school.motto) + '"');
-    if (contacts) h += p("font-size:" + t.contactPt + "pt" + ";margin-top:2pt;", E(contacts));
+    const detailBlock = (d)=>P([{ t: d[0], b: 1, color: t.label }], { align: "left", before: 4 }) + P([{ t: String(d[1] || "—"), b: respBold, color: t.resp }], { align: "left", bdrBottom: { sz: 6, color: t.line, space: 1 } });
+    let x = "";
+    if (logoRid && logoSz) x += P([dxInlinePic(logoRid, logoSz.w, logoSz.h, picId, "School logo")], { line: 1 });
+    x += P([{ t: school.name || "", b: 1, caps: 1, color: t.school, sz: t.schoolPt }], { before: 4 });
+    if (t.motto && school.motto) x += P([{ t: "\"" + school.motto + "\"", i: 1, color: D5C.GOLD_D }]);
+    if (contacts) x += P([{ t: contacts, sz: t.contactPt }], { before: 2 });
     t.titles(year).forEach((tt, i)=>{
         const o = tt[3] || {};
-        h += p("font-size:" + pt(tt[1]) + ";color:" + tt[2] + ";line-height:1.1;margin-top:" + (i === 0 ? 8 : 2) + "pt;" + (o.plain ? "" : "font-weight:bold;") + (o.up ? "text-transform:uppercase;" : ""), E(tt[0]));
+        x += P([{ t: tt[0], b: !o.plain, caps: !!o.up, color: tt[2], sz: ptn(tt[1]) }], { line: 1.1, before: i === 0 ? 8 : 2 });
     });
-    h += p("font-style:italic;font-size:" + (t.preFs ? pt(t.preFs) : bp) + ";margin-top:8pt;", E(t.pre));
-    h += p("margin-top:4pt;", '<span style="font-family:' + t.nameFont + ";font-size:" + pt(t.nameFs(nm.length)) + ";font-weight:bold;color:" + t.name + ";" + (t.nameBg ? "background:" + t.nameBg + ";" : "") + '">' + (t.nameBg ? "&nbsp;&nbsp;&nbsp;" + E(nm) + "&nbsp;&nbsp;&nbsp;" : E(nm)) + "</span>");
+    x += P([{ t: t.pre, i: 1, sz: t.preFs ? ptn(t.preFs) : bp }], { before: 8 });
+    x += P([{ t: t.nameBg ? NB + NB + NB + nm + NB + NB + NB : nm, font: fName, b: 1, color: t.name, sz: ptn(t.nameFs(nm.length)), shd: t.nameBg || null }], { before: 4 });
     if (t.oneLine) {
-        h += p("font-size:" + bp + ";margin-top:6pt;", "Index No. <b>" + E(rec.indexNo || ".........................") + "</b>, who has successfully completed the Primary Leaving Examination (PLE) at <b>" + E(school.name || "") + " " + PLE_CERT_LOCATION + "</b> in <b>" + E(String(year)) + "</b>.");
+        x += P([
+            { t: "Index No. " },
+            { t: rec.indexNo || ".........................", b: 1 },
+            { t: ", who has successfully completed the Primary Leaving Examination (PLE) at " },
+            { t: (school.name || "") + " " + PLE_CERT_LOCATION, b: 1 },
+            { t: " in " },
+            { t: String(year), b: 1 },
+            { t: "." }
+        ], { before: 6 });
     } else {
-        if (rec.indexNo) h += p("font-size:" + bp + ";margin-top:3pt;", "Index No. <b>" + E(rec.indexNo) + "</b>");
-        h += p("font-size:" + bp + ";margin-top:5pt;", "successfully completed " + he + " Primary Leaving Examination (PLE) in <b>" + E(String(year)) + "</b> at <b>" + E(school.name || "") + " " + PLE_CERT_LOCATION + ".</b>");
+        if (rec.indexNo) x += P([{ t: "Index No. " }, { t: rec.indexNo, b: 1 }], { before: 3 });
+        x += P([
+            { t: "successfully completed " + he + " Primary Leaving Examination (PLE) in " },
+            { t: String(year), b: 1 },
+            { t: " at " },
+            { t: (school.name || "") + " " + PLE_CERT_LOCATION + ".", b: 1 }
+        ], { before: 5 });
     }
-    const aggRow = "font-size:" + bp + ";";
     if (t.strip) {
-        h += '<table style="width:100%;border-collapse:collapse;margin-top:8pt;"><tr>' + PLE_SUBJECTS.map((sub, i)=>'<td style="width:25%;border:0.75pt solid ' + t.boxBorder + ";background:" + (i % 2 ? "#f6ecb8" : "#fdf7d8") + ';padding:3pt 2pt;text-align:center;">' + '<div style="font-size:' + bp + ";font-weight:bold;text-transform:uppercase;color:" + t.label + ';">' + E(pleSubLabel(sub)) + "</div>" + '<div style="font-size:' + bp + ';font-weight:bold;">' + val(sub) + "</div></td>").join("") + "</tr></table>";
-        h += p(aggRow + "margin-top:6pt;", 'Total Aggregate: <b style="color:' + t.agg + ';">' + E(String(rec.totalAgg || "—")) + "</b>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Division: <b>" + pleRomanDiv(rec.division) + "</b>");
-        h += '<table style="width:100%;border-collapse:collapse;margin-top:4pt;"><tr>' + [
-            details[0],
-            details[1]
-        ].map((d)=>'<td style="width:50%;' + noBox + 'vertical-align:top;padding:0 8pt;">' + detailBlock(d) + "</td>").join("") + "</tr><tr>" + [
-            details[2],
-            details[3]
-        ].map((d)=>'<td style="width:50%;' + noBox + 'vertical-align:top;padding:0 8pt;">' + detailBlock(d) + "</td>").join("") + "</tr></table>";
-        h += p("font-style:italic;font-size:" + bp + ";margin-top:8pt;", E("I congratulate " + herHim + " on successfully completing the Primary Leaving Examination. " + heShe + " is encouraged to continue working hard and I recommend " + herHim + " for admission to secondary school."));
+        const cw = textW / PLE_SUBJECTS.length;
+        const box = { sz: 6, color: t.boxBorder };
+        x += dxSpacer(8);
+        x += dxTable([
+            PLE_SUBJECTS.map((sub, i)=>dxCell(P([{ t: pleSubLabel(sub), b: 1, caps: 1, color: t.label }]) + P([{ t: val(sub), b: 1 }]), cw, {
+                    borders: { top: box, left: box, bottom: box, right: box },
+                    fill: i % 2 ? "#f6ecb8" : "#fdf7d8",
+                    mar: { t: 60, l: 40, b: 60, r: 40 }
+                }))
+        ], PLE_SUBJECTS.map(()=>cw));
+        x += P([
+            { t: "Total Aggregate: " },
+            { t: String(rec.totalAgg || "—"), b: 1, color: t.agg },
+            { t: NB.repeat(8) + "Division: " },
+            { t: pleRomanDiv(rec.division), b: 1 }
+        ], { before: 6 });
+        const half = textW / 2;
+        const cellFor = (d)=>dxCell(detailBlock(d), half, { mar: { t: 0, l: 160, b: 0, r: 160 } });
+        x += dxSpacer(4);
+        x += dxTable([
+            [cellFor(details[0]), cellFor(details[1])],
+            [cellFor(details[2]), cellFor(details[3])]
+        ], [half, half]);
+        x += P([{ t: "I congratulate " + herHim + " on successfully completing the Primary Leaving Examination. " + heShe + " is encouraged to continue working hard and I recommend " + herHim + " for admission to secondary school.", i: 1 }], { before: 8 });
     } else {
-        const rowCss = "border:none;border-bottom:0.75pt solid " + t.line + ";background:none;padding:2pt 0;font-size:" + bp + ";";
-        const rows = PLE_SUBJECTS.map((sub)=>"<tr><td style=\"" + rowCss + 'text-align:left;">' + E(pleSubLabel(sub)) + (t.colon ? ":" : "") + '</td><td style="' + rowCss + 'text-align:right;font-weight:bold;">' + val(sub) + "</td></tr>").join("");
-        const totRow = (lbl, v, col)=>'<tr><td style="' + noBox + "padding:2pt 0;font-size:" + bp + ';text-align:left;font-weight:bold;">' + lbl + '</td><td style="' + noBox + "padding:2pt 0;font-size:" + bp + ";text-align:right;font-weight:bold;" + (col ? "color:" + col + ";" : "") + '">' + v + "</td></tr>";
-        h += '<table style="width:100%;border-collapse:collapse;margin-top:10pt;"><tr>' + '<td style="width:47%;vertical-align:top;border:1.5pt solid ' + t.boxBorder + ";background:" + t.boxBg + ';padding:5pt 10pt;text-align:left;">' + p("font-weight:bold;font-size:" + bp + ";color:" + t.label + ";", E(t.rowHead || "PLE Results")) + '<table style="width:100%;border-collapse:collapse;margin:0;">' + rows + totRow("Total Agg" + (t.colon ? ":" : ""), E(String(rec.totalAgg || "—")), t.agg) + totRow("Division" + (t.colon ? ":" : ""), E(String(rec.division || "—")), "") + "</table></td>" + '<td style="width:3%;' + noBox + '">&nbsp;</td>' + '<td style="width:50%;vertical-align:top;' + noBox + 'padding:0 0 0 4pt;">' + details.map(detailBlock).join("") + "</td></tr></table>";
-        h += p("font-size:" + bp + ";margin:12pt auto 0;width:88%;line-height:1.5;", E(pleRecommendation(rec.name, rec.gender, rec.totalAgg, rec.division)));
+        const wBox = Math.round(textW * 0.47), wGap = Math.round(textW * 0.03), wRight = textW - wBox - wGap;
+        const boxPad = { t: 100, l: 200, b: 100, r: 200 };
+        const inner = wBox - boxPad.l - boxPad.r;
+        const wLab = Math.round(inner * 0.7), wVal = inner - wLab;
+        const rowBd = { bottom: { sz: 6, color: t.line } };
+        const rowMar = { t: 40, l: 0, b: 40, r: 0 };
+        const subRows = PLE_SUBJECTS.map((sub)=>[
+            dxCell(P([{ t: pleSubLabel(sub) + (t.colon ? ":" : "") }], { align: "left" }), wLab, { borders: rowBd, mar: rowMar }),
+            dxCell(P([{ t: val(sub), b: 1 }], { align: "right" }), wVal, { borders: rowBd, mar: rowMar })
+        ]);
+        const totRow = (lbl, v, col)=>[
+            dxCell(P([{ t: lbl, b: 1 }], { align: "left" }), wLab, { mar: rowMar }),
+            dxCell(P([{ t: v, b: 1, color: col || null }], { align: "right" }), wVal, { mar: rowMar })
+        ];
+        const resultsBox = P([{ t: t.rowHead || "PLE Results", b: 1, color: t.label }], { align: "left" }) + dxTable(subRows.concat([
+            totRow("Total Agg" + (t.colon ? ":" : ""), String(rec.totalAgg || "—"), t.agg),
+            totRow("Division" + (t.colon ? ":" : ""), String(rec.division || "—"), null)
+        ]), [wLab, wVal]) + dxSpacer(1);
+        const boxB = { sz: 12, color: t.boxBorder };
+        x += dxSpacer(10);
+        x += dxTable([
+            [
+                dxCell(resultsBox, wBox, { borders: { top: boxB, left: boxB, bottom: boxB, right: boxB }, fill: t.boxBg, mar: boxPad }),
+                dxCell(dxSpacer(1), wGap),
+                dxCell(details.map(detailBlock).join(""), wRight, { mar: { t: 0, l: 80, b: 0, r: 0 } })
+            ]
+        ], [wBox, wGap, wRight]);
+        x += P([{ t: pleRecommendation(rec.name, rec.gender, rec.totalAgg, rec.division) }], { line: 1.5, before: 12, indL: textW * 0.06, indR: textW * 0.06 });
     }
-    const line = '<div style="border-top:1pt solid #111;width:75%;margin:0 auto 3pt;">&nbsp;</div>';
-    h += '<table style="width:100%;border-collapse:collapse;margin-top:22pt;"><tr>' + '<td style="width:50%;' + noBox + "text-align:center;font-size:" + bp + ';">' + line + E(t.dateLabel || "Date of Issuance") + "</td>" + '<td style="width:50%;' + noBox + "text-align:center;font-size:" + bp + ';">' + line + (school.headTeacher ? "<b>" + E(String(school.headTeacher).toUpperCase()) + "</b><br>" : "") + "Headteacher</td></tr></table>";
-    return h + "</div>";
+    // Signature block: Date | Headteacher
+    const half2 = textW / 2;
+    const sig = (label)=>dxCell(P(label, { bdrTop: { sz: 8, color: "#111111", space: 3 }, indL: half2 * 0.125, indR: half2 * 0.125 }), half2);
+    x += dxSpacer(22);
+    x += dxTable([
+        [
+            sig([{ t: t.dateLabel || "Date of Issuance" }]),
+            sig((school.headTeacher ? [{ t: String(school.headTeacher).toUpperCase(), b: 1 }, { br: 1 }] : []).concat([{ t: "Headteacher" }]))
+        ]
+    ], [half2, half2]);
+    x += dxSpacer(1);
+    return x;
 }
-// Builds the Word body (one page per learner) for the chosen design.
-async function buildDesignedCertificatesWord(recs, school, year, designId) {
+// Rasterises an image (data URI / URL) to a PNG data URL, keeping transparency.
+function pleRasterizePng(src, w, h) {
+    return new Promise((resolve)=>{
+        const img = new Image();
+        img.onload = ()=>{
+            try {
+                const c = document.createElement("canvas");
+                c.width = w;
+                c.height = h;
+                c.getContext("2d").drawImage(img, 0, 0, w, h);
+                resolve(c.toDataURL("image/png"));
+            } catch (e) {
+                resolve("");
+            }
+        };
+        img.onerror = ()=>resolve("");
+        img.src = src;
+    });
+}
+const DX_NS = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"';
+const DX_XML = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n';
+// Assembles the .docx package. bgJpeg / logoPng are base64 strings (or ""), all sizes in twips / px.
+async function assembleCertificatesDocx(bodyXml, marginsTw, bgJpeg, logoPng) {
+    const zip = new JSZip();
+    let types = DX_XML + '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' + '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' + '<Default Extension="xml" ContentType="application/xml"/>' + '<Default Extension="png" ContentType="image/png"/><Default Extension="jpeg" ContentType="image/jpeg"/>' + '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>' + '<Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>' + '<Override PartName="/word/settings.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml"/>';
+    if (bgJpeg) types += '<Override PartName="/word/header1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml"/>';
+    types += "</Types>";
+    zip.file("[Content_Types].xml", types);
+    zip.file("_rels/.rels", DX_XML + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>');
+    let docRels = DX_XML + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' + '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>' + '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings" Target="settings.xml"/>';
+    if (bgJpeg) docRels += '<Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/header" Target="header1.xml"/>';
+    if (logoPng) docRels += '<Relationship Id="rId4" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/logo.png"/>';
+    docRels += "</Relationships>";
+    zip.file("word/_rels/document.xml.rels", docRels);
+    zip.file("word/styles.xml", DX_XML + '<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' + '<w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman" w:eastAsia="Times New Roman" w:cs="Times New Roman"/><w:sz w:val="22"/><w:szCs w:val="22"/><w:lang w:val="en-GB"/></w:rPr></w:rPrDefault>' + '<w:pPrDefault><w:pPr><w:spacing w:after="0" w:line="240" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults>' + '<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:qFormat/></w:style>' + '<w:style w:type="table" w:default="1" w:styleId="TableNormal"><w:name w:val="Normal Table"/><w:uiPriority w:val="99"/><w:semiHidden/><w:unhideWhenUsed/><w:tblPr><w:tblInd w:w="0" w:type="dxa"/><w:tblCellMar><w:top w:w="0" w:type="dxa"/><w:left w:w="108" w:type="dxa"/><w:bottom w:w="0" w:type="dxa"/><w:right w:w="108" w:type="dxa"/></w:tblCellMar></w:tblPr></w:style>' + "</w:styles>");
+    zip.file("word/settings.xml", DX_XML + '<w:settings xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:compat><w:compatSetting w:name="compatibilityMode" w:uri="http://schemas.microsoft.com/office/word" w:val="15"/></w:compat></w:settings>');
+    if (bgJpeg) {
+        zip.file("word/header1.xml", DX_XML + "<w:hdr " + DX_NS + ">" + dxPageBackground("rId1") + "</w:hdr>");
+        zip.file("word/_rels/header1.xml.rels", DX_XML + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/frame.jpeg"/></Relationships>');
+        zip.file("word/media/frame.jpeg", bgJpeg, { base64: true });
+    }
+    if (logoPng) zip.file("word/media/logo.png", logoPng, { base64: true });
+    const m = marginsTw;
+    const sect = "<w:sectPr>" + (bgJpeg ? '<w:headerReference w:type="default" r:id="rId3"/>' : "") + '<w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="' + m.top + '" w:right="' + m.side + '" w:bottom="' + m.bottom + '" w:left="' + m.side + '" w:header="0" w:footer="0" w:gutter="0"/></w:sectPr>';
+    zip.file("word/document.xml", DX_XML + "<w:document " + DX_NS + "><w:body>" + bodyXml + sect + "</w:body></w:document>");
+    return zip.generateAsync({
+        type: "blob",
+        mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        compression: "DEFLATE"
+    });
+}
+// Builds the .docx (one page per learner) for the chosen design and downloads it.
+async function downloadCertificatesDocx(recs, school, year, designId, filename) {
     const t = WORD_CERT_THEMES[designId] || WORD_CERT_THEMES[4];
     const key = String(designId);
-    if (pleWordCache[key] === undefined) pleWordCache[key] = await pleRasterize(t.bg, 1240, 1754);
-    let logoSz = null;
+    if (!pleWordCache[key]) pleWordCache[key] = await pleRasterize(t.bg, 1240, 1754);
+    const bgData = pleWordCache[key];
+    let logoRid = null, logoSz = null, logoB64 = "";
     if (school.logo) {
         const n = await pleImageSize(school.logo);
         const box = t.logo;
-        if (n) {
-            const k = Math.min(box / n.w, box / n.h);
-            logoSz = {
-                w: Math.max(1, Math.round(n.w * k)),
-                h: Math.max(1, Math.round(n.h * k))
-            };
+        const nw = n && n.w > 1 ? n.w : box, nh = n && n.h > 1 ? n.h : box;
+        const k = Math.min(box / nw, box / nh);
+        logoSz = {
+            w: Math.max(1, Math.round(nw * k)),
+            h: Math.max(1, Math.round(nh * k))
+        };
+        // Word only reliably shows PNG/JPEG, so always re-encode (also handles SVG/WebP logos).
+        const scale = Math.min(3, Math.max(1, 900 / Math.max(nw, nh)));
+        const png = await pleRasterizePng(school.logo, Math.round(logoSz.w * scale), Math.round(logoSz.h * scale));
+        if (png) {
+            logoB64 = png.slice(png.indexOf(",") + 1);
+            logoRid = "rId4";
         } else {
-            logoSz = {
-                w: box,
-                h: box
-            };
+            logoSz = null;
         }
     }
-    const body = recs.map((r, i)=>(i > 0 ? WORD_PAGE_BREAK : "") + pleWordCertHtml(r, school, year, t, pleWordCache[key], logoSz, i)).join("");
-    return {
-        body,
-        margin: t.m[0] + "mm " + t.m[1] + "mm " + t.m[2] + "mm " + t.m[1] + "mm"
-    };
+    const mmTw = (mm)=>Math.round(mm / 25.4 * 1440);
+    const marginsTw = { top: mmTw(t.m[0]), side: mmTw(t.m[1]), bottom: mmTw(t.m[2]) };
+    const textW = 11906 - 2 * marginsTw.side;
+    const body = recs.map((r, i)=>pleDocxCertBody(r, school, year, t, textW, logoRid, logoSz, i === 0, 100 + i)).join("");
+    const blob = await assembleCertificatesDocx(body, marginsTw, bgData ? bgData.slice(bgData.indexOf(",") + 1) : "", logoB64);
+    triggerBlobDownload(blob, filename);
 }
 const CERT_DESIGNS = [
     {
@@ -23350,11 +23570,7 @@ function PleInfo(param) {
   const s = p7Students.find((x)=>x.id === selectedStudent);
   if (!s) return;
   const rec = getRecForStudent(s);
-  const w = await buildDesignedCertificatesWord([rec], school, year, selectedDesign);
-  downloadWordHtml("PLE Certificate - ".concat(rec.name || "Certificate"), w.body, "PLE_Certificate_".concat(safeFileName(rec.name || "cert"), "_").concat(year, ".doc"), {
-    pageSize: "210mm 297mm",
-    margin: w.margin
-  });
+  await downloadCertificatesDocx([rec], school, year, selectedDesign, "PLE_Certificate_".concat(safeFileName(rec.name || "cert"), "_").concat(year, ".docx"));
                                         },
                                         style: btnWord,
                                         children: "📄 Download Word"
@@ -23379,11 +23595,7 @@ function PleInfo(param) {
                                     }),
                                     /*#__PURE__*/ _jsx("button", {
                                         onClick: async ()=>{
-  const w = await buildDesignedCertificatesWord(sortedP7.map((s)=>getRecForStudent(s)), school, year, selectedDesign);
-  downloadWordHtml("PLE Certificates - ".concat(year), w.body, "PLE_Certificates_All_".concat(year, ".doc"), {
-    pageSize: "210mm 297mm",
-    margin: w.margin
-  });
+  await downloadCertificatesDocx(sortedP7.map((s)=>getRecForStudent(s)), school, year, selectedDesign, "PLE_Certificates_All_".concat(year, ".docx"));
                                         },
                                         style: {
                                             ...btnWord,
