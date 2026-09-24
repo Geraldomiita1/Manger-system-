@@ -2727,6 +2727,8 @@ async function nodeToPdfPageSlices(node) {
     const rawH = node.scrollHeight || node.offsetHeight || 1;
     const effectiveScale = Math.max(1, Math.min(scale, MAX_CANVAS_DIMENSION / rawW, MAX_CANVAS_DIMENSION / rawH));
     let canvas;
+    // Marks the node being captured so the clone callback below can find it.
+    node.setAttribute("data-pdf-capture", "1");
     try {
         canvas = await html2canvas(node, {
             scale: effectiveScale,
@@ -2736,13 +2738,21 @@ async function nodeToPdfPageSlices(node) {
             // toolbar buttons (Save/Lock, sort toggle) right inside the block being
             // captured. Hide anything marked .no-print in the captured clone only,
             // so the PDF shows just the data, matching what window.print() shows.
+            // BUT never hide a .no-print element that CONTAINS the block being
+            // captured: the single-certificate preview (and other on-screen
+            // previews) sit inside a .no-print wrapper, and hiding that wrapper
+            // made the whole capture -- and so the downloaded PDF -- a blank page.
             onclone: (doc)=>{
+                const target = doc.querySelector('[data-pdf-capture="1"]');
                 doc.querySelectorAll(".no-print").forEach((el)=>{
+                    if (target && el.contains(target)) return;
                     el.style.display = "none";
                 });
+                if (target) target.removeAttribute("data-pdf-capture");
             }
         });
     } finally{
+        node.removeAttribute("data-pdf-capture");
         restore();
     }
     const pxPerMm = canvas.width / pageWmm;
