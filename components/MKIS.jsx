@@ -20579,45 +20579,63 @@ function PleCertificateDesign5(param) {
 // below). Every line of writing stays real, editable Word text. Sizes mirror the
 // on-screen designs (px x 0.75 = pt).
 const WORD_CERT_THEMES = {
+    // ALL sizes below are the SAME pixel sizes the on-screen designs (and therefore the PDFs)
+    // use -- the Word writer converts px -> pt (x 0.75). Fonts: the designs use web fonts Word
+    // doesn't have, so the nearest common font is picked (see dxFont).
     1: {
-        bg: PC_BG_URI, m: [34, 30, 24], logo: 110, schoolPt: 16.5, bodyPt: 10.5, contactPt: 9,
-        font: "Georgia,'Times New Roman',serif", nameFont: "Georgia,'Times New Roman',serif", nameCase: "raw",
+        bg: PC_BG_URI, m: [34, 16, 24], logo: 110,
+        font: "Georgia,'Times New Roman',serif", nameFont: "Georgia,'Times New Roman',serif", titleFont: PC_FONT_SCRIPT, nameCase: "raw",
+        schoolFs: (n)=>Math.max(18, Math.min(34, Math.floor(640 / (Math.max(n, 1) * 0.78)))), contactFs: 12.5, preFs: 14,
+        nameFs: (n)=>(n > 30 ? 20 : n > 24 ? 23 : 26),
+        bodyFs: 15, bodyLh: 26, boxHeadFs: 14, rowFs: 15, rowValFs: 17, totFs: 16, totValFs: 19, detailFs: 14.5,
+        recFs: 14, recLh: 1.55, sigFs: 14, sigSubFs: 13,
         school: PC.NAVY, name: PC.NAVY, label: PC.BLUE, line: "#c9d6ee", boxBorder: PC.GOLD, boxBg: "#ffffff",
-        resp: "#111", respBold: false, agg: "#111", pre: "This is to certify that",
-        titles: ()=>[["PLE Recommendation", 34, PC.BLUE, {}]],
-        nameFs: ()=>28
+        resp: "#111", respBold: true, agg: PC.RED, pre: "This is to certify that",
+        titles: ()=>[["PLE Recommendation", 64, PC.RED, {font: "script", lh: 1.1}]]
     },
     2: {
-        bg: D2_BG_URI, m: [20, 24, 20], logo: 96, schoolPt: 26, bodyPt: 13, contactPt: 13,
-        font: "'Montserrat','Segoe UI',Arial,sans-serif", nameFont: "'Bookman Old Style','Bookman',Georgia,serif", nameCase: "title",
+        bg: D2_BG_URI, m: [20, 18.5, 20], logo: 96,
+        font: "'Montserrat','Segoe UI',Arial,sans-serif", nameFont: "'Bookman Old Style','Bookman',Georgia,serif", titleFont: D2_SERIF, nameCase: "title",
+        schoolFs: ()=>26, contactFs: 13, preFs: 13,
+        nameFs: (n)=>Math.max(26, Math.min(46, Math.floor(600 / (Math.max(n, 1) * 0.62)))),
+        bodyFs: 13, bodyLh: 23, boxHeadFs: 13, rowFs: 13, rowValFs: 13, totFs: 13, totValFs: 13, detailFs: 13,
+        recFs: 13, recLh: 1.6, sigFs: 13, sigSubFs: 13,
         school: D2C.BLACK, name: D2C.GOLD, label: D2C.BLUE, line: D2C.LINE, boxBorder: D2C.LINE, boxBg: D2C.PALE,
-        resp: "#1b1b1b", respBold: false, agg: "#1b1b1b", pre: "This is to certify that", rowHead: "PLE Results",
-        titles: (y)=>[["Primary Leaving Examination", 34, D2C.BLUE, {}], ["Recommendation " + y, 44, D2C.RED, {}]],
-        nameFs: (n)=>Math.max(26, Math.min(46, Math.floor(600 / (Math.max(n, 1) * 0.62)))) * 1
+        resp: "#1b1b1b", respBold: false, agg: "#1b1b1b", totLabel: D2C.RED, pre: "This is to certify that", rowHead: "PLE Results",
+        titles: (y)=>[["Primary Leaving Examination", 34, D2C.BLUE, {lh: 1.15}], ["Recommendation " + y, 44, D2C.RED, {lh: 1.1}]]
     },
     3: {
-        bg: D3_BG_URI, m: [22, 26, 20], logo: 108, schoolPt: 26, bodyPt: 13, contactPt: 13,
-        font: "'Merriweather',Georgia,'Times New Roman',serif", nameFont: "'Playfair Display',Georgia,'Times New Roman',serif", nameCase: "title",
+        bg: D3_BG_URI, m: [22, 26, 20], logo: 108,
+        font: "'Merriweather',Georgia,'Times New Roman',serif", nameFont: "'Playfair Display',Georgia,'Times New Roman',serif", titleFont: D3_HEAD, nameCase: "title",
+        schoolFs: ()=>26, contactFs: 13, preFs: 16,
+        nameFs: (n)=>Math.max(26, Math.min(44, Math.floor(600 / (Math.max(n, 1) * 0.62)))),
+        bodyFs: 13, bodyLh: 23, boxHeadFs: 13, rowFs: 13, rowValFs: 13, totFs: 13, totValFs: 13, detailFs: 13,
+        recFs: 13, recLh: 1.65, sigFs: 13, sigSubFs: 13,
         school: D3C.INK, name: D3C.MAROON, label: D3C.INK, line: "#e2c56a", boxBorder: D3C.GOLD_BOX, boxBg: "#fff8e3",
-        resp: D3C.BLUE, respBold: true, agg: D3C.RED, pre: "This is to certify that", preFs: 16, colon: true, rowHead: "PLE RESULTS",
-        titles: (y)=>[["PLE Recommendation", 40, D3C.GOLD, {up: 1}], ["Uganda National Examinations Board — " + y, 15, D3C.GOLD, {up: 1}]],
-        nameFs: (n)=>Math.max(26, Math.min(44, Math.floor(600 / (Math.max(n, 1) * 0.62)))) * 1
+        resp: D3C.BLUE, respBold: true, agg: D3C.RED, pre: "This is to certify that", colon: true, rowHead: "PLE RESULTS",
+        titles: (y)=>[["PLE Recommendation", 46, D3C.GOLD, {up: 1, lh: 1.15}], ["Uganda National Examinations Board \u2014 " + y, 15, D3C.GOLD, {up: 1, lh: 1.45}]]
     },
     4: {
-        bg: P4_BG_URI, m: [34, 30, 24], logo: 110, schoolPt: 16.5, bodyPt: 10.5, contactPt: 9,
-        font: "Georgia,'Times New Roman',serif", nameFont: "Georgia,'Times New Roman',serif", nameCase: "raw",
+        bg: P4_BG_URI, m: [34, 16, 24], logo: 110,
+        font: "Georgia,'Times New Roman',serif", nameFont: "Georgia,'Times New Roman',serif", titleFont: P4_FONT_TITLE, nameCase: "raw", nameCaps: true,
+        schoolFs: (n)=>Math.max(18, Math.min(34, Math.floor(640 / (Math.max(n, 1) * 0.78)))), contactFs: 12.5, preFs: 15,
+        nameFs: (n)=>(n > 30 ? 20 : n > 24 ? 23 : 26),
+        bodyFs: 15, bodyLh: 26, boxHeadFs: 14, rowFs: 15, rowValFs: 17, totFs: 16, totValFs: 20, detailFs: 14.5,
+        recFs: 14.5, recLh: 1.55, sigFs: 14, sigSubFs: 13,
         school: P4.NAVY, name: P4.NAVY, label: P4.BLUE, line: "#e6d59a", boxBorder: P4.GOLD, boxBg: "#ffffff",
-        resp: "#111", respBold: false, agg: "#111", pre: "This is to certify that", rowHead: "PLE RESULTS",
-        titles: ()=>[["PLE Recommendation", 34, P4.BLUE, {}]],
-        nameFs: ()=>28
+        resp: "#111", respBold: true, agg: P4.RED, pre: "This is to certify that", rowHead: "PLE RESULTS",
+        titles: ()=>[["PLE", 78, P4.NAVY, {i: 1, lh: 0.95}], ["Recommendation", 46, P4.NAVY, {i: 1, lh: 1.1}]]
     },
     5: {
-        bg: D5_BG_URI, m: [31, 34, 22], logo: 132, schoolPt: 26, bodyPt: 13, contactPt: 13, motto: true, strip: true, oneLine: true,
-        font: "'Cormorant Garamond',Georgia,'Times New Roman',serif", nameFont: "'Times New Roman',Times,serif", nameCase: "raw", nameBg: "#efe3a6",
+        bg: D5_BG_URI, m: [31, 31, 22], logo: 132, motto: true, strip: true, oneLine: true,
+        font: "'Cormorant Garamond',Georgia,'Times New Roman',serif", nameFont: "'Times New Roman',Times,serif", titleFont: D5_CAPS, nameCase: "raw", nameBg: "#efe3a6",
+        schoolFs: ()=>26, mottoFs: 13, contactFs: 13, preFs: 13,
+        nameFs: (n)=>(n > 30 ? 21 : n > 22 ? 25 : 31),
+        bodyFs: 13, bodyLh: 17.55, boxHeadFs: 13, rowFs: 13, rowValFs: 13, totFs: 13, totValFs: 13, detailFs: 13,
+        recFs: 13, recLh: 1.35, sigFs: 13, sigSubFs: 13,
         school: D5C.BLUE, name: D5C.NAVY, label: D5C.NAVY, line: D5C.GOLD, boxBorder: D5C.GOLD, boxBg: "#ffffff",
         resp: "#000", respBold: true, agg: "#d4111f", pre: "This certificate is presented to", dateLabel: "Date",
-        titles: (y)=>[["Primary Leaving Examination (PLE)", 17.34, D5C.NAVY, {up: 1, plain: 1}], ["PLE Recommendation " + y, 30, "#d4111f", {up: 1}]],
-        nameFs: (n)=>(n > 30 ? 21 : n > 22 ? 25 : 31)
+        titles: (y)=>[["Primary Leaving Examination (PLE)", 13, D5C.NAVY, {up: 1, plain: 1, lh: 1.3}], ["PLE Recommendation " + y, 28, "#d4111f", {up: 1, lh: 1.2}]]
     }
 };
 const pleWordCache = {};
@@ -20664,7 +20682,7 @@ function pleImageSize(src) {
 // be nudged by accident while editing. All writing stays real, editable Word text.
 const DX_SAFE_FONTS = [
     "Georgia", "Times New Roman", "Arial", "Segoe UI", "Bookman Old Style", "Calibri",
-    "Cambria", "Verdana", "Tahoma", "Trebuchet MS", "Palatino Linotype", "Garamond", "Century Gothic"
+    "Cambria", "Verdana", "Tahoma", "Trebuchet MS", "Palatino Linotype", "Garamond", "Century Gothic", "Brush Script MT", "Segoe Script"
 ];
 // First font of a CSS stack that Word installs everywhere (web fonts like
 // Montserrat/Playfair are not in Word, so they would silently fall back anyway).
@@ -20757,26 +20775,30 @@ function dxPageBackground(rid) {
         "<w:r><w:drawing><wp:anchor distT=\"0\" distB=\"0\" distL=\"0\" distR=\"0\" simplePos=\"0\" relativeHeight=\"0\" behindDoc=\"1\" locked=\"1\" layoutInCell=\"1\" allowOverlap=\"1\">" + "<wp:simplePos x=\"0\" y=\"0\"/><wp:positionH relativeFrom=\"page\"><wp:posOffset>0</wp:posOffset></wp:positionH><wp:positionV relativeFrom=\"page\"><wp:posOffset>0</wp:posOffset></wp:positionV>" + "<wp:extent cx=\"" + cx + "\" cy=\"" + cy + "\"/><wp:effectExtent l=\"0\" t=\"0\" r=\"0\" b=\"0\"/><wp:wrapNone/>" + "<wp:docPr id=\"1\" name=\"Certificate frame\" descr=\"Certificate frame\"/><wp:cNvGraphicFramePr><a:graphicFrameLocks noChangeAspect=\"1\"/></wp:cNvGraphicFramePr>" + "<a:graphic><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/picture\"><pic:pic><pic:nvPicPr><pic:cNvPr id=\"1\" name=\"frame.jpeg\"/><pic:cNvPicPr/></pic:nvPicPr>" + "<pic:blipFill><a:blip r:embed=\"" + rid + "\"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>" + "<pic:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"" + cx + "\" cy=\"" + cy + "\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:anchor></w:drawing></w:r>"
     ], { exact: 1, mark: 1 });
 }
-// One certificate's paragraphs/tables. Mirrors WORD_CERT_THEMES (sizes are px x 0.75 = pt).
+// One certificate's paragraphs/tables. Every size comes from WORD_CERT_THEMES, which holds the
+// SAME px sizes as the on-screen design / PDF (px x 0.75 = pt).
 // textW = usable page width in twips; logoRid/logoSz = school logo (or null); first = first certificate?
 function pleDocxCertBody(rec, school, year, t, textW, logoRid, logoSz, first, picId) {
-    const ptn = (px)=>Math.round(px * 75) / 100;
-    const bp = t.bodyPt;
-    const fBody = dxFont(t.font), fName = dxFont(t.nameFont);
+    const pt = (px)=>Math.round(px * 75) / 100;
+    const bp = pt(t.bodyFs);
+    const fBody = dxFont(t.font), fName = dxFont(t.nameFont), fTitle = dxFont(t.titleFont || t.font);
+    const availPt = textW / 20;
     const he = rec.gender === "F" ? "her" : "his";
     const herHim = rec.gender === "F" ? "her" : "him";
     const heShe = rec.gender === "F" ? "She" : "He";
     const rawName = String(rec.name || "");
-    const nm = t.nameCase === "title" ? rawName.toLowerCase().replace(/(^|[\s'’\-.])([a-z])/g, (m, a, b)=>a + b.toUpperCase()) : rawName;
+    let nm = t.nameCase === "title" ? rawName.toLowerCase().replace(/(^|[\s'\u2019\-.])([a-z])/g, (m, a, b)=>a + b.toUpperCase()) : rawName;
     const contacts = [
         school.poBox,
         school.tel ? "Tel: " + school.tel : "",
         school.email
     ].filter(Boolean).join("  |  ");
-    const val = (sub)=>String(rec.results && rec.results[sub] || "—");
+    const val = (sub)=>String(rec.results && rec.results[sub] || "\u2014");
     let pbPending = !first; // every certificate after the first starts on a fresh page
+    // o.lh = CSS-style line height in px (becomes an exact Word line height, like the design)
     const P = (runs, o)=>{
         const oo = Object.assign({ align: "center", line: 1.15, run: { font: fBody, sz: bp, color: "#111111" } }, o);
+        if (oo.lh) oo.exact = pt(oo.lh);
         if (pbPending) {
             oo.pageBreakBefore = true;
             pbPending = false;
@@ -20785,6 +20807,7 @@ function pleDocxCertBody(rec, school, year, t, textW, logoRid, logoSz, first, pi
     };
     const NB = "\u00A0";
     const respBold = !!t.respBold;
+    const dfs = pt(t.detailFs);
     const details = [
         ["LIN", rec.lin],
         [t.strip ? "LEADERSHIP POSITION(S)" : "Leadership Position", rec.leadership],
@@ -20800,18 +20823,25 @@ function pleDocxCertBody(rec, school, year, t, textW, logoRid, logoSz, first, pi
         details[1] = details[2];
         details[2] = tmp;
     }
-    const detailBlock = (d)=>P([{ t: d[0], b: 1, color: t.label }], { align: "left", before: 4 }) + P([{ t: String(d[1] || "—"), b: respBold, color: t.resp }], { align: "left", bdrBottom: { sz: 6, color: t.line, space: 1 } });
+    const detailBlock = (d)=>P([{ t: d[0], b: 1, color: t.label, sz: dfs }], { align: "left", before: 4 }) + P([{ t: String(d[1] || "\u2014"), b: respBold, color: t.resp, sz: dfs }], { align: "left", bdrBottom: { sz: 6, color: t.line, space: 1 } });
     let x = "";
     if (logoRid && logoSz) x += P([dxInlinePic(logoRid, logoSz.w, logoSz.h, picId, "School logo")], { line: 1 });
-    x += P([{ t: school.name || "", b: 1, caps: 1, color: t.school, sz: t.schoolPt }], { before: 4 });
-    if (t.motto && school.motto) x += P([{ t: "\"" + school.motto + "\"", i: 1, color: D5C.GOLD_D }]);
-    if (contacts) x += P([{ t: contacts, sz: t.contactPt }], { before: 2 });
+    const schoolPt = pt(t.schoolFs((school.name || "").length));
+    x += P([{ t: school.name || "", b: 1, caps: 1, color: t.school, sz: schoolPt }], { before: 4, line: 1.15 });
+    if (t.motto && school.motto) x += P([{ t: "\"" + school.motto + "\"", i: 1, color: D5C.GOLD_D, sz: pt(t.mottoFs || t.bodyFs) }]);
+    if (contacts) x += P([{ t: contacts, sz: pt(t.contactFs) }], { before: 2 });
     t.titles(year).forEach((tt, i)=>{
         const o = tt[3] || {};
-        x += P([{ t: tt[0], b: !o.plain, caps: !!o.up, color: tt[2], sz: ptn(tt[1]) }], { line: 1.1, before: i === 0 ? 8 : 2 });
+        let sz = pt(tt[1]);
+        // Safeguard only: shrink a title that could not fit on one line at the design size
+        // (a substitute font can be wider than the web font the design uses).
+        const est = String(tt[0]).length * (o.up ? 0.74 : 0.56) * sz;
+        if (est > availPt) sz = Math.floor(sz * availPt / est * 2) / 2;
+        x += P([{ t: tt[0], b: !o.plain && !o.font, i: !!o.i, caps: !!o.up, color: tt[2], sz, font: fTitle }], { line: o.lh || 1.1, before: i === 0 ? 8 : 2 });
     });
-    x += P([{ t: t.pre, i: 1, sz: t.preFs ? ptn(t.preFs) : bp }], { before: 8 });
-    x += P([{ t: t.nameBg ? NB + NB + NB + nm + NB + NB + NB : nm, font: fName, b: 1, color: t.name, sz: ptn(t.nameFs(nm.length)), shd: t.nameBg || null }], { before: 4 });
+    x += P([{ t: t.pre, i: 1, sz: pt(t.preFs) }], { before: 8 });
+    let nameSz = pt(t.nameFs(nm.length));
+    x += P([{ t: t.nameBg ? NB + NB + NB + nm + NB + NB + NB : nm, font: fName, b: 1, caps: !!t.nameCaps, color: t.name, sz: nameSz, shd: t.nameBg || null }], { before: 4 });
     if (t.oneLine) {
         x += P([
             { t: "Index No. " },
@@ -20821,22 +20851,22 @@ function pleDocxCertBody(rec, school, year, t, textW, logoRid, logoSz, first, pi
             { t: " in " },
             { t: String(year), b: 1 },
             { t: "." }
-        ], { before: 6 });
+        ], { before: 6, lh: t.bodyLh });
     } else {
-        if (rec.indexNo) x += P([{ t: "Index No. " }, { t: rec.indexNo, b: 1 }], { before: 3 });
+        if (rec.indexNo) x += P([{ t: "Index No. " }, { t: rec.indexNo, b: 1 }], { before: 3, lh: t.bodyLh });
         x += P([
             { t: "successfully completed " + he + " Primary Leaving Examination (PLE) in " },
             { t: String(year), b: 1 },
             { t: " at " },
             { t: (school.name || "") + " " + PLE_CERT_LOCATION + ".", b: 1 }
-        ], { before: 5 });
+        ], { before: 5, lh: t.bodyLh });
     }
     if (t.strip) {
         const cw = textW / PLE_SUBJECTS.length;
         const box = { sz: 6, color: t.boxBorder };
         x += dxSpacer(8);
         x += dxTable([
-            PLE_SUBJECTS.map((sub, i)=>dxCell(P([{ t: pleSubLabel(sub), b: 1, caps: 1, color: t.label }]) + P([{ t: val(sub), b: 1 }]), cw, {
+            PLE_SUBJECTS.map((sub, i)=>dxCell(P([{ t: pleSubLabel(sub), b: 1, caps: 1, color: t.label }], { line: 1.3 }) + P([{ t: val(sub), b: 1 }], { line: 1.2 }), cw, {
                     borders: { top: box, left: box, bottom: box, right: box },
                     fill: i % 2 ? "#f6ecb8" : "#fdf7d8",
                     mar: { t: 60, l: 40, b: 60, r: 40 }
@@ -20844,10 +20874,10 @@ function pleDocxCertBody(rec, school, year, t, textW, logoRid, logoSz, first, pi
         ], PLE_SUBJECTS.map(()=>cw));
         x += P([
             { t: "Total Aggregate: " },
-            { t: String(rec.totalAgg || "—"), b: 1, color: t.agg },
+            { t: String(rec.totalAgg || "\u2014"), b: 1, color: t.agg },
             { t: NB.repeat(8) + "Division: " },
             { t: pleRomanDiv(rec.division), b: 1 }
-        ], { before: 6 });
+        ], { before: 6, line: 1.3 });
         const half = textW / 2;
         const cellFor = (d)=>dxCell(detailBlock(d), half, { mar: { t: 0, l: 160, b: 0, r: 160 } });
         x += dxSpacer(4);
@@ -20855,7 +20885,7 @@ function pleDocxCertBody(rec, school, year, t, textW, logoRid, logoSz, first, pi
             [cellFor(details[0]), cellFor(details[1])],
             [cellFor(details[2]), cellFor(details[3])]
         ], [half, half]);
-        x += P([{ t: "I congratulate " + herHim + " on successfully completing the Primary Leaving Examination. " + heShe + " is encouraged to continue working hard and I recommend " + herHim + " for admission to secondary school.", i: 1 }], { before: 8 });
+        x += P([{ t: "I congratulate " + herHim + " on successfully completing the Primary Leaving Examination. " + heShe + " is encouraged to continue working hard and I recommend " + herHim + " for admission to secondary school.", i: 1 }], { before: 8, lh: t.recFs * t.recLh });
     } else {
         const wBox = Math.round(textW * 0.47), wGap = Math.round(textW * 0.03), wRight = textW - wBox - wGap;
         const boxPad = { t: 100, l: 200, b: 100, r: 200 };
@@ -20863,17 +20893,18 @@ function pleDocxCertBody(rec, school, year, t, textW, logoRid, logoSz, first, pi
         const wLab = Math.round(inner * 0.7), wVal = inner - wLab;
         const rowBd = { bottom: { sz: 6, color: t.line } };
         const rowMar = { t: 40, l: 0, b: 40, r: 0 };
+        const rowSz = pt(t.rowFs), rowValSz = pt(t.rowValFs), totSz = pt(t.totFs), totValSz = pt(t.totValFs);
         const subRows = PLE_SUBJECTS.map((sub)=>[
-            dxCell(P([{ t: pleSubLabel(sub) + (t.colon ? ":" : "") }], { align: "left" }), wLab, { borders: rowBd, mar: rowMar }),
-            dxCell(P([{ t: val(sub), b: 1 }], { align: "right" }), wVal, { borders: rowBd, mar: rowMar })
+            dxCell(P([{ t: pleSubLabel(sub) + (t.colon ? ":" : ""), sz: rowSz }], { align: "left" }), wLab, { borders: rowBd, mar: rowMar }),
+            dxCell(P([{ t: val(sub), b: 1, sz: rowValSz }], { align: "right" }), wVal, { borders: rowBd, mar: rowMar })
         ]);
-        const totRow = (lbl, v, col)=>[
-            dxCell(P([{ t: lbl, b: 1 }], { align: "left" }), wLab, { mar: rowMar }),
-            dxCell(P([{ t: v, b: 1, color: col || null }], { align: "right" }), wVal, { mar: rowMar })
+        const totRow = (lbl, v, col, lblCol)=>[
+            dxCell(P([{ t: lbl, b: 1, sz: totSz, color: lblCol || null }], { align: "left" }), wLab, { mar: rowMar }),
+            dxCell(P([{ t: v, b: 1, sz: totValSz, color: col || null }], { align: "right" }), wVal, { mar: rowMar })
         ];
-        const resultsBox = P([{ t: t.rowHead || "PLE Results", b: 1, color: t.label }], { align: "left" }) + dxTable(subRows.concat([
-            totRow("Total Agg" + (t.colon ? ":" : ""), String(rec.totalAgg || "—"), t.agg),
-            totRow("Division" + (t.colon ? ":" : ""), String(rec.division || "—"), null)
+        const resultsBox = P([{ t: t.rowHead || "PLE Results", b: 1, color: t.label, sz: pt(t.boxHeadFs) }], { align: "left" }) + dxTable(subRows.concat([
+            totRow("Total Agg" + (t.colon ? ":" : ""), String(rec.totalAgg || "\u2014"), t.agg, t.totLabel),
+            totRow("Division" + (t.colon ? ":" : ""), String(rec.division || "\u2014"), null, t.totLabel)
         ]), [wLab, wVal]) + dxSpacer(1);
         const boxB = { sz: 12, color: t.boxBorder };
         x += dxSpacer(10);
@@ -20884,16 +20915,17 @@ function pleDocxCertBody(rec, school, year, t, textW, logoRid, logoSz, first, pi
                 dxCell(details.map(detailBlock).join(""), wRight, { mar: { t: 0, l: 80, b: 0, r: 0 } })
             ]
         ], [wBox, wGap, wRight]);
-        x += P([{ t: pleRecommendation(rec.name, rec.gender, rec.totalAgg, rec.division) }], { line: 1.5, before: 12, indL: textW * 0.06, indR: textW * 0.06 });
+        x += P([{ t: pleRecommendation(rec.name, rec.gender, rec.totalAgg, rec.division), sz: pt(t.recFs) }], { lh: t.recFs * t.recLh, before: 12, indL: textW * 0.06, indR: textW * 0.06 });
     }
     // Signature block: Date | Headteacher
     const half2 = textW / 2;
+    const sigSz = pt(t.sigFs), sigSub = pt(t.sigSubFs);
     const sig = (label)=>dxCell(P(label, { bdrTop: { sz: 8, color: "#111111", space: 3 }, indL: half2 * 0.125, indR: half2 * 0.125 }), half2);
     x += dxSpacer(22);
     x += dxTable([
         [
-            sig([{ t: t.dateLabel || "Date of Issuance" }]),
-            sig((school.headTeacher ? [{ t: String(school.headTeacher).toUpperCase(), b: 1 }, { br: 1 }] : []).concat([{ t: "Headteacher" }]))
+            sig([{ t: t.dateLabel || "Date of Issuance", sz: sigSz }]),
+            sig((school.headTeacher ? [{ t: String(school.headTeacher).toUpperCase(), b: 1, sz: sigSz }, { br: 1, sz: sigSz }] : []).concat([{ t: "Headteacher", sz: sigSub }]))
         ]
     ], [half2, half2]);
     x += dxSpacer(1);
@@ -21010,6 +21042,54 @@ const CERT_DESIGNS = [
         Component: PleCertificateDesign5
     }
 ];
+// Performance Analysis card for the Pre-PLE sheet: A = grade counts per subject,
+// B = division counts split into Male / Female / Total. Sits inside the sheet node so it
+// is included in the PDF as well as on screen.
+function PrePleAnalysisCard(param) {
+    let { title, subjectAnalysis, gradeKeys, genderRows } = param;
+    const e = React.createElement;
+    const head = { ...th, padding: "8px 10px", color: "#0f766e" };
+    const divCols = [
+        ["I", "Div I", "#166534"],
+        ["II", "Div II", "#1e40af"],
+        ["III", "Div III", "#92400e"],
+        ["IV", "Div IV", "#7c2d12"],
+        ["U", "U", "#6b7280"],
+        ["X", "X", "#dc2626"]
+    ];
+    const h4 = { margin: "0 0 8px", color: "#0f766e", fontSize: 13 };
+    return e("div", { style: { background: "white", borderRadius: 12, border: "1px solid #e5e7eb", overflow: "hidden", marginTop: 20 } },
+        e("div", { style: { background: "#0f766e", color: "white", padding: "10px 16px", fontWeight: 700 } }, title),
+        e("div", { style: { padding: 16 } },
+            e("h4", { style: h4 }, "A. Subject Performance Analysis"),
+            e("div", { style: { overflowX: "auto", marginBottom: 20 } },
+                e("table", { style: { width: "100%", fontSize: 12 } },
+                    e("thead", null,
+                        e("tr", { style: { background: "#ccfbf1" } },
+                            e("th", { style: { ...head, textAlign: "left" } }, "Subject"),
+                            ...gradeKeys.map((g)=>e("th", { key: g, style: head }, g)),
+                            e("th", { style: { ...head, color: "#dc2626" } }, "X"),
+                            e("th", { style: head }, "Total"))),
+                    e("tbody", null,
+                        ...subjectAnalysis.map((sa, i)=>e("tr", { key: sa.sub, style: { background: i % 2 === 0 ? "white" : "#f0fdfa" } },
+                            e("td", { style: { ...td, fontWeight: 700, textAlign: "left" } }, sa.sub),
+                            ...gradeKeys.map((g)=>e("td", { key: g, style: td }, sa.gradeCounts[g] || 0)),
+                            e("td", { style: { ...td, fontWeight: 700, color: "#dc2626" } }, sa.xCount || 0),
+                            e("td", { style: { ...td, fontWeight: 700 } }, sa.total)))))),
+            e("h4", { style: h4 }, "B. General Performance Analysis"),
+            e("div", { style: { overflowX: "auto" } },
+                e("table", { style: { width: "100%", fontSize: 12 } },
+                    e("thead", null,
+                        e("tr", { style: { background: "#ccfbf1" } },
+                            e("th", { style: { ...head, textAlign: "left" } }, "Sex"),
+                            e("th", { style: head }, "No. of Pupils"),
+                            ...divCols.map((c)=>e("th", { key: c[0], style: head }, c[1])))),
+                    e("tbody", null,
+                        ...genderRows.map((gr)=>e("tr", { key: gr.label, style: { background: gr.label === "Total" ? "#f0fdfa" : "white" } },
+                            e("td", { style: { ...td, fontWeight: 700, textAlign: "left" } }, gr.label),
+                            e("td", { style: { ...td, fontWeight: 700 } }, gr.total),
+                            ...divCols.map((c)=>e("td", { key: c[0], style: { ...td, fontWeight: 700, color: c[2] } }, gr.counts[c[0]] || 0)))))))));
+}
 const PRE_PLE_SETS = [
     "SET 1",
     "SET 2",
@@ -21312,6 +21392,22 @@ function PleInfo(param) {
         else if (prePleDivCounts[d] !== undefined) prePleDivCounts[d]++;
         else prePleDivCounts.U++;
     });
+    // Same division counts split by sex (Male / Female / Total) for the analysis.
+    const prePleGenderCounts = {
+        M: { I: 0, II: 0, III: 0, IV: 0, U: 0, X: 0 },
+        F: { I: 0, II: 0, III: 0, IV: 0, U: 0, X: 0 }
+    };
+    prePleSortedRows.forEach((r)=>{
+        const g = r.s.gender === "F" ? "F" : r.s.gender === "M" ? "M" : null;
+        if (!g) return;
+        const d = r.hasX ? "X" : r.div;
+        prePleGenderCounts[g][prePleDivCounts[d] !== undefined ? d : "U"]++;
+    });
+    const prePleGenderRows = [
+        { label: "Male", total: prePleStudents.filter((s)=>s.gender === "M").length, counts: prePleGenderCounts.M },
+        { label: "Female", total: prePleStudents.filter((s)=>s.gender === "F").length, counts: prePleGenderCounts.F },
+        { label: "Total", total: prePleStudents.length, counts: prePleDivCounts }
+    ];
     const exportPrePleWord = ()=>{
         const rowsHtml = prePleDisplayRows.map((r, i)=>"\n      <tr>\n        <td>".concat(i + 1, '</td><td class="name-cell">').concat(escapeHtml(r.s.name), "</td>\n        ").concat(r.perSub.map((p)=>{
                 var _p_exam, _p_agg;
@@ -21332,6 +21428,7 @@ function PleInfo(param) {
                     sa.total
                 ]);
             const gHead = [
+                "SEX",
                 "NO. OF PUPILS",
                 "DIV I",
                 "DIV II",
@@ -21340,19 +21437,18 @@ function PleInfo(param) {
                 "U",
                 "X"
             ];
-            const gRow = [
-                prePleStudents.length,
-                prePleDivCounts.I,
-                prePleDivCounts.II,
-                prePleDivCounts.III,
-                prePleDivCounts.IV,
-                prePleDivCounts.U,
-                prePleDivCounts.X
-            ];
+            const gRows = prePleGenderRows.map((gr)=>[
+                    gr.label.toUpperCase(),
+                    gr.total,
+                    gr.counts.I,
+                    gr.counts.II,
+                    gr.counts.III,
+                    gr.counts.IV,
+                    gr.counts.U,
+                    gr.counts.X
+                ]);
             body += '<div class="section-title">A. Subject Performance Analysis</div>'.concat(htmlTable(aHead, aRows));
-            body += '<div class="section-title">B. General Performance Analysis</div>'.concat(htmlTable(gHead, [
-                gRow
-            ]));
+            body += '<div class="section-title">B. General Performance Analysis</div>'.concat(htmlTable(gHead, gRows));
         }
         downloadWordHtml("PRE-PLE ".concat(prePleSet, " - P7"), body, "P7_PRE-PLE_".concat(safeFileName(prePleSet), "_").concat(prePleYear).concat(prePleShowResults ? "" : "_Blank", ".doc"), {
             pageSize: "297mm 210mm"
@@ -21639,7 +21735,7 @@ function PleInfo(param) {
         });
     };
     const plePrintHeaders = [
-        "#",
+        "S/N",
         "Year",
         "Index No",
         "NAME",
@@ -21653,7 +21749,7 @@ function PleInfo(param) {
         "Leadership"
     ];
     const exportPleWord = ()=>{
-        const rowsHtml = sortedP7.map((s, i)=>{
+        const rowsHtml = resultSheetP7.map((s, i)=>{
             const rec = pleData[s.id] || {};
             return "<tr>\n        <td>".concat(i + 1, "</td><td>").concat(escapeHtml(year), "</td><td>").concat(escapeHtml(rec.indexNo || ""), '</td>\n        <td class="name-cell">').concat(escapeHtml(s.name), "</td><td>").concat(escapeHtml(s.gender), "</td><td>").concat(escapeHtml(rec.lin || ""), "</td>\n        ").concat(PLE_SUBJECTS.map((sub)=>{
                 var _rec_results;
@@ -21666,7 +21762,7 @@ function PleInfo(param) {
         });
     };
     const exportPleExcel = ()=>{
-        const data = sortedP7.map((s, i)=>{
+        const data = resultSheetP7.map((s, i)=>{
             const rec = pleData[s.id] || {};
             return [
                 i + 1,
@@ -21954,6 +22050,11 @@ function PleInfo(param) {
         const bAgg = Number(((_pleData_b_id = pleData[b.id]) === null || _pleData_b_id === void 0 ? void 0 : _pleData_b_id.totalAgg) || 999);
         return aAgg - bAgg || a.name.localeCompare(b.name);
     });
+    // The PLE Results sheet carries no positions: learners are listed A-Z with a plain S/N
+    // (numbering a merit-ordered list would read as a position).
+    const resultSheetP7 = [
+        ...p7Students
+    ].sort((a, b)=>a.name.localeCompare(b.name));
     const tabStyle = (t)=>({
             padding: "8px 18px",
             borderRadius: "8px 8px 0 0",
@@ -22751,7 +22852,7 @@ function PleInfo(param) {
                                                             color: "white"
                                                         },
                                                         children: [
-                                                            "#",
+                                                            "S/N",
                                                             "Year",
                                                             "Index No",
                                                             "NAME",
@@ -22780,7 +22881,7 @@ function PleInfo(param) {
                                                 }),
                                                 /*#__PURE__*/ _jsxs("tbody", {
                                                     children: [
-                                                        sortedP7.length === 0 && /*#__PURE__*/ _jsx("tr", {
+                                                        resultSheetP7.length === 0 && /*#__PURE__*/ _jsx("tr", {
                                                             children: /*#__PURE__*/ _jsx("td", {
                                                                 colSpan: 15,
                                                                 style: {
@@ -22791,7 +22892,7 @@ function PleInfo(param) {
                                                                 children: "No P7 learners found. Add them in the LEARNERS page."
                                                             })
                                                         }),
-                                                        sortedP7.map((s, i)=>{
+                                                        resultSheetP7.map((s, i)=>{
                                                             const rec = pleData[s.id] || {};
                                                             const hasResults = PLE_SUBJECTS.some((sub)=>{
                                                                 var _rec_results;
@@ -23412,6 +23513,12 @@ function PleInfo(param) {
                                                     }, r.s.id))
                                             })
                                         ]
+                                    }),
+                                    prePleShowResults && /*#__PURE__*/ _jsx(PrePleAnalysisCard, {
+                                        title: "\uD83D\uDCCA Performance Analysis - PRE-PLE ".concat(prePleSet, " - P7 ").concat(prePleYear),
+                                        subjectAnalysis: prePleSubjectAnalysis,
+                                        gradeKeys: prePleGradeKeys,
+                                        genderRows: prePleGenderRows
                                     })
                                 ]
                             })
@@ -23689,7 +23796,7 @@ function PleInfo(param) {
                                 },
                                 children: "No P7 learners found."
                             }) : (()=>{
-                                const recs = sortedP7.map((s)=>getRecForStudent(s)).filter((r)=>r.totalAgg);
+                                const recs = resultSheetP7.map((s)=>getRecForStudent(s)).filter((r)=>r.totalAgg);
                                 const divCounts = {
                                     "1": 0,
                                     "2": 0,
@@ -23701,6 +23808,52 @@ function PleInfo(param) {
                                     const d = String(r.division);
                                     if (divCounts[d] !== undefined) divCounts[d]++;
                                 });
+                                // Male / Female numbers for every division (and for the whole group)
+                                const divGender = {
+                                    "1": { M: 0, F: 0 },
+                                    "2": { M: 0, F: 0 },
+                                    "3": { M: 0, F: 0 },
+                                    "4": { M: 0, F: 0 },
+                                    "U": { M: 0, F: 0 }
+                                };
+                                const totalGender = { M: 0, F: 0 };
+                                recs.forEach((r)=>{
+                                    const g = r.gender === "M" ? "M" : r.gender === "F" ? "F" : null;
+                                    if (!g) return;
+                                    totalGender[g]++;
+                                    const d = String(r.division);
+                                    if (divGender[d]) divGender[d][g]++;
+                                });
+                                const genderLine = (g)=>/*#__PURE__*/ _jsxs("div", {
+                                        style: {
+                                            display: "flex",
+                                            justifyContent: "center",
+                                            gap: 10,
+                                            marginTop: 6,
+                                            fontSize: 11,
+                                            fontWeight: 700
+                                        },
+                                        children: [
+                                            /*#__PURE__*/ _jsxs("span", {
+                                                style: {
+                                                    color: "#1d4ed8"
+                                                },
+                                                children: [
+                                                    "Male ",
+                                                    g.M
+                                                ]
+                                            }),
+                                            /*#__PURE__*/ _jsxs("span", {
+                                                style: {
+                                                    color: "#be185d"
+                                                },
+                                                children: [
+                                                    "Female ",
+                                                    g.F
+                                                ]
+                                            })
+                                        ]
+                                    });
                                 const subAvg = {};
                                 PLE_SUBJECTS.forEach((sub)=>{
                                     const vals = recs.map((r)=>{
@@ -23728,7 +23881,7 @@ function PleInfo(param) {
                                         /*#__PURE__*/ _jsxs("div", {
                                             style: {
                                                 display: "grid",
-                                                gridTemplateColumns: "repeat(auto-fit,minmax(100px,1fr))",
+                                                gridTemplateColumns: "repeat(auto-fit,minmax(130px,1fr))",
                                                 gap: 10,
                                                 marginBottom: 20
                                             },
@@ -23772,7 +23925,8 @@ function PleInfo(param) {
                                                                     recs.length ? Math.round(count / recs.length * 100) : 0,
                                                                     "%"
                                                                 ]
-                                                            })
+                                                            }),
+                                                            genderLine(divGender[div])
                                                         ]
                                                     }, div);
                                                 }),
@@ -23800,7 +23954,8 @@ function PleInfo(param) {
                                                                 color: "#374151"
                                                             },
                                                             children: "Total Sat"
-                                                        })
+                                                        }),
+                                                        genderLine(totalGender)
                                                     ]
                                                 })
                                             ]
@@ -23886,7 +24041,7 @@ function PleInfo(param) {
                                                                 color: "white"
                                                             },
                                                             children: [
-                                                                "POS",
+                                                                "S/N",
                                                                 "Name",
                                                                 "Index No",
                                                                 "SEX",
