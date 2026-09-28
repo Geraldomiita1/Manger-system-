@@ -14447,6 +14447,27 @@ function MonthBlock(param) {
     });
 }
 // ─── GROUP WORK ──────────────────────────────────────────────────────────────
+// Chronological sort key for a "Term I__2026" period key (year first, then term).
+function groupPeriodOrder(tk) {
+    const [t, y] = String(tk).split("__");
+    return (parseInt(y, 10) || 0) * 10 + (TERMS.indexOf(t) + 1);
+}
+// Latest period BEFORE `tk` (same class) that already has groups set up.
+function findPriorGroupPeriod(clsData, tk) {
+    const target = groupPeriodOrder(tk);
+    let best = null;
+    Object.keys(clsData || {}).forEach((k)=>{
+        const o = groupPeriodOrder(k);
+        if (o >= target || !((clsData[k] && clsData[k].groups) || []).length) return;
+        if (!best || o > best.o) best = { k, o };
+    });
+    return best ? best.k : null;
+}
+// Copy of a group for another period: same id/name, members limited to pupils
+// still in the class (pupils who left/were promoted are dropped).
+function carryGroup(g, validIds) {
+    return { ...g, members: (g.members || []).filter((m)=>validIds.has(m)) };
+}
 function GroupWork(param) {
     let { students, groupWork, setGroupWork, bands: defaultBands, specialBands, divisions, school, markEditing } = param;
     var _groupWork_cls, _period_marks;
@@ -14495,7 +14516,10 @@ function GroupWork(param) {
                 ...prev,
                 [cls]: {
                     ...clsData,
-                    [tk]: updater(cur)
+                    [tk]: {
+                        ...updater(cur),
+                        rosterInit: true
+                    }
                 }
             };
         });
@@ -14581,37 +14605,98 @@ function GroupWork(param) {
     // over too, so the copied marks (keyed by group id) line up correctly.
     const transferGroupWork = useCallback((fromTk, fromTestNo, toTk, toTestNo)=>{
         markEditing();
+        const validIds = new Set(classStudents.map((s)=>s.id));
         setGroupWork((prev)=>{
-            var _srcPeriod_marks;
             const clsData = prev[cls] || {};
-            const srcPeriod = clsData[fromTk] || {
-                groups: [],
-                marks: {}
-            };
-            const srcMarks = ((_srcPeriod_marks = srcPeriod.marks) === null || _srcPeriod_marks === void 0 ? void 0 : _srcPeriod_marks[fromTestNo]) || {};
-            const destPeriod = clsData[toTk] || {
-                groups: [],
-                marks: {}
-            };
-            const destGroups = destPeriod.groups && destPeriod.groups.length > 0 ? destPeriod.groups : srcPeriod.groups;
-            const newPeriod = {
-                ...destPeriod,
-                groups: destGroups,
-                marks: {
-                    ...destPeriod.marks || {},
-                    [toTestNo]: srcMarks
+            const src = clsData[fromTk] || { groups: [], marks: {} };
+            const srcGroups = src.groups || [];
+            const srcMarks = (src.marks || {})[fromTestNo] || {};
+            const dest = clsData[toTk] || { groups: [], marks: {} };
+            const destGroups = [...dest.groups || []];
+            const norm = (n)=>String(n || "").trim().toLowerCase();
+            const memKey = (g)=>[...g.members || []].sort().join("|");
+            // Map each source group onto a destination group: same id, else same
+            // name, else identical members; otherwise add it to the destination.
+            const idMap = {};
+            srcGroups.forEach((sg)=>{
+                let dg = destGroups.find((d)=>d.id === sg.id) || destGroups.find((d)=>norm(d.name) && norm(d.name) === norm(sg.name)) || (memKey(sg) ? destGroups.find((d)=>memKey(d) === memKey(sg)) : null);
+                if (!dg) {
+                    dg = carryGroup(sg, validIds);
+                    if (destGroups.some((d)=>d.id === dg.id)) dg = { ...dg, id: "g".concat(Date.now()).concat(Math.random().toString(36).slice(2, 6)) };
+                    destGroups.push(dg);
                 }
-            };
+                idMap[sg.id] = dg.id;
+            });
+            const newTestMarks = {};
+            Object.entries(srcMarks).forEach((param)=>{
+                let [gid, subs] = param;
+                const did = idMap[gid] || (destGroups.some((d)=>d.id === gid) ? gid : null);
+                if (did) newTestMarks[did] = { ...subs };
+            });
             return {
                 ...prev,
                 [cls]: {
                     ...clsData,
-                    [toTk]: newPeriod
+                    [toTk]: {
+                        ...dest,
+                        rosterInit: true,
+                        groups: destGroups,
+                        marks: {
+                            ...dest.marks || {},
+                            [toTestNo]: newTestMarks
+                        }
+                    }
                 }
             };
         });
     }, [
         cls,
+        classStudents,
+        markEditing,
+        setGroupWork
+    ]);
+    // Auto-load: the first time a class+term+year with no groups is opened,
+    // carry the groups (and their members) over from the most recent earlier
+    // term that has them. Marks are NOT copied -- use Transfer Result for that.
+    const [groupNotice, setGroupNotice] = useState(null);
+    useEffect(()=>{
+        const clsData = (groupWork || {})[cls] || {};
+        const cur = clsData[tk];
+        if (cur && ((cur.groups || []).length > 0 || cur.rosterInit)) return;
+        if (classStudents.length === 0) return;
+        const srcKey = findPriorGroupPeriod(clsData, tk);
+        if (!srcKey) return;
+        const validIds = new Set(classStudents.map((s)=>s.id));
+        const carried = clsData[srcKey].groups.map((g)=>carryGroup(g, validIds));
+        const pupils = carried.reduce((a, g)=>a + g.members.length, 0);
+        markEditing();
+        setGroupWork((prev)=>{
+            const cd = prev[cls] || {};
+            const c = cd[tk];
+            if (c && ((c.groups || []).length > 0 || c.rosterInit)) return prev;
+            return {
+                ...prev,
+                [cls]: {
+                    ...cd,
+                    [tk]: {
+                        marks: {},
+                        ...c || {},
+                        rosterInit: true,
+                        groups: carried
+                    }
+                }
+            };
+        });
+        const [st, sy] = srcKey.split("__");
+        setGroupNotice({
+            key: "".concat(cls, "|").concat(tk),
+            text: "Groups loaded automatically from ".concat(st, " ").concat(sy, ": ").concat(carried.length, " group(s), ").concat(pupils, " pupil(s). Adjust members below if needed; enter this term's marks as usual.")
+        });
+    }, [
+        cls,
+        tk,
+        groupWork,
+        classStudents,
         markEditing,
         setGroupWork
     ]);
@@ -14928,6 +15013,35 @@ function GroupWork(param) {
                                 ]
                             })
                         ]
+                    })
+                ]
+            }),
+            groupNotice && groupNotice.key === "".concat(cls, "|").concat(tk) && /*#__PURE__*/ _jsxs("div", {
+                className: "no-print",
+                style: {
+                    background: "#eff6ff",
+                    border: "1px solid #bfdbfe",
+                    color: "#1e3a6e",
+                    borderRadius: 8,
+                    padding: "8px 12px",
+                    fontSize: 12,
+                    marginBottom: 10,
+                    display: "flex",
+                    justifyContent: "space-between",
+                    gap: 10
+                },
+                children: [
+                    /*#__PURE__*/ _jsx("span", {
+                        children: "\uD83D\uDD01 " + groupNotice.text
+                    }),
+                    /*#__PURE__*/ _jsx("button", {
+                        onClick: ()=>setGroupNotice(null),
+                        style: {
+                            ...btnGhost,
+                            padding: "0 8px",
+                            fontSize: 12
+                        },
+                        children: "\u2715"
                     })
                 ]
             }),
@@ -15433,7 +15547,7 @@ function GroupWork(param) {
             }),
             showTransfer && /*#__PURE__*/ _jsx(TransferResultModal, {
                 title: "Transfer Result — ".concat(cls),
-                note: "Copies every ".concat(cls, ' group\'s saved marks for the "From" test/term/year into the "To" test/term/year, overwriting anything already there. If the destination term/year has no groups set up yet, the source\'s group roster is copied over too.'),
+                note: "Copies every ".concat(cls, ' group\'s saved marks for the "From" test/term/year into the "To" test/term/year, overwriting that test\'s marks there. Groups are matched by name/members, and any group missing at the destination is added with its members.'),
                 fields: [
                     {
                         key: "testNo",
@@ -15463,7 +15577,11 @@ function GroupWork(param) {
                 },
                 onClose: ()=>setShowTransfer(false),
                 onConfirm: (from, to)=>{
-                    transferGroupWork("".concat(from.term, "__").concat(from.year), from.testNo, "".concat(to.term, "__").concat(to.year), to.testNo);
+                    const fy = String(from.year).trim(), ty = String(to.year).trim();
+                    transferGroupWork("".concat(from.term, "__").concat(fy), from.testNo, "".concat(to.term, "__").concat(ty), to.testNo);
+                    setTerm(to.term);
+                    setYear(ty);
+                    setTestNo(to.testNo);
                     setShowTransfer(false);
                 }
             }),
@@ -17775,7 +17893,7 @@ const pleRomanDiv = (d)=>({
         "3": "III",
         "4": "IV",
         "5": "V"
-    })[d] || (d || "—");
+    })[d] || d || "—";
 function certificateWordBody(rec, school, year) {
     const subjectCells = PLE_SUBJECTS.map((sub)=>{
         var _rec_results;
@@ -17786,7 +17904,7 @@ function certificateWordBody(rec, school, year) {
         school.poBox,
         school.tel ? "Tel: ".concat(school.tel) : ""
     ].filter(Boolean).join("  |  ");
-    return '<div style="border:3px double #1e3a6e;padding:22px 34px;text-align:center;font-family:Georgia,\'Times New Roman\',serif;color:#111;">'.concat(school.logo ? '<img src="'.concat(school.logo, '" style="width:80px;height:80px;object-fit:contain;margin-bottom:6px;" />') : "", '<div style="font-size:19pt;font-weight:bold;text-transform:uppercase;letter-spacing:1px;color:#1e3a6e;">').concat(escapeHtml(school.name || ""), "</div>").concat(school.motto ? '<div style="font-style:italic;font-size:10.5pt;margin-top:2px;">"'.concat(escapeHtml(school.motto), '"</div>') : "", contacts ? '<div style="font-size:9.5pt;margin-top:2px;">'.concat(escapeHtml(contacts), "</div>") : "", '<div style="font-size:10.5pt;letter-spacing:2px;text-transform:uppercase;margin-top:16px;">Primary Leaving Examination (PLE)</div>', '<div style="font-size:30pt;font-weight:bold;color:#1e3a6e;margin-top:4px;">Certificate</div>', '<div style="font-size:11.5pt;letter-spacing:1px;text-transform:uppercase;">of Completion and Recommendation</div>', '<div style="border-top:2px solid #c9a227;width:65%;margin:14px auto;">&nbsp;</div>', '<div style="font-style:italic;font-size:11.5pt;margin-top:4px;">This certificate is presented to</div>', '<div style="font-size:20pt;font-weight:bold;margin-top:10px;padding-bottom:4px;border-bottom:1.5px solid #1e3a6e;display:inline-block;">'.concat(escapeHtml(rec.name || ""), "</div>"), '<div style="font-size:11pt;margin-top:14px;line-height:1.5;max-width:480px;margin-left:auto;margin-right:auto;">Index No. <b>'.concat(escapeHtml(rec.indexNo || "........................."), "</b>, who has successfully completed the Primary Leaving Examination (PLE) at <b>").concat(escapeHtml(school.name || ""), " ").concat(PLE_CERT_LOCATION, "</b> in <b>").concat(escapeHtml(String(year)), ".</b></div>"), '<table style="border-collapse:collapse;margin:16px auto 0;width:100%;max-width:480px;"><tr>'.concat(subjectCells, "</tr></table>"), '<div style="margin-top:14px;font-size:11.5pt;">Total Aggregate: <b style="font-size:13.5pt;">'.concat(escapeHtml(String(rec.totalAgg || "—")), "</b>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Division: <b style=\"font-size:13.5pt;\">").concat(pleRomanDiv(rec.division), "</b></div>"), '<div style="font-size:10.5pt;margin-top:14px;line-height:1.4;max-width:480px;margin-left:auto;margin-right:auto;">'.concat(escapeHtml(pleRecommendation(rec.name, rec.gender, rec.totalAgg, rec.division)), "</div>"), '<table style="width:100%;margin-top:56px;font-size:10pt;"><tr>', '<td style="text-align:center;width:33%;"><div style="border-top:1px solid #111;width:70%;margin:0 auto 4px;">&nbsp;</div>Class Teacher</td>', '<td style="text-align:center;width:34%;"><div style="border-top:1px solid #111;width:70%;margin:0 auto 4px;">&nbsp;</div>Head Teacher</td>', '<td style="text-align:center;width:33%;"><div style="border-top:1px solid #111;width:70%;margin:0 auto 4px;">&nbsp;</div>Date</td>', "</tr></table>", "</div>");
+    return "<div style=\"border:3px double #1e3a6e;padding:22px 34px;text-align:center;font-family:Georgia,'Times New Roman',serif;color:#111;\">".concat(school.logo ? '<img src="'.concat(school.logo, '" style="width:80px;height:80px;object-fit:contain;margin-bottom:6px;" />') : "", '<div style="font-size:19pt;font-weight:bold;text-transform:uppercase;letter-spacing:1px;color:#1e3a6e;">').concat(escapeHtml(school.name || ""), "</div>").concat(school.motto ? '<div style="font-style:italic;font-size:10.5pt;margin-top:2px;">"'.concat(escapeHtml(school.motto), '"</div>') : "", contacts ? '<div style="font-size:9.5pt;margin-top:2px;">'.concat(escapeHtml(contacts), "</div>") : "", '<div style="font-size:10.5pt;letter-spacing:2px;text-transform:uppercase;margin-top:16px;">Primary Leaving Examination (PLE)</div>', '<div style="font-size:30pt;font-weight:bold;color:#1e3a6e;margin-top:4px;">Certificate</div>', '<div style="font-size:11.5pt;letter-spacing:1px;text-transform:uppercase;">of Completion and Recommendation</div>', '<div style="border-top:2px solid #c9a227;width:65%;margin:14px auto;">&nbsp;</div>', '<div style="font-style:italic;font-size:11.5pt;margin-top:4px;">This certificate is presented to</div>', '<div style="font-size:20pt;font-weight:bold;margin-top:10px;padding-bottom:4px;border-bottom:1.5px solid #1e3a6e;display:inline-block;">'.concat(escapeHtml(rec.name || ""), "</div>"), '<div style="font-size:11pt;margin-top:14px;line-height:1.5;max-width:480px;margin-left:auto;margin-right:auto;">Index No. <b>'.concat(escapeHtml(rec.indexNo || "........................."), "</b>, who has successfully completed the Primary Leaving Examination (PLE) at <b>").concat(escapeHtml(school.name || ""), " ").concat(PLE_CERT_LOCATION, "</b> in <b>").concat(escapeHtml(String(year)), ".</b></div>"), '<table style="border-collapse:collapse;margin:16px auto 0;width:100%;max-width:480px;"><tr>'.concat(subjectCells, "</tr></table>"), '<div style="margin-top:14px;font-size:11.5pt;">Total Aggregate: <b style="font-size:13.5pt;">'.concat(escapeHtml(String(rec.totalAgg || "—")), '</b>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Division: <b style="font-size:13.5pt;">').concat(pleRomanDiv(rec.division), "</b></div>"), '<div style="font-size:10.5pt;margin-top:14px;line-height:1.4;max-width:480px;margin-left:auto;margin-right:auto;">'.concat(escapeHtml(pleRecommendation(rec.name, rec.gender, rec.totalAgg, rec.division)), "</div>"), '<table style="width:100%;margin-top:56px;font-size:10pt;"><tr>', '<td style="text-align:center;width:33%;"><div style="border-top:1px solid #111;width:70%;margin:0 auto 4px;">&nbsp;</div>Class Teacher</td>', '<td style="text-align:center;width:34%;"><div style="border-top:1px solid #111;width:70%;margin:0 auto 4px;">&nbsp;</div>Head Teacher</td>', '<td style="text-align:center;width:33%;"><div style="border-top:1px solid #111;width:70%;margin:0 auto 4px;">&nbsp;</div>Date</td>', "</tr></table>", "</div>");
 }
 // A forced page break that Word's HTML/MHTML filter honours reliably (plain
 // CSS page-break-before on a <div> is not always respected by Word) -- used
@@ -17856,9 +17974,9 @@ const PC_CREST_URI = (()=>{
     const leafFill = "#2a9d3e";
     const branch = pcLeaves(186, 100, 112, 135, 232, 10, 27, 11, leafFill) + '<path d="' + pcArc(186, 100, 112, 135, 232) + '" fill="none" stroke="' + leafFill + '" stroke-width="2.5"/>';
     const shield = "M96,10 L276,10 L276,112 C276,160 236,188 186,206 C136,188 96,160 96,112 Z";
-    return pcSvgUri('<svg xmlns="http://www.w3.org/2000/svg" width="380" height="215" viewBox="0 0 380 215">' + '<defs>' + '<linearGradient id="sk" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f4f9ff"/><stop offset="1" stop-color="#cfe6f3"/></linearGradient>' + '<clipPath id="sc"><path d="' + shield + '"/></clipPath>' + "</defs>" + "<g>" + branch + "</g>" + '<g transform="translate(372,0) scale(-1,1)">' + branch + "</g>" + '<path d="' + shield + '" fill="url(#sk)"/>' + '<g clip-path="url(#sc)">' + '<path d="M90,150 C130,124 240,124 282,146 L282,212 L90,212 Z" fill="#1f86b4"/>' + '<path d="M90,168 C140,146 232,146 282,166 L282,212 L90,212 Z" fill="#2ea043"/>' + "</g>" + '<path d="' + shield + '" fill="none" stroke="' + PC.BLUE + '" stroke-width="6" stroke-linejoin="round"/>' + // torch flame + cup
-'<path d="M186,16 C200,36 209,50 205,66 C202,79 194,85 186,85 C178,85 170,79 167,66 C164,52 175,44 180,31 C182,38 184,28 186,16 Z" fill="' + PC.RED + '"/>' + '<path d="M186,44 C194,54 197,62 194,70 C192,76 188,79 186,79 C182,79 178,76 177,70 C176,62 182,56 186,44 Z" fill="#ffb02e"/>' + '<rect x="167" y="84" width="38" height="7" rx="2" fill="' + PC.BLUE + '"/>' + '<path d="M172,91 L200,91 L194,104 L178,104 Z" fill="' + PC.BLUE + '"/>' + '<rect x="183" y="104" width="6" height="10" fill="' + PC.BLUE + '"/>' + // open book
-'<path d="M186,152 L130,141 L130,110 Q158,104 186,116 Z" fill="#fff" stroke="' + PC.BLUE + '" stroke-width="3" stroke-linejoin="round"/>' + '<path d="M186,152 L242,141 L242,110 Q214,104 186,116 Z" fill="#fff" stroke="' + PC.BLUE + '" stroke-width="3" stroke-linejoin="round"/>' + '<path d="M124,144 L186,157 L248,144 L248,152 L186,166 L124,152 Z" fill="' + PC.BLUE + '"/>' + '<path d="M138,120 Q158,116 178,124 M138,129 Q158,125 178,133 M194,124 Q214,116 234,120 M194,133 Q214,125 234,129" fill="none" stroke="#9db8ea" stroke-width="1.6"/>' + "</svg>");
+    return pcSvgUri('<svg xmlns="http://www.w3.org/2000/svg" width="380" height="215" viewBox="0 0 380 215">' + "<defs>" + '<linearGradient id="sk" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f4f9ff"/><stop offset="1" stop-color="#cfe6f3"/></linearGradient>' + '<clipPath id="sc"><path d="' + shield + '"/></clipPath>' + "</defs>" + "<g>" + branch + "</g>" + '<g transform="translate(372,0) scale(-1,1)">' + branch + "</g>" + '<path d="' + shield + '" fill="url(#sk)"/>' + '<g clip-path="url(#sc)">' + '<path d="M90,150 C130,124 240,124 282,146 L282,212 L90,212 Z" fill="#1f86b4"/>' + '<path d="M90,168 C140,146 232,146 282,166 L282,212 L90,212 Z" fill="#2ea043"/>' + "</g>" + '<path d="' + shield + '" fill="none" stroke="' + PC.BLUE + '" stroke-width="6" stroke-linejoin="round"/>' + // torch flame + cup
+    '<path d="M186,16 C200,36 209,50 205,66 C202,79 194,85 186,85 C178,85 170,79 167,66 C164,52 175,44 180,31 C182,38 184,28 186,16 Z" fill="' + PC.RED + '"/>' + '<path d="M186,44 C194,54 197,62 194,70 C192,76 188,79 186,79 C182,79 178,76 177,70 C176,62 182,56 186,44 Z" fill="#ffb02e"/>' + '<rect x="167" y="84" width="38" height="7" rx="2" fill="' + PC.BLUE + '"/>' + '<path d="M172,91 L200,91 L194,104 L178,104 Z" fill="' + PC.BLUE + '"/>' + '<rect x="183" y="104" width="6" height="10" fill="' + PC.BLUE + '"/>' + // open book
+    '<path d="M186,152 L130,141 L130,110 Q158,104 186,116 Z" fill="#fff" stroke="' + PC.BLUE + '" stroke-width="3" stroke-linejoin="round"/>' + '<path d="M186,152 L242,141 L242,110 Q214,104 186,116 Z" fill="#fff" stroke="' + PC.BLUE + '" stroke-width="3" stroke-linejoin="round"/>' + '<path d="M124,144 L186,157 L248,144 L248,152 L186,166 L124,152 Z" fill="' + PC.BLUE + '"/>' + '<path d="M138,120 Q158,116 178,124 M138,129 Q158,125 178,133 M194,124 Q214,116 234,120 M194,133 Q214,125 234,129" fill="none" stroke="#9db8ea" stroke-width="1.6"/>' + "</svg>");
 })();
 // Gold medal with laurel wreath and star. The PLE year is printed on the two
 // ribbon tails (first half on the left tail, second half on the right).
@@ -17876,9 +17994,9 @@ const pcMedalUri = (year)=>{
     scallop += "Z";
     const leaf = "#8a5a0a";
     const wreath = pcLeaves(85, 80, 38, 100, 228, 9, 14, 6.5, leaf) + '<path d="' + pcArc(85, 80, 38, 100, 228) + '" fill="none" stroke="' + leaf + '" stroke-width="1.6"/>';
-    return pcSvgUri('<svg xmlns="http://www.w3.org/2000/svg" width="170" height="230" viewBox="0 0 170 230">' + '<defs>' + '<linearGradient id="gd" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f8dc7a"/><stop offset="0.5" stop-color="#dfa326"/><stop offset="1" stop-color="#b9770e"/></linearGradient>' + '<linearGradient id="gi" x1="1" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fae9a2"/><stop offset="1" stop-color="#e0a92c"/></linearGradient>' + "</defs>" + // ribbon tails
-'<path d="M48,115 L96,125 L70,224 L50,208 L24,224 Z" fill="' + PC.BLUE + '"/>' + '<path d="M122,115 L74,125 L100,224 L120,208 L146,224 Z" fill="' + PC.BLUE + '"/>' + '<path d="M52,121 L30,216" stroke="' + PC.RED + '" stroke-width="3"/>' + '<path d="M91,128 L66,218" stroke="' + PC.GREEN + '" stroke-width="3"/>' + '<path d="M118,121 L140,216" stroke="' + PC.RED + '" stroke-width="3"/>' + '<path d="M79,128 L104,218" stroke="' + PC.GREEN + '" stroke-width="3"/>' + // medal
-'<path d="' + scallop + '" fill="url(#gd)" stroke="#b9770e" stroke-width="1.5" stroke-linejoin="round"/>' + '<circle cx="85" cy="80" r="55" fill="url(#gi)" stroke="#b9770e" stroke-width="2"/>' + '<circle cx="85" cy="80" r="49" fill="none" stroke="#b9770e" stroke-width="1" opacity="0.6"/>' + "<g>" + wreath + "</g>" + '<g transform="translate(170,0) scale(-1,1)">' + wreath + "</g>" + '<path d="' + pcStar(85, 80, 21, 8.5) + '" fill="#a8700d" stroke="#f3d77a" stroke-width="1"/>' + yrTxt(60, 14, yr.slice(0, half)) + yrTxt(110, -14, yr.slice(half)) + "</svg>");
+    return pcSvgUri('<svg xmlns="http://www.w3.org/2000/svg" width="170" height="230" viewBox="0 0 170 230">' + "<defs>" + '<linearGradient id="gd" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f8dc7a"/><stop offset="0.5" stop-color="#dfa326"/><stop offset="1" stop-color="#b9770e"/></linearGradient>' + '<linearGradient id="gi" x1="1" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fae9a2"/><stop offset="1" stop-color="#e0a92c"/></linearGradient>' + "</defs>" + // ribbon tails
+    '<path d="M48,115 L96,125 L70,224 L50,208 L24,224 Z" fill="' + PC.BLUE + '"/>' + '<path d="M122,115 L74,125 L100,224 L120,208 L146,224 Z" fill="' + PC.BLUE + '"/>' + '<path d="M52,121 L30,216" stroke="' + PC.RED + '" stroke-width="3"/>' + '<path d="M91,128 L66,218" stroke="' + PC.GREEN + '" stroke-width="3"/>' + '<path d="M118,121 L140,216" stroke="' + PC.RED + '" stroke-width="3"/>' + '<path d="M79,128 L104,218" stroke="' + PC.GREEN + '" stroke-width="3"/>' + // medal
+    '<path d="' + scallop + '" fill="url(#gd)" stroke="#b9770e" stroke-width="1.5" stroke-linejoin="round"/>' + '<circle cx="85" cy="80" r="55" fill="url(#gi)" stroke="#b9770e" stroke-width="2"/>' + '<circle cx="85" cy="80" r="49" fill="none" stroke="#b9770e" stroke-width="1" opacity="0.6"/>' + "<g>" + wreath + "</g>" + '<g transform="translate(170,0) scale(-1,1)">' + wreath + "</g>" + '<path d="' + pcStar(85, 80, 21, 8.5) + '" fill="#a8700d" stroke="#f3d77a" stroke-width="1"/>' + yrTxt(60, 14, yr.slice(0, half)) + yrTxt(110, -14, yr.slice(half)) + "</svg>");
 };
 // Stack of three books (blue / green / red), bottom-left.
 const PC_BOOKS_URI = pcSvgUri('<svg xmlns="http://www.w3.org/2000/svg" width="220" height="160" viewBox="0 0 220 160">' + '<g transform="rotate(-9 110 100)">' + '<rect x="14" y="112" width="196" height="34" rx="5" fill="' + PC.RED + '"/><rect x="36" y="119" width="170" height="20" rx="2" fill="#fff" stroke="#dfe3ea"/><rect x="14" y="112" width="18" height="34" rx="5" fill="#a30d18"/>' + '<rect x="8" y="78" width="192" height="34" rx="5" fill="' + PC.GREEN + '"/><rect x="30" y="85" width="166" height="20" rx="2" fill="#fff" stroke="#dfe3ea"/><rect x="8" y="78" width="18" height="34" rx="5" fill="#12722a"/>' + '<path d="M22,44 L52,26 L196,32 L196,44 Z" fill="#3f7ad6"/>' + '<rect x="20" y="44" width="180" height="34" rx="5" fill="' + PC.BLUE + '"/><rect x="42" y="51" width="154" height="20" rx="2" fill="#fff" stroke="#dfe3ea"/><rect x="20" y="44" width="18" height="34" rx="5" fill="#0a3577"/>' + "</g></svg>");
@@ -17897,7 +18015,9 @@ function PleCertificateDesign1(param) {
         l.href = "https://fonts.googleapis.com/css2?family=Kaushan+Script&display=swap";
         document.head.appendChild(l);
     }, []);
-    const medalUri = useMemo(()=>pcMedalUri(year), [year]);
+    const medalUri = useMemo(()=>pcMedalUri(year), [
+        year
+    ]);
     const schoolFs = Math.max(18, Math.min(34, Math.floor(640 / (Math.max((school.name || "").length, 1) * 0.78))));
     const pupilLen = (s.name || "").length;
     const pupilFs = pupilLen > 30 ? 20 : pupilLen > 24 ? 23 : 26;
@@ -18435,8 +18555,7 @@ const d2TitleCase = (n)=>String(n || "").toLowerCase().replace(/(^|[\s'’\-.])(
 // Orange-to-red frame plus two curled-ribbon corners (top-left, bottom-right).
 // Authored on a 1440x1880 grid, scaled to the A4 aspect ratio.
 const D2_BG_URI = (()=>{
-    const corner = // soft paper shadows
-    '<g filter="url(#bl)" opacity="0.4"><path d="M84,326 C156,328 266,310 324,224 C354,178 381,154 402,138 C324,134 241,156 171,216 C131,250 106,288 84,326 Z" fill="#6a5a90"/>' + '<path d="M560,0 C520,74 420,134 330,168 C250,198 140,252 60,334" fill="none" stroke="#6a5a90" stroke-width="10"/></g>' + // diagonal stripes
+    const corner = '<g filter="url(#bl)" opacity="0.4"><path d="M84,326 C156,328 266,310 324,224 C354,178 381,154 402,138 C324,134 241,156 171,216 C131,250 106,288 84,326 Z" fill="#6a5a90"/>' + '<path d="M560,0 C520,74 420,134 330,168 C250,198 140,252 60,334" fill="none" stroke="#6a5a90" stroke-width="10"/></g>' + // diagonal stripes
     '<path d="M0,215 L195,0 L250,0 L0,268 Z" fill="url(#y1)"/>' + '<path d="M0,268 L250,0 L312,0 L0,335 Z" fill="url(#y2)"/>' + '<path d="M0,335 L312,0 L362,0 L0,400 Z" fill="url(#y3)"/>' + // curled leaf
     '<path d="M78,316 C150,318 260,300 318,215 C348,170 375,148 396,132 C318,128 235,150 165,210 C125,244 100,282 78,316 Z" fill="url(#lf)"/>';
     return pcSvgUri('<svg xmlns="http://www.w3.org/2000/svg" width="794" height="1123" viewBox="0 0 1440 2036.5">' + "<defs>" + '<linearGradient id="fr" gradientUnits="userSpaceOnUse" x1="52" y1="0" x2="1392" y2="0"><stop offset="0" stop-color="#ff6a00"/><stop offset="0.55" stop-color="#f4401a"/><stop offset="1" stop-color="#e8102a"/></linearGradient>' + '<linearGradient id="y1" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ffd800"/><stop offset="1" stop-color="#ff9a00"/></linearGradient>' + '<linearGradient id="y2" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ff9a00"/><stop offset="1" stop-color="#ff5a14"/></linearGradient>' + '<linearGradient id="y3" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ff5a14"/><stop offset="1" stop-color="#e8102a"/></linearGradient>' + '<linearGradient id="lf" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#e93a1c"/><stop offset="1" stop-color="#ff6d00"/></linearGradient>' + '<filter id="bl" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="7"/></filter>' + "</defs>" + '<rect width="1440" height="2036.5" fill="#fff"/>' + '<g transform="scale(1 1.0832)">' + // frame (gaps where the ribbons curl over the corners)
@@ -18922,7 +19041,7 @@ const D3_RULE_URI = pcSvgUri('<svg xmlns="http://www.w3.org/2000/svg" width="662
     305,
     331,
     357
-].map((cx)=>'<path d="M' + cx + ',1 L' + (cx + 11) + ",10 L" + cx + ",19 L" + (cx - 11) + ',10 Z" fill="' + D3C.MAROON + '"/>').join("") + "</svg>");
+].map((cx)=>'<path d="M' + cx + ",1 L" + (cx + 11) + ",10 L" + cx + ",19 L" + (cx - 11) + ',10 Z" fill="' + D3C.MAROON + '"/>').join("") + "</svg>");
 // Gold medal with a black centre and red ribbon tails; the PLE year is printed
 // on the two tails (first half on the left tail, second half on the right).
 const d3MedalUri = (year)=>{
@@ -18952,7 +19071,9 @@ function PleCertificateDesign3(param) {
         l.href = "https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;800&family=Merriweather:ital,wght@0,400;0,700;1,400&display=swap";
         document.head.appendChild(l);
     }, []);
-    const medalUri = useMemo(()=>d3MedalUri(year), [year]);
+    const medalUri = useMemo(()=>d3MedalUri(year), [
+        year
+    ]);
     const displayName = d3TitleCase(s.name);
     const nameFs = Math.max(26, Math.min(44, Math.floor(600 / (Math.max(displayName.length, 1) * 0.62))));
     const schoolFs = 26;
@@ -19460,7 +19581,7 @@ const P4_FONT_TITLE = "'Playfair Display','Georgia','Times New Roman',serif";
 const P4_BG_URI = (()=>{
     const ribbon = '<path d="M33,33 L250,33 L33,250 Z" fill="url(#gg)"/>' + '<path d="M33,33 L217,33 L33,217 Z" fill="' + P4.NAVY + '"/>' + '<path d="M33,33 L199,33 L33,199 Z" fill="url(#gg)"/>' + '<path d="M33,33 L175,33 L33,175 Z" fill="' + P4.NAVY + '"/>';
     const scallop = '<path d="M905,33 C905,55 915,68 932,72 C955,77 975,92 991,118 L991,33 Z" fill="' + P4.NAVY + '"/>' + '<path d="M896,33 C896,62 906,80 923,82 C946,87 966,102 991,128" fill="none" stroke="' + P4.GOLD + '" stroke-width="3"/>';
-    const flip = 'translate(1024,1536) rotate(180)';
+    const flip = "translate(1024,1536) rotate(180)";
     return pcSvgUri('<svg xmlns="http://www.w3.org/2000/svg" width="794" height="1123" viewBox="0 0 1024 1448.2">' + '<defs><linearGradient id="gg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="' + P4.GOLD_L + '"/><stop offset="0.5" stop-color="' + P4.GOLD + '"/><stop offset="1" stop-color="' + P4.GOLD_D + '"/></linearGradient>' + '<clipPath id="in"><rect x="33" y="33" width="958" height="1470"/></clipPath></defs>' + '<rect width="1024" height="1448.2" fill="#fff"/>' + '<g transform="scale(1 0.94284)">' + '<rect x="12" y="12" width="1000" height="1512" fill="none" stroke="' + P4.GOLD + '" stroke-width="2.5"/>' + '<rect x="22" y="22" width="980" height="1492" fill="none" stroke="' + P4.NAVY + '" stroke-width="9"/>' + '<rect x="33" y="33" width="958" height="1470" fill="none" stroke="' + P4.GOLD + '" stroke-width="3"/>' + '<g clip-path="url(#in)">' + ribbon + '<g transform="' + flip + '">' + ribbon + "</g>" + scallop + '<g transform="' + flip + '">' + scallop + "</g>" + "</g></g></svg>");
 })();
 // Fallback crest (only used when the school has no uploaded badge/logo).
@@ -19506,7 +19627,9 @@ function PleCertificateDesign4(param) {
         l.href = "https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@1,700&display=swap";
         document.head.appendChild(l);
     }, []);
-    const medalUri = useMemo(()=>p4MedalUri(year), [year]);
+    const medalUri = useMemo(()=>p4MedalUri(year), [
+        year
+    ]);
     const schoolFs = Math.max(18, Math.min(34, Math.floor(640 / (Math.max((school.name || "").length, 1) * 0.78))));
     const pupilLen = (s.name || "").length;
     const pupilFs = pupilLen > 30 ? 20 : pupilLen > 24 ? 23 : 26;
@@ -20377,7 +20500,7 @@ function PleCertificateDesign5(param) {
                                     /*#__PURE__*/ _jsx("b", {
                                         style: {
                                             color: "#d4111f",
- fontSize: 13
+                                            fontSize: 13
                                         },
                                         children: s.totalAgg || "—"
                                     })
@@ -20583,59 +20706,301 @@ const WORD_CERT_THEMES = {
     // use -- the Word writer converts px -> pt (x 0.75). Fonts: the designs use web fonts Word
     // doesn't have, so the nearest common font is picked (see dxFont).
     1: {
-        bg: PC_BG_URI, m: [34, 16, 24], logo: 110,
-        font: "Georgia,'Times New Roman',serif", nameFont: "Georgia,'Times New Roman',serif", titleFont: PC_FONT_SCRIPT, nameCase: "raw",
-        schoolFs: (n)=>Math.max(18, Math.min(34, Math.floor(640 / (Math.max(n, 1) * 0.78)))), contactFs: 12.5, preFs: 14,
-        nameFs: (n)=>(n > 30 ? 20 : n > 24 ? 23 : 26),
-        bodyFs: 15, bodyLh: 26, boxHeadFs: 14, rowFs: 15, rowValFs: 17, totFs: 16, totValFs: 19, detailFs: 14.5,
-        recFs: 14, recLh: 1.55, sigFs: 14, sigSubFs: 13,
-        school: PC.NAVY, name: PC.NAVY, label: PC.BLUE, line: "#c9d6ee", boxBorder: PC.GOLD, boxBg: "#ffffff",
-        resp: "#111", respBold: true, agg: PC.RED, pre: "This is to certify that",
-        titles: ()=>[["PLE Recommendation", 64, PC.RED, {font: "script", lh: 1.1}]]
+        bg: PC_BG_URI,
+        m: [
+            34,
+            16,
+            24
+        ],
+        logo: 110,
+        font: "Georgia,'Times New Roman',serif",
+        nameFont: "Georgia,'Times New Roman',serif",
+        titleFont: PC_FONT_SCRIPT,
+        nameCase: "raw",
+        schoolFs: (n)=>Math.max(18, Math.min(34, Math.floor(640 / (Math.max(n, 1) * 0.78)))),
+        contactFs: 12.5,
+        preFs: 14,
+        nameFs: (n)=>n > 30 ? 20 : n > 24 ? 23 : 26,
+        bodyFs: 15,
+        bodyLh: 26,
+        boxHeadFs: 14,
+        rowFs: 15,
+        rowValFs: 17,
+        totFs: 16,
+        totValFs: 19,
+        detailFs: 14.5,
+        recFs: 14,
+        recLh: 1.55,
+        sigFs: 14,
+        sigSubFs: 13,
+        school: PC.NAVY,
+        name: PC.NAVY,
+        label: PC.BLUE,
+        line: "#c9d6ee",
+        boxBorder: PC.GOLD,
+        boxBg: "#ffffff",
+        resp: "#111",
+        respBold: true,
+        agg: PC.RED,
+        pre: "This is to certify that",
+        titles: ()=>[
+                [
+                    "PLE Recommendation",
+                    64,
+                    PC.RED,
+                    {
+                        font: "script",
+                        lh: 1.1
+                    }
+                ]
+            ]
     },
     2: {
-        bg: D2_BG_URI, m: [20, 18.5, 20], logo: 96,
-        font: "'Montserrat','Segoe UI',Arial,sans-serif", nameFont: "'Bookman Old Style','Bookman',Georgia,serif", titleFont: D2_SERIF, nameCase: "title",
-        schoolFs: ()=>26, contactFs: 13, preFs: 13,
+        bg: D2_BG_URI,
+        m: [
+            20,
+            18.5,
+            20
+        ],
+        logo: 96,
+        font: "'Montserrat','Segoe UI',Arial,sans-serif",
+        nameFont: "'Bookman Old Style','Bookman',Georgia,serif",
+        titleFont: D2_SERIF,
+        nameCase: "title",
+        schoolFs: ()=>26,
+        contactFs: 13,
+        preFs: 13,
         nameFs: (n)=>Math.max(26, Math.min(46, Math.floor(600 / (Math.max(n, 1) * 0.62)))),
-        bodyFs: 13, bodyLh: 23, boxHeadFs: 13, rowFs: 13, rowValFs: 13, totFs: 13, totValFs: 13, detailFs: 13,
-        recFs: 13, recLh: 1.6, sigFs: 13, sigSubFs: 13,
-        school: D2C.BLACK, name: D2C.GOLD, label: D2C.BLUE, line: D2C.LINE, boxBorder: D2C.LINE, boxBg: D2C.PALE,
-        resp: "#1b1b1b", respBold: false, agg: "#1b1b1b", totLabel: D2C.RED, pre: "This is to certify that", rowHead: "PLE Results",
-        titles: (y)=>[["Primary Leaving Examination", 34, D2C.BLUE, {lh: 1.15}], ["Recommendation " + y, 44, D2C.RED, {lh: 1.1}]]
+        bodyFs: 13,
+        bodyLh: 23,
+        boxHeadFs: 13,
+        rowFs: 13,
+        rowValFs: 13,
+        totFs: 13,
+        totValFs: 13,
+        detailFs: 13,
+        recFs: 13,
+        recLh: 1.6,
+        sigFs: 13,
+        sigSubFs: 13,
+        school: D2C.BLACK,
+        name: D2C.GOLD,
+        label: D2C.BLUE,
+        line: D2C.LINE,
+        boxBorder: D2C.LINE,
+        boxBg: D2C.PALE,
+        resp: "#1b1b1b",
+        respBold: false,
+        agg: "#1b1b1b",
+        totLabel: D2C.RED,
+        pre: "This is to certify that",
+        rowHead: "PLE Results",
+        titles: (y)=>[
+                [
+                    "Primary Leaving Examination",
+                    34,
+                    D2C.BLUE,
+                    {
+                        lh: 1.15
+                    }
+                ],
+                [
+                    "Recommendation " + y,
+                    44,
+                    D2C.RED,
+                    {
+                        lh: 1.1
+                    }
+                ]
+            ]
     },
     3: {
-        bg: D3_BG_URI, m: [22, 26, 20], logo: 108,
-        font: "'Merriweather',Georgia,'Times New Roman',serif", nameFont: "'Playfair Display',Georgia,'Times New Roman',serif", titleFont: D3_HEAD, nameCase: "title",
-        schoolFs: ()=>26, contactFs: 13, preFs: 16,
+        bg: D3_BG_URI,
+        m: [
+            22,
+            26,
+            20
+        ],
+        logo: 108,
+        font: "'Merriweather',Georgia,'Times New Roman',serif",
+        nameFont: "'Playfair Display',Georgia,'Times New Roman',serif",
+        titleFont: D3_HEAD,
+        nameCase: "title",
+        schoolFs: ()=>26,
+        contactFs: 13,
+        preFs: 16,
         nameFs: (n)=>Math.max(26, Math.min(44, Math.floor(600 / (Math.max(n, 1) * 0.62)))),
-        bodyFs: 13, bodyLh: 23, boxHeadFs: 13, rowFs: 13, rowValFs: 13, totFs: 13, totValFs: 13, detailFs: 13,
-        recFs: 13, recLh: 1.65, sigFs: 13, sigSubFs: 13,
-        school: D3C.INK, name: D3C.MAROON, label: D3C.INK, line: "#e2c56a", boxBorder: D3C.GOLD_BOX, boxBg: "#fff8e3",
-        resp: D3C.BLUE, respBold: true, agg: D3C.RED, pre: "This is to certify that", colon: true, rowHead: "PLE RESULTS",
-        titles: (y)=>[["PLE Recommendation", 46, D3C.GOLD, {up: 1, lh: 1.15}], ["Uganda National Examinations Board \u2014 " + y, 15, D3C.GOLD, {up: 1, lh: 1.45}]]
+        bodyFs: 13,
+        bodyLh: 23,
+        boxHeadFs: 13,
+        rowFs: 13,
+        rowValFs: 13,
+        totFs: 13,
+        totValFs: 13,
+        detailFs: 13,
+        recFs: 13,
+        recLh: 1.65,
+        sigFs: 13,
+        sigSubFs: 13,
+        school: D3C.INK,
+        name: D3C.MAROON,
+        label: D3C.INK,
+        line: "#e2c56a",
+        boxBorder: D3C.GOLD_BOX,
+        boxBg: "#fff8e3",
+        resp: D3C.BLUE,
+        respBold: true,
+        agg: D3C.RED,
+        pre: "This is to certify that",
+        colon: true,
+        rowHead: "PLE RESULTS",
+        titles: (y)=>[
+                [
+                    "PLE Recommendation",
+                    46,
+                    D3C.GOLD,
+                    {
+                        up: 1,
+                        lh: 1.15
+                    }
+                ],
+                [
+                    "Uganda National Examinations Board — " + y,
+                    15,
+                    D3C.GOLD,
+                    {
+                        up: 1,
+                        lh: 1.45
+                    }
+                ]
+            ]
     },
     4: {
-        bg: P4_BG_URI, m: [34, 16, 24], logo: 110,
-        font: "Georgia,'Times New Roman',serif", nameFont: "Georgia,'Times New Roman',serif", titleFont: P4_FONT_TITLE, nameCase: "raw", nameCaps: true,
-        schoolFs: (n)=>Math.max(18, Math.min(34, Math.floor(640 / (Math.max(n, 1) * 0.78)))), contactFs: 12.5, preFs: 15,
-        nameFs: (n)=>(n > 30 ? 20 : n > 24 ? 23 : 26),
-        bodyFs: 15, bodyLh: 26, boxHeadFs: 14, rowFs: 15, rowValFs: 17, totFs: 16, totValFs: 20, detailFs: 14.5,
-        recFs: 14.5, recLh: 1.55, sigFs: 14, sigSubFs: 13,
-        school: P4.NAVY, name: P4.NAVY, label: P4.BLUE, line: "#e6d59a", boxBorder: P4.GOLD, boxBg: "#ffffff",
-        resp: "#111", respBold: true, agg: P4.RED, pre: "This is to certify that", rowHead: "PLE RESULTS",
-        titles: ()=>[["PLE", 78, P4.NAVY, {i: 1, lh: 0.95}], ["Recommendation", 46, P4.NAVY, {i: 1, lh: 1.1}]]
+        bg: P4_BG_URI,
+        m: [
+            34,
+            16,
+            24
+        ],
+        logo: 110,
+        font: "Georgia,'Times New Roman',serif",
+        nameFont: "Georgia,'Times New Roman',serif",
+        titleFont: P4_FONT_TITLE,
+        nameCase: "raw",
+        nameCaps: true,
+        schoolFs: (n)=>Math.max(18, Math.min(34, Math.floor(640 / (Math.max(n, 1) * 0.78)))),
+        contactFs: 12.5,
+        preFs: 15,
+        nameFs: (n)=>n > 30 ? 20 : n > 24 ? 23 : 26,
+        bodyFs: 15,
+        bodyLh: 26,
+        boxHeadFs: 14,
+        rowFs: 15,
+        rowValFs: 17,
+        totFs: 16,
+        totValFs: 20,
+        detailFs: 14.5,
+        recFs: 14.5,
+        recLh: 1.55,
+        sigFs: 14,
+        sigSubFs: 13,
+        school: P4.NAVY,
+        name: P4.NAVY,
+        label: P4.BLUE,
+        line: "#e6d59a",
+        boxBorder: P4.GOLD,
+        boxBg: "#ffffff",
+        resp: "#111",
+        respBold: true,
+        agg: P4.RED,
+        pre: "This is to certify that",
+        rowHead: "PLE RESULTS",
+        titles: ()=>[
+                [
+                    "PLE",
+                    78,
+                    P4.NAVY,
+                    {
+                        i: 1,
+                        lh: 0.95
+                    }
+                ],
+                [
+                    "Recommendation",
+                    46,
+                    P4.NAVY,
+                    {
+                        i: 1,
+                        lh: 1.1
+                    }
+                ]
+            ]
     },
     5: {
-        bg: D5_BG_URI, m: [31, 31, 22], logo: 132, motto: true, strip: true, oneLine: true,
-        font: "'Cormorant Garamond',Georgia,'Times New Roman',serif", nameFont: "'Times New Roman',Times,serif", titleFont: D5_CAPS, nameCase: "raw", nameBg: "#efe3a6",
-        schoolFs: ()=>26, mottoFs: 13, contactFs: 13, preFs: 13,
-        nameFs: (n)=>(n > 30 ? 21 : n > 22 ? 25 : 31),
-        bodyFs: 13, bodyLh: 17.55, boxHeadFs: 13, rowFs: 13, rowValFs: 13, totFs: 13, totValFs: 13, detailFs: 13,
-        recFs: 13, recLh: 1.35, sigFs: 13, sigSubFs: 13,
-        school: D5C.BLUE, name: D5C.NAVY, label: D5C.NAVY, line: D5C.GOLD, boxBorder: D5C.GOLD, boxBg: "#ffffff",
-        resp: "#000", respBold: true, agg: "#d4111f", pre: "This certificate is presented to", dateLabel: "Date",
-        titles: (y)=>[["Primary Leaving Examination (PLE)", 13, D5C.NAVY, {up: 1, plain: 1, lh: 1.3}], ["PLE Recommendation " + y, 28, "#d4111f", {up: 1, lh: 1.2}]]
+        bg: D5_BG_URI,
+        m: [
+            31,
+            31,
+            22
+        ],
+        logo: 132,
+        motto: true,
+        strip: true,
+        oneLine: true,
+        font: "'Cormorant Garamond',Georgia,'Times New Roman',serif",
+        nameFont: "'Times New Roman',Times,serif",
+        titleFont: D5_CAPS,
+        nameCase: "raw",
+        nameBg: "#efe3a6",
+        schoolFs: ()=>26,
+        mottoFs: 13,
+        contactFs: 13,
+        preFs: 13,
+        nameFs: (n)=>n > 30 ? 21 : n > 22 ? 25 : 31,
+        bodyFs: 13,
+        bodyLh: 17.55,
+        boxHeadFs: 13,
+        rowFs: 13,
+        rowValFs: 13,
+        totFs: 13,
+        totValFs: 13,
+        detailFs: 13,
+        recFs: 13,
+        recLh: 1.35,
+        sigFs: 13,
+        sigSubFs: 13,
+        school: D5C.BLUE,
+        name: D5C.NAVY,
+        label: D5C.NAVY,
+        line: D5C.GOLD,
+        boxBorder: D5C.GOLD,
+        boxBg: "#ffffff",
+        resp: "#000",
+        respBold: true,
+        agg: "#d4111f",
+        pre: "This certificate is presented to",
+        dateLabel: "Date",
+        titles: (y)=>[
+                [
+                    "Primary Leaving Examination (PLE)",
+                    13,
+                    D5C.NAVY,
+                    {
+                        up: 1,
+                        plain: 1,
+                        lh: 1.3
+                    }
+                ],
+                [
+                    "PLE Recommendation " + y,
+                    28,
+                    "#d4111f",
+                    {
+                        up: 1,
+                        lh: 1.2
+                    }
+                ]
+            ]
     }
 };
 const pleWordCache = {};
@@ -20681,8 +21046,21 @@ function pleImageSize(src) {
 // and sent behind the text, so it repeats on every certificate page and can't
 // be nudged by accident while editing. All writing stays real, editable Word text.
 const DX_SAFE_FONTS = [
-    "Georgia", "Times New Roman", "Arial", "Segoe UI", "Bookman Old Style", "Calibri",
-    "Cambria", "Verdana", "Tahoma", "Trebuchet MS", "Palatino Linotype", "Garamond", "Century Gothic", "Brush Script MT", "Segoe Script"
+    "Georgia",
+    "Times New Roman",
+    "Arial",
+    "Segoe UI",
+    "Bookman Old Style",
+    "Calibri",
+    "Cambria",
+    "Verdana",
+    "Tahoma",
+    "Trebuchet MS",
+    "Palatino Linotype",
+    "Garamond",
+    "Century Gothic",
+    "Brush Script MT",
+    "Segoe Script"
 ];
 // First font of a CSS stack that Word installs everywhere (web fonts like
 // Montserrat/Playfair are not in Word, so they would silently fall back anyway).
@@ -20744,7 +21122,10 @@ function dxPara(runs, o) {
     return "<w:p><w:pPr>" + pp + "</w:pPr>" + body + "</w:p>";
 }
 // Tiny empty paragraph used as vertical spacing (Word tables have no margin-top).
-const dxSpacer = (pt)=>dxPara([], { exact: Math.max(pt, 1), mark: 1 });
+const dxSpacer = (pt)=>dxPara([], {
+        exact: Math.max(pt, 1),
+        mark: 1
+    });
 const dxBorderXml = (tag, b)=>b ? "<w:" + tag + ' w:val="single" w:sz="' + b.sz + '" w:space="0" w:color="' + dxColor(b.color) + '"/>' : "<w:" + tag + ' w:val="nil"/>';
 // One table cell. o: borders {top,left,bottom,right} each {sz,color}|null, fill, mar {t,l,b,r} twips, vAlign
 function dxCell(content, w, o) {
@@ -20753,7 +21134,12 @@ function dxCell(content, w, o) {
     let tp = '<w:tcW w:w="' + Math.round(w) + '" w:type="dxa"/>';
     tp += "<w:tcBorders>" + dxBorderXml("top", bd.top) + dxBorderXml("left", bd.left) + dxBorderXml("bottom", bd.bottom) + dxBorderXml("right", bd.right) + "</w:tcBorders>";
     if (o.fill) tp += '<w:shd w:val="clear" w:color="auto" w:fill="' + dxColor(o.fill) + '"/>';
-    const m = o.mar || { t: 0, l: 0, b: 0, r: 0 };
+    const m = o.mar || {
+        t: 0,
+        l: 0,
+        b: 0,
+        r: 0
+    };
     tp += '<w:tcMar><w:top w:w="' + m.t + '" w:type="dxa"/><w:left w:w="' + m.l + '" w:type="dxa"/><w:bottom w:w="' + m.b + '" w:type="dxa"/><w:right w:w="' + m.r + '" w:type="dxa"/></w:tcMar>';
     tp += '<w:vAlign w:val="' + (o.vAlign || "top") + '"/>';
     return "<w:tc><w:tcPr>" + tp + "</w:tcPr>" + content + "</w:tc>";
@@ -20766,14 +21152,17 @@ function dxTable(rows, widths) {
 // Picture that flows with the text (school logo). Size in CSS px (1px = 9525 EMU).
 function dxInlinePic(rid, wPx, hPx, id, name) {
     const cx = Math.round(wPx * 9525), cy = Math.round(hPx * 9525);
-    return "<w:r><w:drawing><wp:inline distT=\"0\" distB=\"0\" distL=\"0\" distR=\"0\"><wp:extent cx=\"" + cx + "\" cy=\"" + cy + "\"/><wp:effectExtent l=\"0\" t=\"0\" r=\"0\" b=\"0\"/>" + "<wp:docPr id=\"" + id + "\" name=\"" + name + "\" descr=\"School logo\"/><wp:cNvGraphicFramePr><a:graphicFrameLocks noChangeAspect=\"1\"/></wp:cNvGraphicFramePr>" + "<a:graphic><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/picture\"><pic:pic><pic:nvPicPr><pic:cNvPr id=\"" + id + "\" name=\"" + name + "\"/><pic:cNvPicPr/></pic:nvPicPr>" + "<pic:blipFill><a:blip r:embed=\"" + rid + "\"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>" + "<pic:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"" + cx + "\" cy=\"" + cy + "\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>";
+    return '<w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="' + cx + '" cy="' + cy + '"/><wp:effectExtent l="0" t="0" r="0" b="0"/>' + '<wp:docPr id="' + id + '" name="' + name + '" descr="School logo"/><wp:cNvGraphicFramePr><a:graphicFrameLocks noChangeAspect="1"/></wp:cNvGraphicFramePr>' + '<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic><pic:nvPicPr><pic:cNvPr id="' + id + '" name="' + name + '"/><pic:cNvPicPr/></pic:nvPicPr>' + '<pic:blipFill><a:blip r:embed="' + rid + '"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>' + '<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="' + cx + '" cy="' + cy + '"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>';
 }
 // Full-page picture anchored to the PAGE (not the text), behind the text.
 function dxPageBackground(rid) {
     const cx = 7560000, cy = 10692000; // A4 = 210mm x 297mm in EMU
     return dxPara([
-        "<w:r><w:drawing><wp:anchor distT=\"0\" distB=\"0\" distL=\"0\" distR=\"0\" simplePos=\"0\" relativeHeight=\"0\" behindDoc=\"1\" locked=\"1\" layoutInCell=\"1\" allowOverlap=\"1\">" + "<wp:simplePos x=\"0\" y=\"0\"/><wp:positionH relativeFrom=\"page\"><wp:posOffset>0</wp:posOffset></wp:positionH><wp:positionV relativeFrom=\"page\"><wp:posOffset>0</wp:posOffset></wp:positionV>" + "<wp:extent cx=\"" + cx + "\" cy=\"" + cy + "\"/><wp:effectExtent l=\"0\" t=\"0\" r=\"0\" b=\"0\"/><wp:wrapNone/>" + "<wp:docPr id=\"1\" name=\"Certificate frame\" descr=\"Certificate frame\"/><wp:cNvGraphicFramePr><a:graphicFrameLocks noChangeAspect=\"1\"/></wp:cNvGraphicFramePr>" + "<a:graphic><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/picture\"><pic:pic><pic:nvPicPr><pic:cNvPr id=\"1\" name=\"frame.jpeg\"/><pic:cNvPicPr/></pic:nvPicPr>" + "<pic:blipFill><a:blip r:embed=\"" + rid + "\"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>" + "<pic:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"" + cx + "\" cy=\"" + cy + "\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:anchor></w:drawing></w:r>"
-    ], { exact: 1, mark: 1 });
+        '<w:r><w:drawing><wp:anchor distT="0" distB="0" distL="0" distR="0" simplePos="0" relativeHeight="0" behindDoc="1" locked="1" layoutInCell="1" allowOverlap="1">' + '<wp:simplePos x="0" y="0"/><wp:positionH relativeFrom="page"><wp:posOffset>0</wp:posOffset></wp:positionH><wp:positionV relativeFrom="page"><wp:posOffset>0</wp:posOffset></wp:positionV>' + '<wp:extent cx="' + cx + '" cy="' + cy + '"/><wp:effectExtent l="0" t="0" r="0" b="0"/><wp:wrapNone/>' + '<wp:docPr id="1" name="Certificate frame" descr="Certificate frame"/><wp:cNvGraphicFramePr><a:graphicFrameLocks noChangeAspect="1"/></wp:cNvGraphicFramePr>' + '<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic><pic:nvPicPr><pic:cNvPr id="1" name="frame.jpeg"/><pic:cNvPicPr/></pic:nvPicPr>' + '<pic:blipFill><a:blip r:embed="' + rid + '"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>' + '<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="' + cx + '" cy="' + cy + '"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:anchor></w:drawing></w:r>'
+    ], {
+        exact: 1,
+        mark: 1
+    });
 }
 // One certificate's paragraphs/tables. Every size comes from WORD_CERT_THEMES, which holds the
 // SAME px sizes as the on-screen design / PDF (px x 0.75 = pt).
@@ -20793,11 +21182,19 @@ function pleDocxCertBody(rec, school, year, t, textW, logoRid, logoSz, first, pi
         school.tel ? "Tel: " + school.tel : "",
         school.email
     ].filter(Boolean).join("  |  ");
-    const val = (sub)=>String(rec.results && rec.results[sub] || "\u2014");
+    const val = (sub)=>String(rec.results && rec.results[sub] || "—");
     let pbPending = !first; // every certificate after the first starts on a fresh page
     // o.lh = CSS-style line height in px (becomes an exact Word line height, like the design)
     const P = (runs, o)=>{
-        const oo = Object.assign({ align: "center", line: 1.15, run: { font: fBody, sz: bp, color: "#111111" } }, o);
+        const oo = Object.assign({
+            align: "center",
+            line: 1.15,
+            run: {
+                font: fBody,
+                sz: bp,
+                color: "#111111"
+            }
+        }, o);
         if (oo.lh) oo.exact = pt(oo.lh);
         if (pbPending) {
             oo.pageBreakBefore = true;
@@ -20805,14 +21202,26 @@ function pleDocxCertBody(rec, school, year, t, textW, logoRid, logoSz, first, pi
         }
         return dxPara(runs, oo);
     };
-    const NB = "\u00A0";
+    const NB = "\xa0";
     const respBold = !!t.respBold;
     const dfs = pt(t.detailFs);
     const details = [
-        ["LIN", rec.lin],
-        [t.strip ? "LEADERSHIP POSITION(S)" : "Leadership Position", rec.leadership],
-        [t.strip ? "CO-CURRICULAR ACTIVITIES" : "Co-curricular Activities", rec.cocurricular],
-        ["Conduct", rec.conduct || (t.strip ? "" : "Good")]
+        [
+            "LIN",
+            rec.lin
+        ],
+        [
+            t.strip ? "LEADERSHIP POSITION(S)" : "Leadership Position",
+            rec.leadership
+        ],
+        [
+            t.strip ? "CO-CURRICULAR ACTIVITIES" : "Co-curricular Activities",
+            rec.cocurricular
+        ],
+        [
+            "Conduct",
+            rec.conduct || (t.strip ? "" : "Good")
+        ]
     ].map((d)=>[
             t.strip ? d[0].toUpperCase() + ":" : d[0] + (t.colon ? ":" : ""),
             d[1]
@@ -20823,13 +21232,66 @@ function pleDocxCertBody(rec, school, year, t, textW, logoRid, logoSz, first, pi
         details[1] = details[2];
         details[2] = tmp;
     }
-    const detailBlock = (d)=>P([{ t: d[0], b: 1, color: t.label, sz: dfs }], { align: "left", before: 4 }) + P([{ t: String(d[1] || "\u2014"), b: respBold, color: t.resp, sz: dfs }], { align: "left", bdrBottom: { sz: 6, color: t.line, space: 1 } });
+    const detailBlock = (d)=>P([
+            {
+                t: d[0],
+                b: 1,
+                color: t.label,
+                sz: dfs
+            }
+        ], {
+            align: "left",
+            before: 4
+        }) + P([
+            {
+                t: String(d[1] || "—"),
+                b: respBold,
+                color: t.resp,
+                sz: dfs
+            }
+        ], {
+            align: "left",
+            bdrBottom: {
+                sz: 6,
+                color: t.line,
+                space: 1
+            }
+        });
     let x = "";
-    if (logoRid && logoSz) x += P([dxInlinePic(logoRid, logoSz.w, logoSz.h, picId, "School logo")], { line: 1 });
+    if (logoRid && logoSz) x += P([
+        dxInlinePic(logoRid, logoSz.w, logoSz.h, picId, "School logo")
+    ], {
+        line: 1
+    });
     const schoolPt = pt(t.schoolFs((school.name || "").length));
-    x += P([{ t: school.name || "", b: 1, caps: 1, color: t.school, sz: schoolPt }], { before: 4, line: 1.15 });
-    if (t.motto && school.motto) x += P([{ t: "\"" + school.motto + "\"", i: 1, color: D5C.GOLD_D, sz: pt(t.mottoFs || t.bodyFs) }]);
-    if (contacts) x += P([{ t: contacts, sz: pt(t.contactFs) }], { before: 2 });
+    x += P([
+        {
+            t: school.name || "",
+            b: 1,
+            caps: 1,
+            color: t.school,
+            sz: schoolPt
+        }
+    ], {
+        before: 4,
+        line: 1.15
+    });
+    if (t.motto && school.motto) x += P([
+        {
+            t: '"' + school.motto + '"',
+            i: 1,
+            color: D5C.GOLD_D,
+            sz: pt(t.mottoFs || t.bodyFs)
+        }
+    ]);
+    if (contacts) x += P([
+        {
+            t: contacts,
+            sz: pt(t.contactFs)
+        }
+    ], {
+        before: 2
+    });
     t.titles(year).forEach((tt, i)=>{
         const o = tt[3] || {};
         let sz = pt(tt[1]);
@@ -20837,97 +21299,375 @@ function pleDocxCertBody(rec, school, year, t, textW, logoRid, logoSz, first, pi
         // (a substitute font can be wider than the web font the design uses).
         const est = String(tt[0]).length * (o.up ? 0.74 : 0.56) * sz;
         if (est > availPt) sz = Math.floor(sz * availPt / est * 2) / 2;
-        x += P([{ t: tt[0], b: !o.plain && !o.font, i: !!o.i, caps: !!o.up, color: tt[2], sz, font: fTitle }], { line: o.lh || 1.1, before: i === 0 ? 8 : 2 });
+        x += P([
+            {
+                t: tt[0],
+                b: !o.plain && !o.font,
+                i: !!o.i,
+                caps: !!o.up,
+                color: tt[2],
+                sz,
+                font: fTitle
+            }
+        ], {
+            line: o.lh || 1.1,
+            before: i === 0 ? 8 : 2
+        });
     });
-    x += P([{ t: t.pre, i: 1, sz: pt(t.preFs) }], { before: 8 });
+    x += P([
+        {
+            t: t.pre,
+            i: 1,
+            sz: pt(t.preFs)
+        }
+    ], {
+        before: 8
+    });
     let nameSz = pt(t.nameFs(nm.length));
-    x += P([{ t: t.nameBg ? NB + NB + NB + nm + NB + NB + NB : nm, font: fName, b: 1, caps: !!t.nameCaps, color: t.name, sz: nameSz, shd: t.nameBg || null }], { before: 4 });
+    x += P([
+        {
+            t: t.nameBg ? NB + NB + NB + nm + NB + NB + NB : nm,
+            font: fName,
+            b: 1,
+            caps: !!t.nameCaps,
+            color: t.name,
+            sz: nameSz,
+            shd: t.nameBg || null
+        }
+    ], {
+        before: 4
+    });
     if (t.oneLine) {
         x += P([
-            { t: "Index No. " },
-            { t: rec.indexNo || ".........................", b: 1 },
-            { t: ", who has successfully completed the Primary Leaving Examination (PLE) at " },
-            { t: (school.name || "") + " " + PLE_CERT_LOCATION, b: 1 },
-            { t: " in " },
-            { t: String(year), b: 1 },
-            { t: "." }
-        ], { before: 6, lh: t.bodyLh });
+            {
+                t: "Index No. "
+            },
+            {
+                t: rec.indexNo || ".........................",
+                b: 1
+            },
+            {
+                t: ", who has successfully completed the Primary Leaving Examination (PLE) at "
+            },
+            {
+                t: (school.name || "") + " " + PLE_CERT_LOCATION,
+                b: 1
+            },
+            {
+                t: " in "
+            },
+            {
+                t: String(year),
+                b: 1
+            },
+            {
+                t: "."
+            }
+        ], {
+            before: 6,
+            lh: t.bodyLh
+        });
     } else {
-        if (rec.indexNo) x += P([{ t: "Index No. " }, { t: rec.indexNo, b: 1 }], { before: 3, lh: t.bodyLh });
+        if (rec.indexNo) x += P([
+            {
+                t: "Index No. "
+            },
+            {
+                t: rec.indexNo,
+                b: 1
+            }
+        ], {
+            before: 3,
+            lh: t.bodyLh
+        });
         x += P([
-            { t: "successfully completed " + he + " Primary Leaving Examination (PLE) in " },
-            { t: String(year), b: 1 },
-            { t: " at " },
-            { t: (school.name || "") + " " + PLE_CERT_LOCATION + ".", b: 1 }
-        ], { before: 5, lh: t.bodyLh });
+            {
+                t: "successfully completed " + he + " Primary Leaving Examination (PLE) in "
+            },
+            {
+                t: String(year),
+                b: 1
+            },
+            {
+                t: " at "
+            },
+            {
+                t: (school.name || "") + " " + PLE_CERT_LOCATION + ".",
+                b: 1
+            }
+        ], {
+            before: 5,
+            lh: t.bodyLh
+        });
     }
     if (t.strip) {
         const cw = textW / PLE_SUBJECTS.length;
-        const box = { sz: 6, color: t.boxBorder };
+        const box = {
+            sz: 6,
+            color: t.boxBorder
+        };
         x += dxSpacer(8);
         x += dxTable([
-            PLE_SUBJECTS.map((sub, i)=>dxCell(P([{ t: pleSubLabel(sub), b: 1, caps: 1, color: t.label }], { line: 1.3 }) + P([{ t: val(sub), b: 1 }], { line: 1.2 }), cw, {
-                    borders: { top: box, left: box, bottom: box, right: box },
+            PLE_SUBJECTS.map((sub, i)=>dxCell(P([
+                    {
+                        t: pleSubLabel(sub),
+                        b: 1,
+                        caps: 1,
+                        color: t.label
+                    }
+                ], {
+                    line: 1.3
+                }) + P([
+                    {
+                        t: val(sub),
+                        b: 1
+                    }
+                ], {
+                    line: 1.2
+                }), cw, {
+                    borders: {
+                        top: box,
+                        left: box,
+                        bottom: box,
+                        right: box
+                    },
                     fill: i % 2 ? "#f6ecb8" : "#fdf7d8",
-                    mar: { t: 60, l: 40, b: 60, r: 40 }
+                    mar: {
+                        t: 60,
+                        l: 40,
+                        b: 60,
+                        r: 40
+                    }
                 }))
         ], PLE_SUBJECTS.map(()=>cw));
         x += P([
-            { t: "Total Aggregate: " },
-            { t: String(rec.totalAgg || "\u2014"), b: 1, color: t.agg },
-            { t: NB.repeat(8) + "Division: " },
-            { t: pleRomanDiv(rec.division), b: 1 }
-        ], { before: 6, line: 1.3 });
+            {
+                t: "Total Aggregate: "
+            },
+            {
+                t: String(rec.totalAgg || "—"),
+                b: 1,
+                color: t.agg
+            },
+            {
+                t: NB.repeat(8) + "Division: "
+            },
+            {
+                t: pleRomanDiv(rec.division),
+                b: 1
+            }
+        ], {
+            before: 6,
+            line: 1.3
+        });
         const half = textW / 2;
-        const cellFor = (d)=>dxCell(detailBlock(d), half, { mar: { t: 0, l: 160, b: 0, r: 160 } });
+        const cellFor = (d)=>dxCell(detailBlock(d), half, {
+                mar: {
+                    t: 0,
+                    l: 160,
+                    b: 0,
+                    r: 160
+                }
+            });
         x += dxSpacer(4);
         x += dxTable([
-            [cellFor(details[0]), cellFor(details[1])],
-            [cellFor(details[2]), cellFor(details[3])]
-        ], [half, half]);
-        x += P([{ t: "I congratulate " + herHim + " on successfully completing the Primary Leaving Examination. " + heShe + " is encouraged to continue working hard and I recommend " + herHim + " for admission to secondary school.", i: 1 }], { before: 8, lh: t.recFs * t.recLh });
+            [
+                cellFor(details[0]),
+                cellFor(details[1])
+            ],
+            [
+                cellFor(details[2]),
+                cellFor(details[3])
+            ]
+        ], [
+            half,
+            half
+        ]);
+        x += P([
+            {
+                t: "I congratulate " + herHim + " on successfully completing the Primary Leaving Examination. " + heShe + " is encouraged to continue working hard and I recommend " + herHim + " for admission to secondary school.",
+                i: 1
+            }
+        ], {
+            before: 8,
+            lh: t.recFs * t.recLh
+        });
     } else {
         const wBox = Math.round(textW * 0.47), wGap = Math.round(textW * 0.03), wRight = textW - wBox - wGap;
-        const boxPad = { t: 100, l: 200, b: 100, r: 200 };
+        const boxPad = {
+            t: 100,
+            l: 200,
+            b: 100,
+            r: 200
+        };
         const inner = wBox - boxPad.l - boxPad.r;
         const wLab = Math.round(inner * 0.7), wVal = inner - wLab;
-        const rowBd = { bottom: { sz: 6, color: t.line } };
-        const rowMar = { t: 40, l: 0, b: 40, r: 0 };
+        const rowBd = {
+            bottom: {
+                sz: 6,
+                color: t.line
+            }
+        };
+        const rowMar = {
+            t: 40,
+            l: 0,
+            b: 40,
+            r: 0
+        };
         const rowSz = pt(t.rowFs), rowValSz = pt(t.rowValFs), totSz = pt(t.totFs), totValSz = pt(t.totValFs);
         const subRows = PLE_SUBJECTS.map((sub)=>[
-            dxCell(P([{ t: pleSubLabel(sub) + (t.colon ? ":" : ""), sz: rowSz }], { align: "left" }), wLab, { borders: rowBd, mar: rowMar }),
-            dxCell(P([{ t: val(sub), b: 1, sz: rowValSz }], { align: "right" }), wVal, { borders: rowBd, mar: rowMar })
-        ]);
+                dxCell(P([
+                    {
+                        t: pleSubLabel(sub) + (t.colon ? ":" : ""),
+                        sz: rowSz
+                    }
+                ], {
+                    align: "left"
+                }), wLab, {
+                    borders: rowBd,
+                    mar: rowMar
+                }),
+                dxCell(P([
+                    {
+                        t: val(sub),
+                        b: 1,
+                        sz: rowValSz
+                    }
+                ], {
+                    align: "right"
+                }), wVal, {
+                    borders: rowBd,
+                    mar: rowMar
+                })
+            ]);
         const totRow = (lbl, v, col, lblCol)=>[
-            dxCell(P([{ t: lbl, b: 1, sz: totSz, color: lblCol || null }], { align: "left" }), wLab, { mar: rowMar }),
-            dxCell(P([{ t: v, b: 1, sz: totValSz, color: col || null }], { align: "right" }), wVal, { mar: rowMar })
-        ];
-        const resultsBox = P([{ t: t.rowHead || "PLE Results", b: 1, color: t.label, sz: pt(t.boxHeadFs) }], { align: "left" }) + dxTable(subRows.concat([
-            totRow("Total Agg" + (t.colon ? ":" : ""), String(rec.totalAgg || "\u2014"), t.agg, t.totLabel),
-            totRow("Division" + (t.colon ? ":" : ""), String(rec.division || "\u2014"), null, t.totLabel)
-        ]), [wLab, wVal]) + dxSpacer(1);
-        const boxB = { sz: 12, color: t.boxBorder };
+                dxCell(P([
+                    {
+                        t: lbl,
+                        b: 1,
+                        sz: totSz,
+                        color: lblCol || null
+                    }
+                ], {
+                    align: "left"
+                }), wLab, {
+                    mar: rowMar
+                }),
+                dxCell(P([
+                    {
+                        t: v,
+                        b: 1,
+                        sz: totValSz,
+                        color: col || null
+                    }
+                ], {
+                    align: "right"
+                }), wVal, {
+                    mar: rowMar
+                })
+            ];
+        const resultsBox = P([
+            {
+                t: t.rowHead || "PLE Results",
+                b: 1,
+                color: t.label,
+                sz: pt(t.boxHeadFs)
+            }
+        ], {
+            align: "left"
+        }) + dxTable(subRows.concat([
+            totRow("Total Agg" + (t.colon ? ":" : ""), String(rec.totalAgg || "—"), t.agg, t.totLabel),
+            totRow("Division" + (t.colon ? ":" : ""), String(rec.division || "—"), null, t.totLabel)
+        ]), [
+            wLab,
+            wVal
+        ]) + dxSpacer(1);
+        const boxB = {
+            sz: 12,
+            color: t.boxBorder
+        };
         x += dxSpacer(10);
         x += dxTable([
             [
-                dxCell(resultsBox, wBox, { borders: { top: boxB, left: boxB, bottom: boxB, right: boxB }, fill: t.boxBg, mar: boxPad }),
+                dxCell(resultsBox, wBox, {
+                    borders: {
+                        top: boxB,
+                        left: boxB,
+                        bottom: boxB,
+                        right: boxB
+                    },
+                    fill: t.boxBg,
+                    mar: boxPad
+                }),
                 dxCell(dxSpacer(1), wGap),
-                dxCell(details.map(detailBlock).join(""), wRight, { mar: { t: 0, l: 80, b: 0, r: 0 } })
+                dxCell(details.map(detailBlock).join(""), wRight, {
+                    mar: {
+                        t: 0,
+                        l: 80,
+                        b: 0,
+                        r: 0
+                    }
+                })
             ]
-        ], [wBox, wGap, wRight]);
-        x += P([{ t: pleRecommendation(rec.name, rec.gender, rec.totalAgg, rec.division), sz: pt(t.recFs) }], { lh: t.recFs * t.recLh, before: 12, indL: textW * 0.06, indR: textW * 0.06 });
+        ], [
+            wBox,
+            wGap,
+            wRight
+        ]);
+        x += P([
+            {
+                t: pleRecommendation(rec.name, rec.gender, rec.totalAgg, rec.division),
+                sz: pt(t.recFs)
+            }
+        ], {
+            lh: t.recFs * t.recLh,
+            before: 12,
+            indL: textW * 0.06,
+            indR: textW * 0.06
+        });
     }
     // Signature block: Date | Headteacher
     const half2 = textW / 2;
     const sigSz = pt(t.sigFs), sigSub = pt(t.sigSubFs);
-    const sig = (label)=>dxCell(P(label, { bdrTop: { sz: 8, color: "#111111", space: 3 }, indL: half2 * 0.125, indR: half2 * 0.125 }), half2);
+    const sig = (label)=>dxCell(P(label, {
+            bdrTop: {
+                sz: 8,
+                color: "#111111",
+                space: 3
+            },
+            indL: half2 * 0.125,
+            indR: half2 * 0.125
+        }), half2);
     x += dxSpacer(22);
     x += dxTable([
         [
-            sig([{ t: t.dateLabel || "Date of Issuance", sz: sigSz }]),
-            sig((school.headTeacher ? [{ t: String(school.headTeacher).toUpperCase(), b: 1, sz: sigSz }, { br: 1, sz: sigSz }] : []).concat([{ t: "Headteacher", sz: sigSub }]))
+            sig([
+                {
+                    t: t.dateLabel || "Date of Issuance",
+                    sz: sigSz
+                }
+            ]),
+            sig((school.headTeacher ? [
+                {
+                    t: String(school.headTeacher).toUpperCase(),
+                    b: 1,
+                    sz: sigSz
+                },
+                {
+                    br: 1,
+                    sz: sigSz
+                }
+            ] : []).concat([
+                {
+                    t: "Headteacher",
+                    sz: sigSub
+                }
+            ]))
         ]
-    ], [half2, half2]);
+    ], [
+        half2,
+        half2
+    ]);
     x += dxSpacer(1);
     return x;
 }
@@ -20970,9 +21710,13 @@ async function assembleCertificatesDocx(bodyXml, marginsTw, bgJpeg, logoPng) {
     if (bgJpeg) {
         zip.file("word/header1.xml", DX_XML + "<w:hdr " + DX_NS + ">" + dxPageBackground("rId1") + "</w:hdr>");
         zip.file("word/_rels/header1.xml.rels", DX_XML + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/frame.jpeg"/></Relationships>');
-        zip.file("word/media/frame.jpeg", bgJpeg, { base64: true });
+        zip.file("word/media/frame.jpeg", bgJpeg, {
+            base64: true
+        });
     }
-    if (logoPng) zip.file("word/media/logo.png", logoPng, { base64: true });
+    if (logoPng) zip.file("word/media/logo.png", logoPng, {
+        base64: true
+    });
     const m = marginsTw;
     const sect = "<w:sectPr>" + (bgJpeg ? '<w:headerReference w:type="default" r:id="rId3"/>' : "") + '<w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="' + m.top + '" w:right="' + m.side + '" w:bottom="' + m.bottom + '" w:left="' + m.side + '" w:header="0" w:footer="0" w:gutter="0"/></w:sectPr>';
     zip.file("word/document.xml", DX_XML + "<w:document " + DX_NS + "><w:body>" + bodyXml + sect + "</w:body></w:document>");
@@ -21009,7 +21753,11 @@ async function downloadCertificatesDocx(recs, school, year, designId, filename) 
         }
     }
     const mmTw = (mm)=>Math.round(mm / 25.4 * 1440);
-    const marginsTw = { top: mmTw(t.m[0]), side: mmTw(t.m[1]), bottom: mmTw(t.m[2]) };
+    const marginsTw = {
+        top: mmTw(t.m[0]),
+        side: mmTw(t.m[1]),
+        bottom: mmTw(t.m[2])
+    };
     const textW = 11906 - 2 * marginsTw.side;
     const body = recs.map((r, i)=>pleDocxCertBody(r, school, year, t, textW, logoRid, logoSz, i === 0, 100 + i)).join("");
     const blob = await assembleCertificatesDocx(body, marginsTw, bgData ? bgData.slice(bgData.indexOf(",") + 1) : "", logoB64);
@@ -21048,47 +21796,172 @@ const CERT_DESIGNS = [
 function PrePleAnalysisCard(param) {
     let { title, subjectAnalysis, gradeKeys, genderRows } = param;
     const e = React.createElement;
-    const head = { ...th, padding: "8px 10px", color: "#0f766e" };
+    const head = {
+        ...th,
+        padding: "8px 10px",
+        color: "#0f766e"
+    };
     const divCols = [
-        ["I", "Div I", "#166534"],
-        ["II", "Div II", "#1e40af"],
-        ["III", "Div III", "#92400e"],
-        ["IV", "Div IV", "#7c2d12"],
-        ["U", "U", "#6b7280"],
-        ["X", "X", "#dc2626"]
+        [
+            "I",
+            "Div I",
+            "#166534"
+        ],
+        [
+            "II",
+            "Div II",
+            "#1e40af"
+        ],
+        [
+            "III",
+            "Div III",
+            "#92400e"
+        ],
+        [
+            "IV",
+            "Div IV",
+            "#7c2d12"
+        ],
+        [
+            "U",
+            "U",
+            "#6b7280"
+        ],
+        [
+            "X",
+            "X",
+            "#dc2626"
+        ]
     ];
-    const h4 = { margin: "0 0 8px", color: "#0f766e", fontSize: 13 };
-    return e("div", { style: { background: "white", borderRadius: 12, border: "1px solid #e5e7eb", overflow: "hidden", marginTop: 20 } },
-        e("div", { style: { background: "#0f766e", color: "white", padding: "10px 16px", fontWeight: 700 } }, title),
-        e("div", { style: { padding: 16 } },
-            e("h4", { style: h4 }, "A. Subject Performance Analysis"),
-            e("div", { style: { overflowX: "auto", marginBottom: 20 } },
-                e("table", { style: { width: "100%", fontSize: 12 } },
-                    e("thead", null,
-                        e("tr", { style: { background: "#ccfbf1" } },
-                            e("th", { style: { ...head, textAlign: "left" } }, "Subject"),
-                            ...gradeKeys.map((g)=>e("th", { key: g, style: head }, g)),
-                            e("th", { style: { ...head, color: "#dc2626" } }, "X"),
-                            e("th", { style: head }, "Total"))),
-                    e("tbody", null,
-                        ...subjectAnalysis.map((sa, i)=>e("tr", { key: sa.sub, style: { background: i % 2 === 0 ? "white" : "#f0fdfa" } },
-                            e("td", { style: { ...td, fontWeight: 700, textAlign: "left" } }, sa.sub),
-                            ...gradeKeys.map((g)=>e("td", { key: g, style: td }, sa.gradeCounts[g] || 0)),
-                            e("td", { style: { ...td, fontWeight: 700, color: "#dc2626" } }, sa.xCount || 0),
-                            e("td", { style: { ...td, fontWeight: 700 } }, sa.total)))))),
-            e("h4", { style: h4 }, "B. General Performance Analysis"),
-            e("div", { style: { overflowX: "auto" } },
-                e("table", { style: { width: "100%", fontSize: 12 } },
-                    e("thead", null,
-                        e("tr", { style: { background: "#ccfbf1" } },
-                            e("th", { style: { ...head, textAlign: "left" } }, "Sex"),
-                            e("th", { style: head }, "No. of Pupils"),
-                            ...divCols.map((c)=>e("th", { key: c[0], style: head }, c[1])))),
-                    e("tbody", null,
-                        ...genderRows.map((gr)=>e("tr", { key: gr.label, style: { background: gr.label === "Total" ? "#f0fdfa" : "white" } },
-                            e("td", { style: { ...td, fontWeight: 700, textAlign: "left" } }, gr.label),
-                            e("td", { style: { ...td, fontWeight: 700 } }, gr.total),
-                            ...divCols.map((c)=>e("td", { key: c[0], style: { ...td, fontWeight: 700, color: c[2] } }, gr.counts[c[0]] || 0)))))))));
+    const h4 = {
+        margin: "0 0 8px",
+        color: "#0f766e",
+        fontSize: 13
+    };
+    return e("div", {
+        style: {
+            background: "white",
+            borderRadius: 12,
+            border: "1px solid #e5e7eb",
+            overflow: "hidden",
+            marginTop: 20
+        }
+    }, e("div", {
+        style: {
+            background: "#0f766e",
+            color: "white",
+            padding: "10px 16px",
+            fontWeight: 700
+        }
+    }, title), e("div", {
+        style: {
+            padding: 16
+        }
+    }, e("h4", {
+        style: h4
+    }, "A. Subject Performance Analysis"), e("div", {
+        style: {
+            overflowX: "auto",
+            marginBottom: 20
+        }
+    }, e("table", {
+        style: {
+            width: "100%",
+            fontSize: 12
+        }
+    }, e("thead", null, e("tr", {
+        style: {
+            background: "#ccfbf1"
+        }
+    }, e("th", {
+        style: {
+            ...head,
+            textAlign: "left"
+        }
+    }, "Subject"), ...gradeKeys.map((g)=>e("th", {
+            key: g,
+            style: head
+        }, g)), e("th", {
+        style: {
+            ...head,
+            color: "#dc2626"
+        }
+    }, "X"), e("th", {
+        style: head
+    }, "Total"))), e("tbody", null, ...subjectAnalysis.map((sa, i)=>e("tr", {
+            key: sa.sub,
+            style: {
+                background: i % 2 === 0 ? "white" : "#f0fdfa"
+            }
+        }, e("td", {
+            style: {
+                ...td,
+                fontWeight: 700,
+                textAlign: "left"
+            }
+        }, sa.sub), ...gradeKeys.map((g)=>e("td", {
+                key: g,
+                style: td
+            }, sa.gradeCounts[g] || 0)), e("td", {
+            style: {
+                ...td,
+                fontWeight: 700,
+                color: "#dc2626"
+            }
+        }, sa.xCount || 0), e("td", {
+            style: {
+                ...td,
+                fontWeight: 700
+            }
+        }, sa.total)))))), e("h4", {
+        style: h4
+    }, "B. General Performance Analysis"), e("div", {
+        style: {
+            overflowX: "auto"
+        }
+    }, e("table", {
+        style: {
+            width: "100%",
+            fontSize: 12
+        }
+    }, e("thead", null, e("tr", {
+        style: {
+            background: "#ccfbf1"
+        }
+    }, e("th", {
+        style: {
+            ...head,
+            textAlign: "left"
+        }
+    }, "Sex"), e("th", {
+        style: head
+    }, "No. of Pupils"), ...divCols.map((c)=>e("th", {
+            key: c[0],
+            style: head
+        }, c[1])))), e("tbody", null, ...genderRows.map((gr)=>e("tr", {
+            key: gr.label,
+            style: {
+                background: gr.label === "Total" ? "#f0fdfa" : "white"
+            }
+        }, e("td", {
+            style: {
+                ...td,
+                fontWeight: 700,
+                textAlign: "left"
+            }
+        }, gr.label), e("td", {
+            style: {
+                ...td,
+                fontWeight: 700
+            }
+        }, gr.total), ...divCols.map((c)=>e("td", {
+                key: c[0],
+                style: {
+                    ...td,
+                    fontWeight: 700,
+                    color: c[2]
+                }
+            }, gr.counts[c[0]] || 0)))))))));
 }
 const PRE_PLE_SETS = [
     "SET 1",
@@ -21394,8 +22267,22 @@ function PleInfo(param) {
     });
     // Same division counts split by sex (Male / Female / Total) for the analysis.
     const prePleGenderCounts = {
-        M: { I: 0, II: 0, III: 0, IV: 0, U: 0, X: 0 },
-        F: { I: 0, II: 0, III: 0, IV: 0, U: 0, X: 0 }
+        M: {
+            I: 0,
+            II: 0,
+            III: 0,
+            IV: 0,
+            U: 0,
+            X: 0
+        },
+        F: {
+            I: 0,
+            II: 0,
+            III: 0,
+            IV: 0,
+            U: 0,
+            X: 0
+        }
     };
     prePleSortedRows.forEach((r)=>{
         const g = r.s.gender === "F" ? "F" : r.s.gender === "M" ? "M" : null;
@@ -21404,9 +22291,21 @@ function PleInfo(param) {
         prePleGenderCounts[g][prePleDivCounts[d] !== undefined ? d : "U"]++;
     });
     const prePleGenderRows = [
-        { label: "Male", total: prePleStudents.filter((s)=>s.gender === "M").length, counts: prePleGenderCounts.M },
-        { label: "Female", total: prePleStudents.filter((s)=>s.gender === "F").length, counts: prePleGenderCounts.F },
-        { label: "Total", total: prePleStudents.length, counts: prePleDivCounts }
+        {
+            label: "Male",
+            total: prePleStudents.filter((s)=>s.gender === "M").length,
+            counts: prePleGenderCounts.M
+        },
+        {
+            label: "Female",
+            total: prePleStudents.filter((s)=>s.gender === "F").length,
+            counts: prePleGenderCounts.F
+        },
+        {
+            label: "Total",
+            total: prePleStudents.length,
+            counts: prePleDivCounts
+        }
     ];
     const exportPrePleWord = ()=>{
         const rowsHtml = prePleDisplayRows.map((r, i)=>"\n      <tr>\n        <td>".concat(i + 1, '</td><td class="name-cell">').concat(escapeHtml(r.s.name), "</td>\n        ").concat(r.perSub.map((p)=>{
@@ -23515,7 +24414,7 @@ function PleInfo(param) {
                                         ]
                                     }),
                                     prePleShowResults && /*#__PURE__*/ _jsx(PrePleAnalysisCard, {
-                                        title: "\uD83D\uDCCA Performance Analysis - PRE-PLE ".concat(prePleSet, " - P7 ").concat(prePleYear),
+                                        title: "📊 Performance Analysis - PRE-PLE ".concat(prePleSet, " - P7 ").concat(prePleYear),
                                         subjectAnalysis: prePleSubjectAnalysis,
                                         gradeKeys: prePleGradeKeys,
                                         genderRows: prePleGenderRows
@@ -23684,10 +24583,12 @@ function PleInfo(param) {
                                     }),
                                     selectedStudent && /*#__PURE__*/ _jsx("button", {
                                         onClick: async ()=>{
-  const s = p7Students.find((x)=>x.id === selectedStudent);
-  if (!s) return;
-  const rec = getRecForStudent(s);
-  await downloadCertificatesDocx([rec], school, year, selectedDesign, "PLE_Certificate_".concat(safeFileName(rec.name || "cert"), "_").concat(year, ".docx"));
+                                            const s = p7Students.find((x)=>x.id === selectedStudent);
+                                            if (!s) return;
+                                            const rec = getRecForStudent(s);
+                                            await downloadCertificatesDocx([
+                                                rec
+                                            ], school, year, selectedDesign, "PLE_Certificate_".concat(safeFileName(rec.name || "cert"), "_").concat(year, ".docx"));
                                         },
                                         style: btnWord,
                                         children: "📄 Download Word"
@@ -23712,7 +24613,7 @@ function PleInfo(param) {
                                     }),
                                     /*#__PURE__*/ _jsx("button", {
                                         onClick: async ()=>{
-  await downloadCertificatesDocx(sortedP7.map((s)=>getRecForStudent(s)), school, year, selectedDesign, "PLE_Certificates_All_".concat(year, ".docx"));
+                                            await downloadCertificatesDocx(sortedP7.map((s)=>getRecForStudent(s)), school, year, selectedDesign, "PLE_Certificates_All_".concat(year, ".docx"));
                                         },
                                         style: {
                                             ...btnWord,
@@ -23810,13 +24711,31 @@ function PleInfo(param) {
                                 });
                                 // Male / Female numbers for every division (and for the whole group)
                                 const divGender = {
-                                    "1": { M: 0, F: 0 },
-                                    "2": { M: 0, F: 0 },
-                                    "3": { M: 0, F: 0 },
-                                    "4": { M: 0, F: 0 },
-                                    "U": { M: 0, F: 0 }
+                                    "1": {
+                                        M: 0,
+                                        F: 0
+                                    },
+                                    "2": {
+                                        M: 0,
+                                        F: 0
+                                    },
+                                    "3": {
+                                        M: 0,
+                                        F: 0
+                                    },
+                                    "4": {
+                                        M: 0,
+                                        F: 0
+                                    },
+                                    "U": {
+                                        M: 0,
+                                        F: 0
+                                    }
                                 };
-                                const totalGender = { M: 0, F: 0 };
+                                const totalGender = {
+                                    M: 0,
+                                    F: 0
+                                };
                                 recs.forEach((r)=>{
                                     const g = r.gender === "M" ? "M" : r.gender === "F" ? "F" : null;
                                     if (!g) return;
