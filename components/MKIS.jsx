@@ -14485,13 +14485,9 @@ function GroupWork(param) {
     const isLower = LOWER_CLASSES.includes(cls);
     const subjects = isLower ? LOWER_SUBJECTS : UPPER_SUBJECTS;
     const tk = "".concat(term, "__").concat(year);
-    // Special Grading Scale override for the selected class, if any.
-    const bands = useMemo(()=>bandsForClass(cls, defaultBands, specialBands, undefined, year), [
-        cls,
-        defaultBands,
-        specialBands,
-        year
-    ]);
+    // Group Work always uses the GENERAL grading scale (never a Special/TAEB
+    // scale override), so group aggregates match the school's normal grading.
+    const bands = defaultBands;
     const classStudents = useMemo(()=>students.filter((s)=>s.className === cls).sort((a, b)=>a.name.localeCompare(b.name)), [
         students,
         cls
