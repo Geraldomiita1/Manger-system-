@@ -1512,12 +1512,12 @@ function exportGroupWorkWord(param) {
     downloadWordHtml("".concat(cls, " ").concat(term, " ").concat(year, " ").concat(testNo), body, "".concat(safeFileName(cls), "_").concat(safeFileName(term), "_").concat(year, "_").concat(safeFileName(testNo), ".doc"));
 }
 function groupWorkAnalysisHtmlTable(param) {
-    let { isLower, sortedAnalysisRows } = param;
+    let { isLower, sortedAnalysisRows, testOptions = GROUP_TEST_OPTIONS } = param;
     const th = "border:1px solid #999;padding:5px;font-size:8.5pt;background:#1e40af;color:white;";
     const td = "border:1px solid #999;padding:4px;text-align:center;font-size:9pt;";
     let head = "<tr>";
     head += '<th style="'.concat(th, '">GROUP</th><th style="').concat(th, 'text-align:left;">MEMBERS</th>');
-    GROUP_TEST_OPTIONS.forEach((tn)=>{
+    testOptions.forEach((tn)=>{
         head += '<th style="'.concat(th, '">').concat(tn.replace("Group Test ", "GT"), "</th>");
     });
     head += '<th style="'.concat(th, '">TESTS DONE</th><th style="').concat(th, '">AVG TOT MK</th>');
@@ -1532,7 +1532,7 @@ function groupWorkAnalysisHtmlTable(param) {
         r.perTest.forEach((t)=>{
             body += '<td style="'.concat(td, '">').concat(t.hasData ? t.totMk : "-", "</td>");
         });
-        body += '<td style="'.concat(td, 'font-weight:700;">').concat(r.testsCompleted, "/").concat(GROUP_TEST_OPTIONS.length, "</td>");
+        body += '<td style="'.concat(td, 'font-weight:700;">').concat(r.testsCompleted, "/").concat(testOptions.length, "</td>");
         body += '<td style="'.concat(td, 'font-weight:700;background:#ede9fe;">').concat(r.avgTotMk > 0 ? r.avgTotMk.toFixed(1) : "-", "</td>");
         if (!isLower) {
             body += '<td style="'.concat(td, 'background:#ede9fe;">').concat(r.avgTotAgg !== null ? r.avgTotAgg.toFixed(1) : "-", "</td>");
@@ -1544,11 +1544,12 @@ function groupWorkAnalysisHtmlTable(param) {
     return '<table style="border-collapse:collapse;width:100%;">'.concat(head).concat(body, "</table>");
 }
 function exportGroupWorkAnalysisWord(param) {
-    let { school, cls, term, year, isLower, sortedAnalysisRows } = param;
+    let { school, cls, term, year, isLower, sortedAnalysisRows, testOptions } = param;
     let body = titleBlockHtml(school, "GENERAL GROUP PERFORMANCE ANALYSIS - ".concat(term.toUpperCase(), ", ").concat(year, " - ").concat(cls));
     body += groupWorkAnalysisHtmlTable({
         isLower,
-        sortedAnalysisRows
+        sortedAnalysisRows,
+        testOptions
     });
     downloadWordHtml("".concat(cls, " ").concat(term, " ").concat(year, " General Group Analysis"), body, "".concat(safeFileName(cls), "_").concat(safeFileName(term), "_").concat(year, "_General_Group_Analysis.doc"), {
         pageSize: "297mm 210mm"
@@ -14458,15 +14459,21 @@ function findPriorGroupPeriod(clsData, tk) {
     let best = null;
     Object.keys(clsData || {}).forEach((k)=>{
         const o = groupPeriodOrder(k);
-        if (o >= target || !((clsData[k] && clsData[k].groups) || []).length) return;
-        if (!best || o > best.o) best = { k, o };
+        if (o >= target || !(clsData[k] && clsData[k].groups || []).length) return;
+        if (!best || o > best.o) best = {
+            k,
+            o
+        };
     });
     return best ? best.k : null;
 }
 // Copy of a group for another period: same id/name, members limited to pupils
 // still in the class (pupils who left/were promoted are dropped).
 function carryGroup(g, validIds) {
-    return { ...g, members: (g.members || []).filter((m)=>validIds.has(m)) };
+    return {
+        ...g,
+        members: (g.members || []).filter((m)=>validIds.has(m))
+    };
 }
 function GroupWork(param) {
     let { students, groupWork, setGroupWork, bands: defaultBands, specialBands, divisions, school, markEditing } = param;
@@ -14500,6 +14507,46 @@ function GroupWork(param) {
     };
     const groups = period.groups || [];
     const testMarks = ((_period_marks = period.marks) === null || _period_marks === void 0 ? void 0 : _period_marks[testNo]) || {};
+    // Extra, manually-added Group Tests (beyond the fixed Group Test 1-5) are
+    // kept per class+term+year, alongside that period's groups/marks.
+    const testOptions = useMemo(()=>[
+            ...GROUP_TEST_OPTIONS,
+            ...period.extraTests || []
+        ], [
+        period
+    ]);
+    const addTest = useCallback(()=>{
+        markEditing();
+        const name = "Group Test ".concat(testOptions.length + 1);
+        setGroupWork((prev)=>{
+            const clsData = prev[cls] || {};
+            const cur = clsData[tk] || {
+                groups: [],
+                marks: {}
+            };
+            return {
+                ...prev,
+                [cls]: {
+                    ...clsData,
+                    [tk]: {
+                        ...cur,
+                        rosterInit: true,
+                        extraTests: [
+                            ...cur.extraTests || [],
+                            name
+                        ]
+                    }
+                }
+            };
+        });
+        setTestNo(name);
+    }, [
+        cls,
+        tk,
+        testOptions,
+        markEditing,
+        setGroupWork
+    ]);
     const updatePeriod = useCallback((updater)=>{
         markEditing();
         setGroupWork((prev)=>{
@@ -14604,13 +14651,23 @@ function GroupWork(param) {
         const validIds = new Set(classStudents.map((s)=>s.id));
         setGroupWork((prev)=>{
             const clsData = prev[cls] || {};
-            const src = clsData[fromTk] || { groups: [], marks: {} };
+            const src = clsData[fromTk] || {
+                groups: [],
+                marks: {}
+            };
             const srcGroups = src.groups || [];
             const srcMarks = (src.marks || {})[fromTestNo] || {};
-            const dest = clsData[toTk] || { groups: [], marks: {} };
-            const destGroups = [...dest.groups || []];
+            const dest = clsData[toTk] || {
+                groups: [],
+                marks: {}
+            };
+            const destGroups = [
+                ...dest.groups || []
+            ];
             const norm = (n)=>String(n || "").trim().toLowerCase();
-            const memKey = (g)=>[...g.members || []].sort().join("|");
+            const memKey = (g)=>[
+                    ...g.members || []
+                ].sort().join("|");
             // Map each source group onto a destination group: same id, else same
             // name, else identical members; otherwise add it to the destination.
             const idMap = {};
@@ -14618,7 +14675,10 @@ function GroupWork(param) {
                 let dg = destGroups.find((d)=>d.id === sg.id) || destGroups.find((d)=>norm(d.name) && norm(d.name) === norm(sg.name)) || (memKey(sg) ? destGroups.find((d)=>memKey(d) === memKey(sg)) : null);
                 if (!dg) {
                     dg = carryGroup(sg, validIds);
-                    if (destGroups.some((d)=>d.id === dg.id)) dg = { ...dg, id: "g".concat(Date.now()).concat(Math.random().toString(36).slice(2, 6)) };
+                    if (destGroups.some((d)=>d.id === dg.id)) dg = {
+                        ...dg,
+                        id: "g".concat(Date.now()).concat(Math.random().toString(36).slice(2, 6))
+                    };
                     destGroups.push(dg);
                 }
                 idMap[sg.id] = dg.id;
@@ -14627,8 +14687,16 @@ function GroupWork(param) {
             Object.entries(srcMarks).forEach((param)=>{
                 let [gid, subs] = param;
                 const did = idMap[gid] || (destGroups.some((d)=>d.id === gid) ? gid : null);
-                if (did) newTestMarks[did] = { ...subs };
+                if (did) newTestMarks[did] = {
+                    ...subs
+                };
             });
+            // If the destination test is a manually-added one not yet known
+            // there (e.g. transferring a "Group Test 6" into a term that
+            // hasn't had Test 6 added), register it so it shows up in that
+            // term's Test No. list and General Performance Analysis too.
+            const destExtra = dest.extraTests || [];
+            const needsExtra = !GROUP_TEST_OPTIONS.includes(toTestNo) && !destExtra.includes(toTestNo);
             return {
                 ...prev,
                 [cls]: {
@@ -14637,6 +14705,10 @@ function GroupWork(param) {
                         ...dest,
                         rosterInit: true,
                         groups: destGroups,
+                        extraTests: needsExtra ? [
+                            ...destExtra,
+                            toTestNo
+                        ] : destExtra,
                         marks: {
                             ...dest.marks || {},
                             [toTestNo]: newTestMarks
@@ -14766,7 +14838,7 @@ function GroupWork(param) {
     // selected above), so groups can be compared on their overall performance
     // across the whole term rather than a single test at a time.
     const analysisRows = useMemo(()=>groups.map((g)=>{
-            const perTest = GROUP_TEST_OPTIONS.map((tn)=>{
+            const perTest = testOptions.map((tn)=>{
                 var _period_marks;
                 const m = (((_period_marks = period.marks) === null || _period_marks === void 0 ? void 0 : _period_marks[tn]) || {})[g.id];
                 const hasData = !!m && subjects.some((sub)=>m[sub] !== undefined && m[sub] !== null);
@@ -14823,6 +14895,7 @@ function GroupWork(param) {
         }), [
         groups,
         period,
+        testOptions,
         subjects,
         isLower,
         bands,
@@ -14899,7 +14972,18 @@ function GroupWork(param) {
                                 label: "Test No.",
                                 value: testNo,
                                 onChange: setTestNo,
-                                opts: GROUP_TEST_OPTIONS
+                                opts: testOptions
+                            }),
+                            viewMode === "single" && /*#__PURE__*/ _jsx("button", {
+                                type: "button",
+                                onClick: addTest,
+                                title: "Add another Group Test (e.g. Group Test ".concat(testOptions.length + 1, ")"),
+                                style: {
+                                    ...btnGhost,
+                                    alignSelf: "flex-end",
+                                    height: 38
+                                },
+                                children: "➕ Add Test"
                             }),
                             /*#__PURE__*/ _jsx(Sel, {
                                 label: "Term",
@@ -14986,7 +15070,8 @@ function GroupWork(param) {
                                                 year,
                                                 isLower,
                                                 subjects,
-                                                sortedAnalysisRows
+                                                sortedAnalysisRows,
+                                                testOptions
                                             }),
                                         style: btnWord,
                                         children: "📄 Download Word"
@@ -15028,7 +15113,7 @@ function GroupWork(param) {
                 },
                 children: [
                     /*#__PURE__*/ _jsx("span", {
-                        children: "\uD83D\uDD01 " + groupNotice.text
+                        children: "🔁 " + groupNotice.text
                     }),
                     /*#__PURE__*/ _jsx("button", {
                         onClick: ()=>setGroupNotice(null),
@@ -15037,7 +15122,7 @@ function GroupWork(param) {
                             padding: "0 8px",
                             fontSize: 12
                         },
-                        children: "\u2715"
+                        children: "✕"
                     })
                 ]
             }),
@@ -15430,7 +15515,7 @@ function GroupWork(param) {
                                                 },
                                                 children: "MEMBERS"
                                             }),
-                                            GROUP_TEST_OPTIONS.map((tn)=>/*#__PURE__*/ _jsx("th", {
+                                            testOptions.map((tn)=>/*#__PURE__*/ _jsx("th", {
                                                     style: th,
                                                     children: tn.replace("Group Test ", "GT")
                                                 }, tn)),
@@ -15496,7 +15581,7 @@ function GroupWork(param) {
                                                     children: [
                                                         r.testsCompleted,
                                                         "/",
-                                                        GROUP_TEST_OPTIONS.length
+                                                        testOptions.length
                                                     ]
                                                 }),
                                                 /*#__PURE__*/ _jsx("td", {
@@ -15548,7 +15633,7 @@ function GroupWork(param) {
                     {
                         key: "testNo",
                         label: "Test No.",
-                        options: GROUP_TEST_OPTIONS
+                        options: testOptions
                     },
                     {
                         key: "term",
