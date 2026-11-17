@@ -1350,7 +1350,7 @@ function resultSheetHtmlTable(param) {
     head += '<th style="'.concat(thTop, '"').concat(rs, ">S/N</th>");
     head += '<th style="'.concat(thTop, 'text-align:left;min-width:150px;"').concat(rs, ">NAME OF PUPIL</th>");
     subjects.forEach((sub)=>{
-        head += isLower ? '<th style="'.concat(thTop, '"').concat(rs, ">").concat(escapeHtml(sub)).concat(lowerSubjectMax(sub) !== 100 ? " /".concat(lowerSubjectMax(sub)) : "", "</th>") : '<th style="'.concat(thTop, '" colspan="3">').concat(escapeHtml(sub), "</th>");
+        head += isLower ? '<th style="'.concat(thTop, '"').concat(rs, ">").concat(escapeHtml(sub)).concat(lowerSubjectMax(sub) !== 100 ? " /".concat(lowerSubjectMax(sub)) : "", "</th>") : '<th style="'.concat(thTop, '" colspan="2">').concat(escapeHtml(sub), "</th>");
     });
     head += '<th style="'.concat(thTop, '"').concat(rs, ">TOT MK</th>");
     if (!isLower) head += '<th style="'.concat(thTop, '"').concat(rs, '>TOT AGG</th><th style="').concat(thTop, '"').concat(rs, ">DIV</th>");
@@ -1359,7 +1359,6 @@ function resultSheetHtmlTable(param) {
         head += '<tr style="background:#2563eb;color:white;font-size:8pt;">';
         subjects.forEach(()=>{
             head += '<th style="'.concat(thTop, 'background:#dcfce7;color:#14532d;">EX</th>');
-            head += '<th style="'.concat(thTop, 'background:#dbeafe;color:#1e3a6e;">AV</th>');
             head += '<th style="'.concat(thTop, 'background:#fed7aa;color:#7c2d12;">AG</th>');
         });
         head += "</tr>";
@@ -1381,8 +1380,6 @@ function resultSheetHtmlTable(param) {
             r.perSub.forEach((p)=>{
                 var _p_exam;
                 body += '<td style="'.concat(td, 'background:#f0fdf4;">').concat(p.isX ? "X" : (_p_exam = p.exam) !== null && _p_exam !== void 0 ? _p_exam : "-", "</td>");
-                var _p_av;
-                body += '<td style="'.concat(td, 'background:#eff6ff;font-weight:600;">').concat(p.isX ? "X" : (_p_av = p.av) !== null && _p_av !== void 0 ? _p_av : "-", "</td>");
                 body += '<td style="'.concat(td, 'background:#fff7ed;">').concat(p.isX ? "X" : p.av !== undefined ? p.agg : "-", "</td>");
             });
         }
@@ -2148,7 +2145,7 @@ function resultSheetHeaderRow(isLower, subjects) {
         "NAME OF PUPIL"
     ];
     if (isLower) subjects.forEach((s)=>head.push(s));
-    else subjects.forEach((s)=>head.push("".concat(s, " EXAM"), "".concat(s, " AVG"), "".concat(s, " AGG")));
+    else subjects.forEach((s)=>head.push("".concat(s, " EXAM"), "".concat(s, " AGG")));
     head.push("TOT MK");
     if (!isLower) head.push("TOT AGG", "DIV");
     head.push("POS");
@@ -2166,8 +2163,6 @@ function resultSheetDataRow(r, i, isLower) {
         } else {
             var _p_exam;
             row.push(p.isX ? "X" : (_p_exam = p.exam) !== null && _p_exam !== void 0 ? _p_exam : "-");
-            var _p_av1;
-            row.push(p.isX ? "X" : (_p_av1 = p.av) !== null && _p_av1 !== void 0 ? _p_av1 : "-");
             row.push(p.isX ? "X" : p.av !== undefined ? p.agg : "-");
         }
     });
@@ -9864,7 +9859,7 @@ function MarkEntry(param) {
                 var _m_sub, _m_sub1;
                 const ca = (_m_sub = m[sub]) === null || _m_sub === void 0 ? void 0 : _m_sub.ca;
                 const exam = (_m_sub1 = m[sub]) === null || _m_sub1 === void 0 ? void 0 : _m_sub1.exam;
-                const isX = isLower ? exam === undefined || exam === null : (ca === undefined || ca === null) && (exam === undefined || exam === null);
+                const isX = exam === undefined || exam === null;
                 if (isX) return {
                     sub,
                     ca,
@@ -9873,8 +9868,7 @@ function MarkEntry(param) {
                     agg: undefined,
                     isX: true
                 };
-                const hasBoth = typeof ca === "number" && typeof exam === "number";
-                const av = hasBoth ? Math.round((ca + exam) / 2) : typeof exam === "number" ? exam : typeof ca === "number" ? ca : undefined;
+                const av = typeof exam === "number" ? exam : undefined;
                 const agg = av !== undefined ? aggOf(av, bands) : undefined;
                 return {
                     sub,
@@ -9962,10 +9956,8 @@ function MarkEntry(param) {
                     markIdx: idx
                 };
             } else {
-                const caIdx = headers.findIndex((h)=>h === "".concat(sub, "_CA") || h === "".concat(sub, " CA") || h === "".concat(sub, "CA"));
-                const exIdx = headers.findIndex((h)=>h === "".concat(sub, "_EXAM") || h === "".concat(sub, " EXAM") || h === "".concat(sub, "EXAM") || h === "".concat(sub, "_EX") || h === "".concat(sub, " EX"));
-                if (caIdx !== -1 || exIdx !== -1) subjectCols[sub] = {
-                    caIdx,
+                const exIdx = headers.findIndex((h)=>h === "".concat(sub, "_EXAM") || h === "".concat(sub, " EXAM") || h === "".concat(sub, "EXAM") || h === "".concat(sub, "_EX") || h === "".concat(sub, " EX") || h === sub);
+                if (exIdx !== -1) subjectCols[sub] = {
                     examIdx: exIdx
                 };
             }
@@ -9984,10 +9976,8 @@ function MarkEntry(param) {
                         mk: v !== undefined && v !== "" && !isNaN(Number(v)) ? Number(v) : null
                     };
                 } else {
-                    const ca = col.caIdx !== undefined && col.caIdx !== -1 && cells[col.caIdx] !== "" && !isNaN(Number(cells[col.caIdx])) ? Number(cells[col.caIdx]) : null;
                     const exam = col.examIdx !== undefined && col.examIdx !== -1 && cells[col.examIdx] !== "" && !isNaN(Number(cells[col.examIdx])) ? Number(cells[col.examIdx]) : null;
                     marks[sub] = {
-                        ca,
                         exam
                     };
                 }
@@ -10047,7 +10037,6 @@ function MarkEntry(param) {
                 if (isLower) {
                     if (m.mk !== null && m.mk !== undefined) requestOrApplyTermMark(row.studentId, studentName, tk, sub, "exam", clampMark(m.mk, lowerSubjectMax(sub)), existing.exam);
                 } else {
-                    if (m.ca !== null && m.ca !== undefined) requestOrApplyTermMark(row.studentId, studentName, tk, sub, "ca", clampMark(m.ca), existing.ca);
                     if (m.exam !== null && m.exam !== undefined) requestOrApplyTermMark(row.studentId, studentName, tk, sub, "exam", clampMark(m.exam), existing.exam);
                 }
             });
@@ -10061,13 +10050,13 @@ function MarkEntry(param) {
         let header = "NAME";
         curSubjects.forEach((sub)=>{
             if (isLower) header += ",".concat(sub);
-            else header += ",".concat(sub, "_CA,").concat(sub, "_EXAM");
+            else header += ",".concat(sub, "_EXAM");
         });
         const rows = classStudents.map((s)=>{
             let row = s.name;
             curSubjects.forEach(()=>{
                 if (isLower) row += ",";
-                else row += ",,";
+                else row += ",";
             });
             return row;
         });
@@ -10586,13 +10575,6 @@ function MarkEntry(param) {
                                                                         style: th,
                                                                         children: [
                                                                             sub,
-                                                                            " CA"
-                                                                        ]
-                                                                    }),
-                                                                    /*#__PURE__*/ _jsxs("th", {
-                                                                        style: th,
-                                                                        children: [
-                                                                            sub,
                                                                             " EX"
                                                                         ]
                                                                     })
@@ -10673,10 +10655,6 @@ function MarkEntry(param) {
                                                                     children: m.mk != null ? clampMark(m.mk, subMax) : "-"
                                                                 }, sub) : /*#__PURE__*/ _jsxs(React.Fragment, {
                                                                     children: [
-                                                                        /*#__PURE__*/ _jsx("td", {
-                                                                            style: td,
-                                                                            children: m.ca != null ? clampMark(m.ca, subMax) : "-"
-                                                                        }),
                                                                         /*#__PURE__*/ _jsx("td", {
                                                                             style: td,
                                                                             children: m.exam != null ? clampMark(m.exam, subMax) : "-"
@@ -10771,7 +10749,7 @@ function MarkEntry(param) {
                                                 ]
                                             }, s)) : subjects.map((s)=>/*#__PURE__*/ _jsx("th", {
                                                 style: th,
-                                                colSpan: 4,
+                                                colSpan: 2,
                                                 children: s
                                             }, s)),
                                         /*#__PURE__*/ _jsx("th", {
@@ -10810,26 +10788,10 @@ function MarkEntry(param) {
                                                 /*#__PURE__*/ _jsx("th", {
                                                     style: {
                                                         ...th,
-                                                        background: "#fef9c3",
-                                                        color: "#713f12"
-                                                    },
-                                                    children: "CA"
-                                                }),
-                                                /*#__PURE__*/ _jsx("th", {
-                                                    style: {
-                                                        ...th,
                                                         background: "#dcfce7",
                                                         color: "#14532d"
                                                     },
                                                     children: "EXAM"
-                                                }),
-                                                /*#__PURE__*/ _jsx("th", {
-                                                    style: {
-                                                        ...th,
-                                                        background: "#dbeafe",
-                                                        color: "#1e3a6e"
-                                                    },
-                                                    children: "AV"
                                                 }),
                                                 /*#__PURE__*/ _jsx("th", {
                                                     style: {
@@ -10880,20 +10842,6 @@ function MarkEntry(param) {
                                                         /*#__PURE__*/ _jsx("td", {
                                                             style: {
                                                                 ...td,
-                                                                background: "#fefce8"
-                                                            },
-                                                            children: /*#__PURE__*/ _jsx(MarkInput, {
-                                                                value: p.ca,
-                                                                existingVal: p.ca,
-                                                                max: 100,
-                                                                style: markInput,
-                                                                locked: isLocked,
-                                                                onCommit: (newVal, existingVal)=>handleMarkChange(r.s.id, r.s.name, tk, p.sub, "ca", newVal, existingVal)
-                                                            })
-                                                        }),
-                                                        /*#__PURE__*/ _jsx("td", {
-                                                            style: {
-                                                                ...td,
                                                                 background: "#f0fdf4"
                                                             },
                                                             children: /*#__PURE__*/ _jsx(MarkInput, {
@@ -10904,14 +10852,6 @@ function MarkEntry(param) {
                                                                 locked: isLocked,
                                                                 onCommit: (newVal, existingVal)=>handleMarkChange(r.s.id, r.s.name, tk, p.sub, "exam", newVal, existingVal)
                                                             })
-                                                        }),
-                                                        /*#__PURE__*/ _jsx("td", {
-                                                            style: {
-                                                                ...td,
-                                                                background: "#eff6ff",
-                                                                fontWeight: 600
-                                                            },
-                                                            children: p.isX ? "X" : (_p_av = p.av) !== null && _p_av !== void 0 ? _p_av : "-"
                                                         }),
                                                         /*#__PURE__*/ _jsx("td", {
                                                             style: {
@@ -25988,7 +25928,7 @@ function ResultSheets(param) {
             const perSub = subjects.map((sub)=>{
                 var _m_sub, _m_sub1;
                 const ca = (_m_sub = m[sub]) === null || _m_sub === void 0 ? void 0 : _m_sub.ca, exam = (_m_sub1 = m[sub]) === null || _m_sub1 === void 0 ? void 0 : _m_sub1.exam;
-                const isX = isLower ? exam === undefined || exam === null : (ca === undefined || ca === null) && (exam === undefined || exam === null);
+                const isX = exam === undefined || exam === null;
                 if (isX) return {
                     sub,
                     ca,
@@ -25998,8 +25938,7 @@ function ResultSheets(param) {
                     isX: true,
                     gradeLabel: "X"
                 };
-                const hasBoth = typeof ca === "number" && typeof exam === "number";
-                const av = hasBoth ? Math.round((ca + exam) / 2) : typeof exam === "number" ? exam : typeof ca === "number" ? ca : undefined;
+                const av = typeof exam === "number" ? exam : undefined;
                 const agg = av !== undefined ? aggOf(av, bands) : undefined;
                 const gl = av !== undefined ? gradeLabel(av, bands) : undefined;
                 return {
@@ -26348,7 +26287,7 @@ function ResultSheets(param) {
                                                         ]
                                                     }, s)) : subjects.map((s)=>/*#__PURE__*/ _jsx("th", {
                                                         style: th,
-                                                        colSpan: 3,
+                                                        colSpan: 2,
                                                         children: s
                                                     }, s)),
                                                 /*#__PURE__*/ _jsx("th", {
@@ -26392,14 +26331,6 @@ function ResultSheets(param) {
                                                                 color: "#14532d"
                                                             },
                                                             children: "EX"
-                                                        }),
-                                                        /*#__PURE__*/ _jsx("th", {
-                                                            style: {
-                                                                ...th,
-                                                                background: "#dbeafe",
-                                                                color: "#1e3a6e"
-                                                            },
-                                                            children: "AV"
                                                         }),
                                                         /*#__PURE__*/ _jsx("th", {
                                                             style: {
@@ -26448,14 +26379,6 @@ function ResultSheets(param) {
                                                                     background: "#f0fdf4"
                                                                 },
                                                                 children: p.isX ? "X" : (_p_exam = p.exam) !== null && _p_exam !== void 0 ? _p_exam : "-"
-                                                            }),
-                                                            /*#__PURE__*/ _jsx("td", {
-                                                                style: {
-                                                                    ...td,
-                                                                    background: "#eff6ff",
-                                                                    fontWeight: 600
-                                                                },
-                                                                children: p.isX ? "X" : (_p_av = p.av) !== null && _p_av !== void 0 ? _p_av : "-"
                                                             }),
                                                             /*#__PURE__*/ _jsx("td", {
                                                                 style: {
@@ -26516,7 +26439,7 @@ function ResultSheets(param) {
                                             fontSize: 12
                                         },
                                         children: /*#__PURE__*/ _jsxs("td", {
-                                            colSpan: isLower ? subjects.length + 4 : subjects.length * 3 + 6,
+                                            colSpan: isLower ? subjects.length + 4 : subjects.length * 2 + 6,
                                             style: {
                                                 ...td,
                                                 textAlign: "left",
