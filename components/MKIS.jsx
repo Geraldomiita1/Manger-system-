@@ -332,6 +332,7 @@ const ALL_MKIS_KEYS = [
     "mkis_pledata",
     "mkis_mock_marks",
     "mkis_pre_ple_marks",
+    "mkis_assessment_marks",
     "mkis_term_reset_backups",
     "mkis_monthly_reset_backups",
     "mkis_sweeping_rota",
@@ -453,6 +454,7 @@ const KEY_LABEL = {
     mkis_mock_marks: "Mock Results",
     mkis_pledata: "PLE Results",
     mkis_pre_ple_marks: "Pre-PLE Results",
+    mkis_assessment_marks: "Continuous Assessment",
     mkis_reports: "Reports"
 };
 // ─── SHARED KEY SAVE QUEUE (module-level) ───────────────────────────────────
@@ -644,6 +646,9 @@ const MERGE_STRATEGIES = {
     // mkis_mock_marks above: deep-merge so one device's save can never wipe
     // out a concurrent edit to a different student/set/year branch.
     mkis_pre_ple_marks: (remote, local)=>deepMergeObjects(remote, local),
+    // Continuous Assessment tests (P4-P7), same nested shape and reasoning as
+    // mkis_mock_marks: deep-merge so concurrent edits never wipe each other.
+    mkis_assessment_marks: (remote, local)=>deepMergeObjects(remote, local),
     // Report narrative drafts, keyed by report identity -- deep-merged so one
     // device saving its Class Teacher Report draft can never wipe out a
     // concurrent edit to a different report (or a not-yet-seen remote edit
@@ -744,7 +749,8 @@ const SPECIAL_SCALE_EXAM_TYPES = [
     "End of Term",
     "Monthly Exams",
     "Municipal Mock",
-    "TAEB Mock"
+    "TAEB Mock",
+    "Continuous Assessment"
 ];
 // Reads the list of named Scales configured for a class in a given academic
 // Year. specialBands[cls] is keyed by Year, e.g.
@@ -1336,7 +1342,7 @@ function htmlTable(headerRow, dataRows) {
 // single-row header with no shading. POS is rendered with its ordinal suffix
 // (1st, 2nd, 3rd...) since the plain number alone was silently dropping it.
 function resultSheetHtmlTable(param) {
-    let { subjects, isLower, sortedRows } = param;
+    let { subjects, isLower, sortedRows, caMode } = param;
     const thTop = "border:1px solid #999;padding:5px;font-size:9pt;";
     // rowspan="2" is only valid when a second header <tr> actually exists to
     // absorb it (upper classes: the CA/EX/AV/AG sub-row below). Lower classes
@@ -1358,7 +1364,7 @@ function resultSheetHtmlTable(param) {
     if (!isLower) {
         head += '<tr style="background:#2563eb;color:white;font-size:8pt;">';
         subjects.forEach(()=>{
-            head += '<th style="'.concat(thTop, 'background:#dcfce7;color:#14532d;">EX</th>');
+            head += '<th style="'.concat(thTop, 'background:#dcfce7;color:#14532d;">'.concat(caMode ? "CA" : "EX", "</th>"));
             head += '<th style="'.concat(thTop, 'background:#fed7aa;color:#7c2d12;">AG</th>');
         });
         head += "</tr>";
@@ -2139,13 +2145,13 @@ function titleBlockHtml(school, subtitle) {
     return html;
 }
 // ── End-of-term Result Sheet: row builders shared by Excel + Word ──
-function resultSheetHeaderRow(isLower, subjects) {
+function resultSheetHeaderRow(isLower, subjects, caMode) {
     const head = [
         "S/N",
         "NAME OF PUPIL"
     ];
     if (isLower) subjects.forEach((s)=>head.push(s));
-    else subjects.forEach((s)=>head.push("".concat(s, " EXAM"), "".concat(s, " AGG")));
+    else subjects.forEach((s)=>head.push("".concat(s, caMode ? " CA" : " EXAM"), "".concat(s, " AGG")));
     head.push("TOT MK");
     if (!isLower) head.push("TOT AGG", "DIV");
     head.push("POS");
@@ -2175,9 +2181,9 @@ function resultSheetDataRow(r, i, isLower) {
     return row;
 }
 function exportResultSheetExcel(param) {
-    let { school, cls, term, year, isLower, subjects, sortedRows, best, worst, avg, subjectAnalysis, gradeKeys, divCounts, classCount } = param;
+    let { school, cls, term, year, isLower, caMode, subjects, sortedRows, best, worst, avg, subjectAnalysis, gradeKeys, divCounts, classCount } = param;
     var _sortedRows_;
-    const headerRow = resultSheetHeaderRow(isLower, subjects);
+    const headerRow = resultSheetHeaderRow(isLower, subjects, caMode);
     const numCols = headerRow.length;
     const dataRows = sortedRows.map((r, i)=>resultSheetDataRow(r, i, isLower));
     const aoa = [
@@ -2188,7 +2194,7 @@ function exportResultSheetExcel(param) {
             school.poBox || ""
         ],
         [
-            "END OF ".concat(term.toUpperCase(), " ").concat(year, " - ").concat(cls, " RESULT SHEET")
+            (caMode ? "CONTINUOUS ASSESSMENT - " : "END OF ").concat(term.toUpperCase(), " ").concat(year, " - ").concat(cls, " RESULT SHEET")
         ],
         [],
         headerRow,
@@ -2288,13 +2294,14 @@ function exportResultSheetExcel(param) {
     XLSX.writeFile(wb, "".concat(safeFileName(cls), "_").concat(safeFileName(term), "_").concat(year, "_Result_Sheet.xlsx"));
 }
 function exportResultSheetWord(param) {
-    let { school, cls, term, year, isLower, subjects, sortedRows, best, worst, avg, subjectAnalysis, gradeKeys, divCounts, classCount } = param;
+    let { school, cls, term, year, isLower, caMode, subjects, sortedRows, best, worst, avg, subjectAnalysis, gradeKeys, divCounts, classCount } = param;
     var _sortedRows_;
-    let body = titleBlockHtml(school, "END OF ".concat(term.toUpperCase(), " ").concat(year, " - ").concat(cls, " RESULT SHEET"));
+    let body = titleBlockHtml(school, (caMode ? "CONTINUOUS ASSESSMENT - " : "END OF ").concat(term.toUpperCase(), " ").concat(year, " - ").concat(cls, " RESULT SHEET"));
     body += resultSheetHtmlTable({
         subjects,
         isLower,
-        sortedRows
+        sortedRows,
+        caMode
     });
     body += "<p><b>Highest:</b> ".concat(escapeHtml(best || "-"), " &nbsp; <b>Lowest:</b> ").concat(escapeHtml(worst || "-"), " &nbsp; <b>Class Average:</b> ").concat(escapeHtml(avg || "-"), " &nbsp; <b>Best Pupil:</b> ").concat(escapeHtml(((_sortedRows_ = sortedRows.find((r)=>r.pos !== "-")) === null || _sortedRows_ === void 0 ? void 0 : _sortedRows_.s.name) || "-"), "</p>");
     if (!isLower && (subjectAnalysis === null || subjectAnalysis === void 0 ? void 0 : subjectAnalysis.length)) {
@@ -3799,6 +3806,7 @@ const PAGES = [
     "DASHBOARD",
     "MARK ENTRY",
     "MONTHLY EXAMS",
+    "ASSESSMENT",
     "GROUP WORK",
     "EXAM TIMETABLE",
     "MONTHLY CARDS",
@@ -5545,6 +5553,7 @@ export default function App() {
                                         "DASHBOARD": "📊",
                                         "MARK ENTRY": "📝",
                                         "MONTHLY EXAMS": "📅",
+                                        "ASSESSMENT": "🧪",
                                         "GROUP WORK": "👨‍👩‍👧‍👦",
                                         "EXAM TIMETABLE": "🗓️",
                                         "MONTHLY CARDS": "🗂️",
@@ -5908,6 +5917,15 @@ export default function App() {
                                     }),
                                     page === "MONTHLY EXAMS" && /*#__PURE__*/ _jsx(MonthlyExams, {
                                         ...props
+                                    }),
+                                    page === "ASSESSMENT" && /*#__PURE__*/ _jsx(Assessment, {
+                                        students: students,
+                                        school: school,
+                                        bands: bands,
+                                        specialBands: specialBands,
+                                        divisions: divisions,
+                                        markEditing: markEditing,
+                                        role: role
                                     }),
                                     page === "GROUP WORK" && /*#__PURE__*/ _jsx(GroupWork, {
                                         ...props
@@ -12848,7 +12866,14 @@ function MonthlyExams(param) {
     // marksheet pasted straight from Excel/Sheets (tab-separated) into a
     // textarea. Both paths flow through the same parser below. ──────────────
     const [showBulkMonthly, setShowBulkMonthly] = useState(false);
-    const [bulkMonth, setBulkMonth] = useState(months[0]);
+    // The sheet that is "spread" (shown). First month of the term by default;
+    // the rest stay in the Monthly Sheet dropdown. The Bulk/CSV loader always
+    // targets whichever sheet is selected.
+    const [selectedMonth, setSelectedMonth] = useState(months[0]);
+    const bulkMonth = selectedMonth;
+    const setBulkMonth = setSelectedMonth;
+    const activeMonth = months.includes(selectedMonth) ? selectedMonth : months[0];
+    const quickCsvRef = useRef(null);
     const [bulkMonthlyText, setBulkMonthlyText] = useState("");
     const [bulkMonthlyPreview, setBulkMonthlyPreview] = useState(null);
     const [bulkMonthlyError, setBulkMonthlyError] = useState("");
@@ -12920,63 +12945,230 @@ function MonthlyExams(param) {
         bands,
         divisions
     ]);
-    // Parses pasted or uploaded marksheet text into preview rows. The header
-    // row needs a NAME/PUPIL/STUDENT column plus one column per subject, and
-    // works with either comma-separated (CSV) or tab-separated (pasted from
-    // Excel/Sheets) data -- whichever delimiter the header row actually uses.
-    const parseMonthlyMarksheet = useCallback((text)=>{
-        const lines = text.split(/\r?\n/).filter((l)=>l.trim().length > 0);
+    // Parses pasted or uploaded marksheet text into preview rows ("smart" CSV
+    // import). It copes with: a UTF-8 BOM, comma / semicolon / tab delimiters,
+    // quoted cells, title rows above the header, headers such as "ENG", "ENGLISH",
+    // "ENG MK" or "MATHS" (AGG columns are ignored), a MONTH column or a month in
+    // the file name, and pupil names written in a different order or with a
+    // middle name missing. Anything it cannot match is left for the teacher to
+    // pick in the preview.
+    const parseMonthlyMarksheet = useCallback((text, fileName)=>{
+        const normKey = (h)=>String(h || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+        const NAME_KEYS = [
+            "NAME", "NAMES", "NAMEOFPUPIL", "PUPIL", "PUPILNAME", "STUDENT", "STUDENTNAME", "LEARNER", "LEARNERNAME"
+        ];
+        const SUBJECT_ALIASES = {
+            ENG: ["ENGLISH", "ENGL"],
+            MATH: ["MATHS", "MATHEMATICS", "MTC", "MAT"],
+            MATHS: ["MATH", "MATHEMATICS", "MTC", "MAT"],
+            SST: ["SOCIALSTUDIES", "SOCSTUDIES", "SOC"],
+            SCI: ["SCIENCE"],
+            LITI: ["LIT1", "LITERACYI", "LITERACY1"],
+            LITII: ["LIT2", "LITERACYII", "LITERACY2"],
+            RE: ["RELIGIOUSEDUCATION", "RELIGION", "REL"]
+        };
+        const MONTH_NAMES = {
+            JAN: "JAN", JANUARY: "JAN", FEB: "FEB", FEBRUARY: "FEB", MAR: "MAR", MARCH: "MAR", APR: "APR", APRIL: "APR",
+            MAY: "MAY", JUN: "JUN", JUNE: "JUN", JUL: "JUL", JULY: "JUL", AUG: "AUG", AUGUST: "AUG",
+            SEP: "SEP", SEPT: "SEP", SEPTEMBER: "SEP", OCT: "OCT", OCTOBER: "OCT", NOV: "NOV", NOVEMBER: "NOV", DEC: "DEC", DECEMBER: "DEC"
+        };
+        const clean = String(text || "").replace(/^﻿/, "");
+        const lines = clean.split(/\r?\n/).filter((l)=>l.trim().length > 0);
         if (lines.length < 2) throw new Error("Data must have a header row and at least one row of marks.");
-        const delim = lines[0].includes("	") ? "	" : ",";
-        const headers = lines[0].split(delim).map((h)=>h.trim().toUpperCase());
-        const nameIdx = headers.findIndex((h)=>h === "NAME" || h === "PUPIL" || h === "STUDENT");
-        if (nameIdx === -1) throw new Error("The header row must include a column named NAME, PUPIL, or STUDENT.");
-        const subjectCols = {};
-        subjects.forEach((sub)=>{
-            const idx = headers.findIndex((h)=>h === sub || h === sub.replace(/ /g, "_") || h === sub.replace(/ /g, ""));
-            if (idx !== -1) subjectCols[sub] = idx;
-        });
-        const rows = lines.slice(1).map((line, i)=>{
-            const cells = line.split(delim).map((c)=>c.trim());
-            const rawName = toUpper(cells[nameIdx] || "");
-            if (!rawName) return null;
-            const matched = classStudents.find((s)=>s.name === rawName || s.name.toLowerCase().includes(rawName.toLowerCase().split(" ")[0]) || rawName.toLowerCase().includes(s.name.toLowerCase().split(" ")[0]));
+        const countOutsideQuotes = (line, ch)=>{
+            let inQ = false, n = 0;
+            for (const c of line){
+                if (c === '"') inQ = !inQ;
+                else if (c === ch && !inQ) n++;
+            }
+            return n;
+        };
+        const splitLine = (line, delim)=>{
+            const out = [];
+            let cur = "", inQ = false;
+            for(let i = 0; i < line.length; i++){
+                const c = line[i];
+                if (c === '"') {
+                    if (inQ && line[i + 1] === '"') {
+                        cur += '"';
+                        i++;
+                    } else inQ = !inQ;
+                } else if (c === delim && !inQ) {
+                    out.push(cur.trim());
+                    cur = "";
+                } else cur += c;
+            }
+            out.push(cur.trim());
+            return out;
+        };
+        const pickDelim = (line)=>{
+            const opts = [
+                "\t", ",", ";"
+            ].map((d)=>[
+                    d,
+                    countOutsideQuotes(line, d)
+                ]).sort((x, y)=>y[1] - x[1]);
+            return opts[0][1] > 0 ? opts[0][0] : ",";
+        };
+        // subject -> column finder for a given header row
+        const findSubjectCols = (headers)=>{
+            const cols = {};
+            subjects.forEach((sub)=>{
+                const key = normKey(sub);
+                const wanted = [
+                    key, ...SUBJECT_ALIASES[key] || []
+                ];
+                const idx = headers.findIndex((h)=>{
+                    let k = normKey(h);
+                    if (/AGG$|AG$|GRADE$/.test(k)) return false; // grade columns are recomputed, never imported
+                    k = k.replace(/(MARKS|MARK|MK)$/, "");
+                    return wanted.includes(k);
+                });
+                if (idx !== -1) cols[sub] = idx;
+            });
+            return cols;
+        };
+        // find the header row (may sit below a title block)
+        let headerLine = -1, delim = ",", headers = [], nameIdx = -1, subjectCols = {};
+        for(let i = 0; i < Math.min(lines.length - 1, 12); i++){
+            const d = pickDelim(lines[i]);
+            const hs = splitLine(lines[i], d);
+            const ni = hs.findIndex((h)=>NAME_KEYS.includes(normKey(h)));
+            if (ni === -1) continue;
+            const sc = findSubjectCols(hs);
+            if (Object.keys(sc).length === 0) continue;
+            headerLine = i;
+            delim = d;
+            headers = hs;
+            nameIdx = ni;
+            subjectCols = sc;
+            break;
+        }
+        if (headerLine === -1) {
+            const hs0 = splitLine(lines[0], pickDelim(lines[0]));
+            if (!hs0.some((h)=>NAME_KEYS.includes(normKey(h)))) throw new Error("The header row must include a column named NAME, PUPIL, or STUDENT.");
+            throw new Error("None of the subject columns were found. Expected headers like: " + subjects.join(", ") + ".");
+        }
+        const monthIdx = headers.findIndex((h)=>normKey(h) === "MONTH");
+        // name matching: exact -> same words in any order -> unique word-subset
+        const nameTokens = (s)=>toUpper(s).replace(/[^A-Z\s']/g, " ").replace(/\s+/g, " ").trim().split(" ").filter(Boolean);
+        const pupilTokens = classStudents.map((s)=>({
+                s,
+                tokens: nameTokens(s.name)
+            }));
+        const matchPupil = (rawName)=>{
+            const t = nameTokens(rawName);
+            if (!t.length) return null;
+            const joined = t.join(" ");
+            const exact = pupilTokens.filter((p)=>p.tokens.join(" ") === joined);
+            if (exact.length === 1) return exact[0].s;
+            const sorted = [
+                ...t
+            ].sort().join(" ");
+            const sameWords = pupilTokens.filter((p)=>[
+                    ...p.tokens
+                ].sort().join(" ") === sorted);
+            if (sameWords.length === 1) return sameWords[0].s;
+            if (t.length >= 2) {
+                const subset = pupilTokens.filter((p)=>t.every((w)=>p.tokens.includes(w)) || p.tokens.length >= 2 && p.tokens.every((w)=>t.includes(w)));
+                if (subset.length === 1) return subset[0].s;
+            }
+            return null;
+        };
+        const parseMark = (raw)=>{
+            const v = String(raw === undefined ? "" : raw).trim();
+            if (v === "" || /^(X|ABS|ABSENT|A|-|N\/A|NA)$/i.test(v)) return null;
+            const n = Number(v.replace(",", "."));
+            return isNaN(n) ? null : Math.round(n);
+        };
+        const monthTally = {};
+        const rawRows = [];
+        lines.slice(headerLine + 1).forEach((line, i)=>{
+            const cells = splitLine(line, delim);
+            const rawName = toUpper(cells[nameIdx] || "").replace(/\s+/g, " ").trim();
+            if (!rawName || /^(TOTAL|AVERAGE|MEAN|HIGHEST|LOWEST)/.test(rawName)) return;
             const marks = {};
             subjects.forEach((sub)=>{
                 const idx = subjectCols[sub];
-                if (idx === undefined) return;
-                const v = cells[idx];
-                marks[sub] = v !== undefined && v !== "" && !isNaN(Number(v)) ? Number(v) : null;
+                if (idx !== undefined) marks[sub] = parseMark(cells[idx]);
             });
-            return {
-                id: "bmm_".concat(i),
+            const rowMonth = monthIdx !== -1 ? MONTH_NAMES[normKey(cells[monthIdx])] || MONTH_NAMES[normKey(cells[monthIdx]).slice(0, 3)] || null : null;
+            if (rowMonth) monthTally[rowMonth] = (monthTally[rowMonth] || 0) + 1;
+            rawRows.push({
+                i,
                 rawName,
-                studentId: (matched === null || matched === void 0 ? void 0 : matched.id) || null,
-                include: true,
-                marks
+                marks,
+                rowMonth
+            });
+        });
+        if (rawRows.length === 0) throw new Error("No data rows found.");
+        // which month is this file for? MONTH column wins, then the file name
+        const allMonths = Object.values(TERM_MONTHS).flat();
+        let detected = null;
+        const tallied = Object.entries(monthTally).sort((a, b)=>b[1] - a[1]);
+        if (tallied.length) detected = tallied[0][0];
+        else if (fileName) {
+            const parts = String(fileName).toUpperCase().split(/[^A-Z]+/).filter(Boolean);
+            const hit = parts.map((p)=>MONTH_NAMES[p]).find(Boolean);
+            if (hit) detected = hit;
+        }
+        let note = "";
+        let detectedMonth = null;
+        if (detected) {
+            if (months.includes(detected)) {
+                detectedMonth = detected;
+                note = "📅 Month detected from the file: " + detected + " - that sheet has been selected.";
+            } else if (allMonths.includes(detected)) {
+                const ownerTerm = Object.keys(TERM_MONTHS).find((t)=>TERM_MONTHS[t].includes(detected));
+                note = "⚠️ The file looks like it is for " + detected + " (" + ownerTerm + "), but " + term + " is selected. Change the Term above if that is wrong - otherwise choose the month to load into.";
+            }
+        }
+        const rows = rawRows.map((r)=>{
+            const matched = matchPupil(r.rawName);
+            const otherMonth = !!(detectedMonth && r.rowMonth && r.rowMonth !== detectedMonth);
+            return {
+                id: "bmm_" + r.i,
+                rawName: r.rawName,
+                studentId: matched ? matched.id : null,
+                include: !otherMonth,
+                marks: r.marks
             };
-        }).filter(Boolean);
-        if (rows.length === 0) throw new Error("No data rows found.");
+        });
+        const skippedOther = rows.filter((r)=>!r.include).length;
+        if (skippedOther) note += (note ? " " : "") + skippedOther + " row(s) belong to a different month and were unticked.";
+        const unmatched = rows.filter((r)=>r.include && !r.studentId).length;
+        if (unmatched) note += (note ? " " : "") + unmatched + " name(s) could not be matched automatically - pick the pupil in the list.";
         return {
             rows,
             subjectCols,
-            headers
+            headers,
+            note,
+            detectedMonth
         };
     }, [
         subjects,
-        classStudents
+        classStudents,
+        months,
+        term
     ]);
+    // Works for the in-panel file picker AND the toolbar "Upload CSV" button:
+    // reads the file, detects the month, selects that sheet and opens the preview.
     const handleBulkMonthlyFile = async (e)=>{
-        const file = e.target.files[0];
+        const input = e.target;
+        const file = input.files && input.files[0];
         if (!file) return;
         setBulkMonthlyError("");
+        setShowBulkMonthly(true);
         try {
             const text = await file.text();
-            setBulkMonthlyPreview(parseMonthlyMarksheet(text));
+            const preview = parseMonthlyMarksheet(text, file.name);
+            if (preview.detectedMonth && months.includes(preview.detectedMonth)) setSelectedMonth(preview.detectedMonth);
+            setBulkMonthlyPreview(preview);
         } catch (err) {
+            setBulkMonthlyPreview(null);
             setBulkMonthlyError(err.message || "Could not read that file.");
         }
-        if (bulkMonthlyFileRef.current) bulkMonthlyFileRef.current.value = "";
+        input.value = "";
     };
     const handleLoadPastedMonthly = ()=>{
         setBulkMonthlyError("");
@@ -13092,6 +13284,12 @@ function MonthlyExams(param) {
                                 onChange: setTerm,
                                 opts: TERMS
                             }),
+                            /*#__PURE__*/ _jsx(Sel, {
+                                label: "Monthly Sheet",
+                                value: activeMonth,
+                                onChange: setSelectedMonth,
+                                opts: months
+                            }),
                             /*#__PURE__*/ _jsxs("div", {
                                 children: [
                                     /*#__PURE__*/ _jsx("label", {
@@ -13153,6 +13351,21 @@ function MonthlyExams(param) {
                                     " students"
                                 ]
                             }),
+                            /*#__PURE__*/ _jsx("input", {
+                                ref: quickCsvRef,
+                                type: "file",
+                                accept: ".csv,.txt",
+                                onChange: handleBulkMonthlyFile,
+                                style: {
+                                    display: "none"
+                                }
+                            }),
+                            /*#__PURE__*/ _jsx("button", {
+                                onClick: ()=>quickCsvRef.current && quickCsvRef.current.click(),
+                                style: btnSuccess,
+                                title: "Upload a CSV of marks for the selected monthly sheet - month, subjects and pupils are detected automatically",
+                                children: "⬆️ Upload CSV"
+                            }),
                             /*#__PURE__*/ _jsx("button", {
                                 onClick: ()=>setShowBulkMonthly((v)=>!v),
                                 style: btnWarning,
@@ -13203,7 +13416,7 @@ function MonthlyExams(param) {
                                     }
                                 },
                                 style: pdfBusy ? btnPdfBusy : btnPdf,
-                                children: pdfBusy ? "⏳ Generating..." : "📕 Download PDF"
+                                children: pdfBusy ? "⏳ Generating..." : "📕 PDF (this month)"
                             }),
                             /*#__PURE__*/ _jsx("button", {
                                 onClick: ()=>window.print(),
@@ -13504,6 +13717,13 @@ function MonthlyExams(param) {
                                                 missing.join(", "),
                                                 "."
                                             ]
+                                        }),
+                                        bulkMonthlyPreview.note && /*#__PURE__*/ _jsx("div", {
+                                            style: {
+                                                marginTop: 4,
+                                                color: "#92400e"
+                                            },
+                                            children: bulkMonthlyPreview.note
                                         })
                                     ]
                                 }),
@@ -13674,7 +13894,9 @@ function MonthlyExams(param) {
             }),
             /*#__PURE__*/ _jsx("div", {
                 ref: monthBlocksRef,
-                children: months.map((month)=>/*#__PURE__*/ _jsx(MonthBlock, {
+                children: [
+                    activeMonth
+                ].map((month)=>/*#__PURE__*/ _jsx(MonthBlock, {
                         month: month,
                         term: term,
                         year: year,
@@ -14464,6 +14686,691 @@ function carryGroup(g, validIds) {
         members: (g.members || []).filter((m)=>validIds.has(m))
     };
 }
+// ─── CONTINUOUS ASSESSMENT (P4–P7) ───────────────────────────────────────────
+// Four class tests per subject (1–4). AV = average of the tests actually
+// entered (rounded to a whole mark), AGG = grade of that average on the
+// class's scale. Marks live in their own shared key (mkis_assessment_marks):
+//   { [studentId]: { "Term I__2026": { ENG: { t1, t2, t3, t4 }, MATH: {...} } } }
+// Subject keys follow UPPER_SUBJECTS (so MATH is stored as MATH but shown as
+// MATHS), which lets Result Sheets read the same data back.
+const ASSESSMENT_CLASSES = [
+    "P4",
+    "P5",
+    "P6",
+    "P7"
+];
+const ASSESSMENT_TESTS = [
+    1,
+    2,
+    3,
+    4
+];
+const ASSESSMENT_SOURCES = [
+    "MARK ENTRY",
+    "CONTINUOUS ASSESSMENT"
+];
+const assessmentLabel = (sub)=>sub === "MATH" ? "MATHS" : sub;
+function assessmentAverage(entry) {
+    if (!entry) return undefined;
+    const vals = ASSESSMENT_TESTS.map((n)=>entry["t" + n]).filter((v)=>typeof v === "number" && !isNaN(v));
+    if (!vals.length) return undefined;
+    return Math.round(vals.reduce((a, b)=>a + b, 0) / vals.length);
+}
+// Reshapes one pupil's assessment entry into the { SUB: { ca, exam } } shape
+// Result Sheets already understands, with the AVERAGE standing in as CA.
+function assessmentAsTermShape(entry, subjects) {
+    const out = {};
+    subjects.forEach((sub)=>{
+        const av = assessmentAverage(entry === null || entry === void 0 ? void 0 : entry[sub]);
+        if (av !== undefined) out[sub] = {
+            ca: av,
+            exam: av
+        };
+    });
+    return out;
+}
+function computeAssessmentRows(param) {
+    let { classStudents, assessmentMarks, tk, subjects, bands, divisions } = param;
+    const rows = classStudents.map((s)=>{
+        const m = assessmentMarks && assessmentMarks[s.id] && assessmentMarks[s.id][tk] || {};
+        const perSub = subjects.map((sub)=>{
+            const entry = m[sub] || {};
+            const av = assessmentAverage(entry);
+            const isX = av === undefined;
+            return {
+                sub,
+                tests: ASSESSMENT_TESTS.map((n)=>entry["t" + n]),
+                av,
+                agg: isX ? undefined : aggOf(av, bands),
+                isX
+            };
+        });
+        const hasX = perSub.some((p)=>p.isX);
+        const hasF9 = perSub.some((p)=>p.agg === 9);
+        const totMk = perSub.reduce((a, p)=>a + (p.av !== undefined ? p.av : 0), 0);
+        const totAgg = hasX ? "X" : perSub.reduce((a, p)=>a + (p.agg || 0), 0);
+        const div = hasX ? "X" : divisionOf(totAgg, subjects.length, divisions, hasF9);
+        return {
+            s,
+            perSub,
+            totMk,
+            totAgg,
+            div,
+            hasX,
+            noMarks: perSub.every((p)=>p.isX)
+        };
+    });
+    const positions = rankWithTies(rows.map((r)=>r.totMk > 0 ? r.totMk : null), rows.map((r)=>typeof r.totAgg === "number" ? r.totAgg : null));
+    return rows.map((r, i)=>({
+            ...r,
+            pos: positions[i]
+        }));
+}
+function assessmentExportRows(rows) {
+    return rows.map((r, i)=>{
+        const row = [
+            padSN(i + 1),
+            r.s.name
+        ];
+        r.perSub.forEach((p)=>{
+            p.tests.forEach((t)=>row.push(typeof t === "number" ? t : ""));
+            row.push(p.isX ? "X" : p.av);
+            row.push(p.isX ? "X" : p.agg);
+        });
+        row.push(r.noMarks ? "X" : padTotMk(r.totMk) || "-");
+        row.push(r.hasX ? "X" : r.totAgg || "-");
+        row.push(r.hasX ? "X" : r.totMk ? r.div : "-");
+        row.push(r.noMarks ? "X" : r.pos !== "-" ? r.pos : "-");
+        return row;
+    });
+}
+function exportAssessmentExcel(param) {
+    let { school, cls, term, year, subjects, rows } = param;
+    const top = [
+        "S/N",
+        "NAME OF PUPIL"
+    ];
+    const sub2 = [
+        "",
+        ""
+    ];
+    subjects.forEach((sub)=>{
+        top.push(assessmentLabel(sub), "", "", "", "", "");
+        sub2.push("1", "2", "3", "4", "AV", "AGG");
+    });
+    top.push("TOT MK", "TOT AGG", "DIV", "POS");
+    sub2.push("", "", "", "");
+    const aoa = [
+        [
+            school.name
+        ],
+        [
+            school.poBox || ""
+        ],
+        [
+            "".concat(term.toUpperCase(), " ").concat(year, " - ").concat(cls, " CONTINUOUS ASSESSMENT")
+        ],
+        [],
+        top,
+        sub2,
+        ...assessmentExportRows(rows)
+    ];
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    const lastCol = top.length - 1;
+    const merges = [
+        0,
+        1,
+        2
+    ].map((r)=>({
+            s: {
+                r,
+                c: 0
+            },
+            e: {
+                r,
+                c: lastCol
+            }
+        }));
+    subjects.forEach((_, i)=>merges.push({
+            s: {
+                r: 4,
+                c: 2 + i * 6
+            },
+            e: {
+                r: 4,
+                c: 7 + i * 6
+            }
+        }));
+    [
+        0,
+        1
+    ].concat([
+        0,
+        1,
+        2,
+        3
+    ].map((k)=>2 + subjects.length * 6 + k)).forEach((c)=>merges.push({
+            s: {
+                r: 4,
+                c
+            },
+            e: {
+                r: 5,
+                c
+            }
+        }));
+    ws["!merges"] = merges;
+    ws["!cols"] = top.map((_, i)=>({
+            wch: i === 1 ? 30 : 6
+        }));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Continuous Assessment");
+    XLSX.writeFile(wb, "".concat(safeFileName(cls), "_").concat(safeFileName(term), "_").concat(year, "_Continuous_Assessment.xlsx"));
+}
+function exportAssessmentWord(param) {
+    let { school, cls, term, year, subjects, rows } = param;
+    const head = [
+        "S/N",
+        "NAME OF PUPIL"
+    ];
+    subjects.forEach((sub)=>[
+            "1",
+            "2",
+            "3",
+            "4",
+            "AV",
+            "AGG"
+        ].forEach((c)=>head.push(assessmentLabel(sub) + " " + c)));
+    head.push("TOT MK", "TOT AGG", "DIV", "POS");
+    const body = titleBlockHtml(school, "".concat(term.toUpperCase(), " ").concat(year, " - ").concat(cls, " CONTINUOUS ASSESSMENT")) + htmlTable(head, assessmentExportRows(rows));
+    downloadWordHtml("".concat(cls, " ").concat(term, " ").concat(year, " Continuous Assessment"), body, "".concat(safeFileName(cls), "_").concat(safeFileName(term), "_").concat(year, "_Continuous_Assessment.doc"));
+}
+function Assessment(param) {
+    let { students, school, bands: defaultBands, specialBands, divisions, markEditing } = param;
+    const h = React.createElement;
+    const [cls, setCls] = useState("P4");
+    const [term, setTerm] = useState("Term I");
+    const [year, setYear] = useState(school.year || String(new Date().getFullYear()));
+    const [search, setSearch] = useState("");
+    const [sortByPos, setSortByPos] = useState(false);
+    const [pdfBusy, setPdfBusy] = useState(false);
+    const [assessmentMarks, setAssessmentMarks] = useState({});
+    const [loaded, setLoaded] = useState(false);
+    const sheetRef = useRef(null);
+    const editingUntilRef = useRef(0);
+    const lastSeenRef = useRef("");
+    const latestRef = useRef(assessmentMarks);
+    latestRef.current = assessmentMarks;
+    const auditDetailRef = useRef("");
+    // Debounced, serialized save of every change (same pattern as Mock Info).
+    useEffect(()=>{
+        if (!loaded) return;
+        const str = JSON.stringify(assessmentMarks);
+        if (str === lastSeenRef.current) return;
+        const detail = auditDetailRef.current || "Continuous Assessment updated";
+        auditDetailRef.current = "";
+        const t = setTimeout(()=>{
+            queueSharedSave("mkis_assessment_marks", latestRef, setAssessmentMarks, lastSeenRef, detail);
+        }, 700);
+        return ()=>clearTimeout(t);
+    }, [
+        assessmentMarks,
+        loaded
+    ]);
+    useEffect(()=>{
+        let alive = true;
+        loadShared("mkis_assessment_marks", {}).then((m)=>{
+            if (!alive) return;
+            const val = m || {};
+            lastSeenRef.current = JSON.stringify(val);
+            setAssessmentMarks(val);
+            setLoaded(true);
+        });
+        return ()=>{
+            alive = false;
+        };
+    }, []);
+    // Pick up marks another device saved while this page is open (never while typing).
+    useEffect(()=>{
+        let stopped = false;
+        const id = setInterval(async ()=>{
+            if (stopped) return;
+            if (Date.now() < editingUntilRef.current) return;
+            if (isKeySaveInFlight("mkis_assessment_marks")) return;
+            const remote = await loadShared("mkis_assessment_marks", undefined);
+            if (stopped || remote === undefined) return;
+            const remoteStr = JSON.stringify(remote);
+            if (remoteStr !== lastSeenRef.current) {
+                lastSeenRef.current = remoteStr;
+                setAssessmentMarks(remote);
+            }
+        }, 4000);
+        return ()=>{
+            stopped = true;
+            clearInterval(id);
+        };
+    }, []);
+    const subjects = UPPER_SUBJECTS;
+    const tk = "".concat(term, "__").concat(year);
+    const bands = useMemo(()=>bandsForClass(cls, defaultBands, specialBands, "Continuous Assessment", year), [
+        cls,
+        defaultBands,
+        specialBands,
+        year
+    ]);
+    const classStudents = useMemo(()=>students.filter((s)=>s.className === cls).sort((a, b)=>a.name.localeCompare(b.name)), [
+        students,
+        cls
+    ]);
+    const rows = useMemo(()=>computeAssessmentRows({
+            classStudents,
+            assessmentMarks,
+            tk,
+            subjects,
+            bands,
+            divisions
+        }), [
+        classStudents,
+        assessmentMarks,
+        tk,
+        subjects,
+        bands,
+        divisions
+    ]);
+    const shownRows = useMemo(()=>{
+        let list = rows;
+        if (search.trim()) list = list.filter((r)=>r.s.name.toLowerCase().includes(search.trim().toLowerCase()));
+        if (sortByPos) list = [
+            ...list
+        ].sort((a, b)=>{
+            if (a.pos === "-" && b.pos === "-") return 0;
+            if (a.pos === "-") return 1;
+            if (b.pos === "-") return -1;
+            return a.pos - b.pos;
+        });
+        return list;
+    }, [
+        rows,
+        search,
+        sortByPos
+    ]);
+    const totals = rows.map((r)=>r.totMk).filter((v)=>v > 0);
+    const best = totals.length ? Math.max(...totals) : 0;
+    const worst = totals.length ? Math.min(...totals) : 0;
+    const avg = totals.length ? Math.round(totals.reduce((a, b)=>a + b, 0) / totals.length) : 0;
+    const updateTest = (sid, sub, n, val)=>{
+        markEditing && markEditing();
+        editingUntilRef.current = Date.now() + 2500;
+        const s = students.find((x)=>x.id === sid);
+        auditDetailRef.current = "Continuous Assessment — ".concat((s === null || s === void 0 ? void 0 : s.className) || "?", " ").concat(term, " ").concat(year, " — ").concat((s === null || s === void 0 ? void 0 : s.name) || sid, " ").concat(assessmentLabel(sub), " test ").concat(n);
+        setAssessmentMarks((prev)=>{
+            const pS = prev[sid] || {};
+            const pT = pS[tk] || {};
+            const pSub = pT[sub] || {};
+            return {
+                ...prev,
+                [sid]: {
+                    ...pS,
+                    [tk]: {
+                        ...pT,
+                        [sub]: {
+                            ...pSub,
+                            ["t" + n]: val === undefined ? null : val
+                        }
+                    }
+                }
+            };
+        });
+    };
+    const hdr = {
+        ...th,
+        padding: "6px 4px"
+    };
+    const cellInput = {
+        ...markInput,
+        width: 38,
+        textAlign: "center"
+    };
+    const subjColors = [
+        "#dbeafe",
+        "#dcfce7",
+        "#fef9c3",
+        "#fce7f3"
+    ];
+    const divCounts = {
+        I: 0,
+        II: 0,
+        III: 0,
+        IV: 0,
+        U: 0,
+        X: 0
+    };
+    rows.forEach((r)=>{
+        if (r.noMarks) return;
+        if (r.div === "X") divCounts.X++;
+        else if (divCounts[r.div] !== undefined) divCounts[r.div]++;
+        else divCounts.U++;
+    });
+    const btn = (label, onClick, style, extra)=>h("button", {
+            onClick,
+            style,
+            ...extra || {}
+        }, label);
+    return h("div", null, h("div", {
+        className: "no-print",
+        style: {
+            display: "flex",
+            gap: 10,
+            marginBottom: 16,
+            flexWrap: "wrap",
+            alignItems: "flex-end",
+            justifyContent: "space-between"
+        }
+    }, h("div", {
+        style: {
+            display: "flex",
+            gap: 10,
+            flexWrap: "wrap",
+            alignItems: "flex-end"
+        }
+    }, h(Sel, {
+        label: "Class",
+        value: cls,
+        onChange: setCls,
+        opts: ASSESSMENT_CLASSES
+    }), h(Sel, {
+        label: "Term",
+        value: term,
+        onChange: setTerm,
+        opts: TERMS
+    }), h("div", null, h("label", {
+        style: lbl
+    }, "Year"), h("input", {
+        type: "number",
+        value: year,
+        onChange: (e)=>setYear(e.target.value),
+        style: {
+            ...inp,
+            width: 90
+        }
+    })), h("div", null, h("label", {
+        style: lbl
+    }, "Search Pupil"), h("input", {
+        value: search,
+        onChange: (e)=>setSearch(e.target.value),
+        style: {
+            ...inp,
+            width: 160
+        },
+        placeholder: "Type a name..."
+    })), h("label", {
+        style: {
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            fontSize: 12,
+            fontWeight: 600,
+            color: "#374151",
+            paddingBottom: 9,
+            cursor: "pointer"
+        }
+    }, h("input", {
+        type: "checkbox",
+        checked: sortByPos,
+        onChange: (e)=>setSortByPos(e.target.checked)
+    }), "Sort by position")), h("div", {
+        style: {
+            display: "flex",
+            gap: 8,
+            flexWrap: "wrap",
+            alignItems: "center"
+        }
+    }, h("span", {
+        style: {
+            background: "#dbeafe",
+            color: "#1e40af",
+            borderRadius: 20,
+            padding: "4px 12px",
+            fontSize: 12,
+            fontWeight: 700
+        }
+    }, cls + " - " + classStudents.length + " students"), btn("📊 Download Excel", ()=>exportAssessmentExcel({
+            school,
+            cls,
+            term,
+            year,
+            subjects,
+            rows: shownRows
+        }), btnExcel), btn("📄 Download Word", ()=>exportAssessmentWord({
+            school,
+            cls,
+            term,
+            year,
+            subjects,
+            rows: shownRows
+        }), btnWord), btn(pdfBusy ? "⏳ Generating..." : "📕 Download PDF", async ()=>{
+        setPdfBusy(true);
+        try {
+            await downloadNodesAsPdf([
+                sheetRef.current
+            ], "".concat(safeFileName(cls), "_").concat(safeFileName(term), "_").concat(year, "_Continuous_Assessment.pdf"), "landscape");
+        } finally{
+            setPdfBusy(false);
+        }
+    }, pdfBusy ? btnPdfBusy : btnPdf, {
+        disabled: pdfBusy
+    }), btn("🖨️ Print", ()=>window.print(), btnPrimary))), h("div", {
+        className: "no-print",
+        style: {
+            fontSize: 12,
+            color: "#6b7280",
+            marginBottom: 10
+        }
+    }, "Enter each test mark (0–100) under 1–4. AV is the average of the tests entered so far and AGG is its grade; a subject with no test yet shows X. Marks save automatically."), h("div", {
+        ref: sheetRef,
+        style: {
+            background: "white",
+            borderRadius: 12,
+            border: "1px solid #e5e7eb",
+            overflow: "hidden",
+            marginBottom: 24
+        }
+    }, h("div", {
+        style: {
+            background: "#1e3a6e",
+            color: "white",
+            padding: "12px 16px",
+            textAlign: "center",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 10
+        }
+    }, school.logo && h("img", {
+        src: school.logo,
+        alt: "logo",
+        style: {
+            width: 36,
+            height: 36,
+            objectFit: "contain",
+            flexShrink: 0
+        }
+    }), h("div", null, h("div", {
+        style: {
+            fontWeight: 800,
+            fontSize: 16
+        }
+    }, school.name), h("div", {
+        style: {
+            fontSize: 12,
+            opacity: 0.9,
+            marginTop: 2
+        }
+    }, [
+        school.poBox,
+        " | ",
+        term.toUpperCase(),
+        " ",
+        year,
+        " - ",
+        cls,
+        " CONTINUOUS ASSESSMENT"
+    ].join("")))), h("div", {
+        style: {
+            overflowX: "auto"
+        }
+    }, h("table", {
+        style: {
+            width: "100%",
+            fontSize: 12,
+            minWidth: 1100
+        }
+    }, h("thead", null, h("tr", {
+        style: {
+            background: "#1e40af",
+            color: "white"
+        }
+    }, h("th", {
+        style: th,
+        rowSpan: 2
+    }, "S/N"), h("th", {
+        style: {
+            ...th,
+            textAlign: "left",
+            minWidth: 160
+        },
+        rowSpan: 2
+    }, "NAME OF PUPIL"), subjects.map((sub)=>h("th", {
+            key: sub,
+            style: th,
+            colSpan: 6
+        }, assessmentLabel(sub))), h("th", {
+        style: th,
+        rowSpan: 2
+    }, "TOT MK"), h("th", {
+        style: th,
+        rowSpan: 2
+    }, "TOT AGG"), h("th", {
+        style: th,
+        rowSpan: 2
+    }, "DIV"), h("th", {
+        style: th,
+        rowSpan: 2
+    }, "POS")), h("tr", {
+        style: {
+            background: "#2563eb",
+            color: "white",
+            fontSize: 11
+        }
+    }, subjects.map((sub, si)=>h(React.Fragment, {
+            key: sub
+        }, ASSESSMENT_TESTS.map((n)=>h("th", {
+                key: n,
+                style: {
+                    ...hdr,
+                    background: subjColors[si % 4],
+                    color: "#1f2937"
+                }
+            }, String(n))), h("th", {
+            style: {
+                ...hdr,
+                background: "#dcfce7",
+                color: "#14532d"
+            }
+        }, "AV"), h("th", {
+            style: {
+                ...hdr,
+                background: "#fed7aa",
+                color: "#7c2d12"
+            }
+        }, "AGG"))))), h("tbody", null, shownRows.length === 0 ? h("tr", null, h("td", {
+        style: {
+            ...td,
+            padding: 24,
+            color: "#6b7280"
+        },
+        colSpan: subjects.length * 6 + 6
+    }, classStudents.length === 0 ? "No " + cls + " learners yet." : "No pupils match that search.")) : shownRows.map((r, i)=>h("tr", {
+            key: r.s.id,
+            style: {
+                background: i % 2 === 0 ? "white" : "#f8fafc"
+            }
+        }, h("td", {
+            style: td
+        }, padSN(i + 1)), h("td", {
+            style: {
+                ...td,
+                fontWeight: 600,
+                textAlign: "left"
+            }
+        }, r.s.name), r.perSub.map((p)=>h(React.Fragment, {
+                key: p.sub
+            }, ASSESSMENT_TESTS.map((n, ti)=>h("td", {
+                    key: n,
+                    style: {
+                        ...td,
+                        padding: "4px 3px"
+                    }
+                }, h(MarkInput, {
+                    value: p.tests[ti],
+                    existingVal: p.tests[ti],
+                    max: 100,
+                    style: cellInput,
+                    onCommit: (newVal)=>updateTest(r.s.id, p.sub, n, newVal)
+                }))), h("td", {
+                style: {
+                    ...td,
+                    background: "#f0fdf4",
+                    fontWeight: 700,
+                    color: p.isX ? "#dc2626" : "inherit"
+                }
+            }, p.isX ? "X" : p.av), h("td", {
+                style: {
+                    ...td,
+                    background: "#fff7ed",
+                    color: p.isX ? "#dc2626" : "inherit"
+                }
+            }, p.isX ? "X" : p.agg))), h("td", {
+            style: {
+                ...td,
+                fontWeight: 700,
+                background: "#ede9fe"
+            }
+        }, r.noMarks ? "X" : padTotMk(r.totMk) || "-"), h("td", {
+            style: {
+                ...td,
+                background: "#ede9fe",
+                color: r.hasX ? "#dc2626" : "inherit",
+                fontWeight: r.hasX ? 700 : 400
+            }
+        }, r.hasX ? "X" : r.totAgg || "-"), h("td", {
+            style: {
+                ...td,
+                fontWeight: 700,
+                color: r.hasX ? "#dc2626" : "#1e40af"
+            }
+        }, r.hasX ? "X" : r.totMk ? r.div : "-"), h("td", {
+            style: td
+        }, r.noMarks ? "X" : r.pos !== "-" ? h(PositionBadge, {
+            pos: r.pos,
+            size: 13
+        }) : "-")))), h("tfoot", null, h("tr", {
+        style: {
+            background: "#dbeafe",
+            fontWeight: 700,
+            fontSize: 12
+        }
+    }, h("td", {
+        colSpan: subjects.length * 6 + 6,
+        style: {
+            ...td,
+            textAlign: "left",
+            padding: "8px 12px",
+            color: "#1e3a6e"
+        }
+    }, "📈 Highest: " + (best || "-") + "  |  Lowest: " + (worst || "-") + "  |  Class Avg: " + (avg || "-") + "  |  DIV I: " + divCounts.I + "  II: " + divCounts.II + "  III: " + divCounts.III + "  IV: " + divCounts.IV + "  U: " + divCounts.U + "  X: " + divCounts.X)))))));
+}
+
 function GroupWork(param) {
     let { students, groupWork, setGroupWork, bands: defaultBands, specialBands, divisions, school, markEditing } = param;
     var _groupWork_cls, _period_marks;
@@ -25910,8 +26817,29 @@ function ResultSheets(param) {
     const analysisCardRef = useRef(null);
     const isLower = LOWER_CLASSES.includes(cls);
     const subjects = isLower ? LOWER_SUBJECTS : UPPER_SUBJECTS;
+    // MARK ENTRY (end-of-term exam) or CONTINUOUS ASSESSMENT (average of the
+    // class tests, shown as CA). Continuous Assessment only exists for P4-P7.
+    const [source, setSource] = useState("MARK ENTRY");
+    const isCA = source === "CONTINUOUS ASSESSMENT" && !isLower;
+    const [assessmentData, setAssessmentData] = useState({});
+    useEffect(()=>{
+        let alive = true;
+        loadShared("mkis_assessment_marks", {}).then((m)=>{
+            if (alive) setAssessmentData(m || {});
+        });
+        const id = setInterval(()=>{
+            loadShared("mkis_assessment_marks", undefined).then((m)=>{
+                if (alive && m !== undefined) setAssessmentData(m);
+            });
+        }, 6000);
+        return ()=>{
+            alive = false;
+            clearInterval(id);
+        };
+    }, []);
     // Special Grading Scale override for the selected class, if any.
-    const bands = useMemo(()=>bandsForClass(cls, defaultBands, specialBands, "End of Term", year), [
+    const bands = useMemo(()=>bandsForClass(cls, defaultBands, specialBands, isCA ? "Continuous Assessment" : "End of Term", year), [
+        isCA,
         cls,
         defaultBands,
         specialBands,
@@ -25924,7 +26852,7 @@ function ResultSheets(param) {
     ]);
     const rows = useMemo(()=>classStudents.map((s)=>{
             var _termMarks_s_id;
-            const m = ((_termMarks_s_id = termMarks[s.id]) === null || _termMarks_s_id === void 0 ? void 0 : _termMarks_s_id[tk]) || {};
+            const m = isCA ? assessmentAsTermShape(assessmentData && assessmentData[s.id] && assessmentData[s.id][tk], subjects) : ((_termMarks_s_id = termMarks[s.id]) === null || _termMarks_s_id === void 0 ? void 0 : _termMarks_s_id[tk]) || {};
             const perSub = subjects.map((sub)=>{
                 var _m_sub, _m_sub1;
                 const ca = (_m_sub = m[sub]) === null || _m_sub === void 0 ? void 0 : _m_sub.ca, exam = (_m_sub1 = m[sub]) === null || _m_sub1 === void 0 ? void 0 : _m_sub1.exam;
@@ -25974,6 +26902,8 @@ function ResultSheets(param) {
         }), [
         classStudents,
         termMarks,
+        assessmentData,
+        isCA,
         tk,
         subjects,
         bands,
@@ -26072,6 +27002,12 @@ function ResultSheets(param) {
                                 onChange: setTerm,
                                 opts: TERMS
                             }),
+                            /*#__PURE__*/ _jsx(Sel, {
+                                label: "Read Marks From",
+                                value: source,
+                                onChange: setSource,
+                                opts: ASSESSMENT_SOURCES
+                            }),
                             /*#__PURE__*/ _jsxs("div", {
                                 children: [
                                     /*#__PURE__*/ _jsx("label", {
@@ -26105,6 +27041,7 @@ function ResultSheets(param) {
                                         term,
                                         year,
                                         isLower,
+                                        caMode: isCA,
                                         subjects,
                                         sortedRows,
                                         best,
@@ -26125,6 +27062,7 @@ function ResultSheets(param) {
                                         term,
                                         year,
                                         isLower,
+                                        caMode: isCA,
                                         subjects,
                                         sortedRows,
                                         best,
@@ -26162,6 +27100,19 @@ function ResultSheets(param) {
                         ]
                     })
                 ]
+            }),
+            source === "CONTINUOUS ASSESSMENT" && isLower && /*#__PURE__*/ _jsx("div", {
+                className: "no-print",
+                style: {
+                    background: "#eff6ff",
+                    border: "1px solid #bfdbfe",
+                    color: "#1e40af",
+                    borderRadius: 10,
+                    padding: "10px 14px",
+                    fontSize: 13,
+                    marginBottom: 16
+                },
+                children: "Continuous Assessment is only kept for P4 to P7, so this " + cls + " sheet is showing Mark Entry results."
             }),
             classStudents.length > 0 && sortedRows.every((r)=>r.noMarks) && /*#__PURE__*/ _jsxs("div", {
                 style: {
@@ -26232,7 +27183,7 @@ function ResultSheets(param) {
                                         },
                                         children: [
                                             school.poBox,
-                                            " | END OF ",
+                                            isCA ? " | CONTINUOUS ASSESSMENT - " : " | END OF ",
                                             term.toUpperCase(),
                                             " ",
                                             year,
@@ -26330,7 +27281,7 @@ function ResultSheets(param) {
                                                                 background: "#dcfce7",
                                                                 color: "#14532d"
                                                             },
-                                                            children: "EX"
+                                                            children: isCA ? "CA" : "EX"
                                                         }),
                                                         /*#__PURE__*/ _jsx("th", {
                                                             style: {
@@ -33802,7 +34753,8 @@ function AuditLog() {
             mkis_examtimetable: "Exam Timetable",
             mkis_mock_marks: "Mock Results",
             mkis_pledata: "PLE Results",
-            mkis_pre_ple_marks: "Pre-PLE Results"
+            mkis_pre_ple_marks: "Pre-PLE Results",
+            mkis_assessment_marks: "Continuous Assessment"
         })[key] || key;
     const filtered = rows.filter((r)=>!filter.trim() || (r.key || "").toLowerCase().includes(filter.trim().toLowerCase())).filter((r)=>!whoFilter.trim() || (r.who || "").toLowerCase().includes(whoFilter.trim().toLowerCase())).slice(0, limit);
     const exportCsv = ()=>{
