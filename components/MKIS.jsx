@@ -1350,7 +1350,7 @@ function resultSheetHtmlTable(param) {
     head += '<th style="'.concat(thTop, '"').concat(rs, ">S/N</th>");
     head += '<th style="'.concat(thTop, 'text-align:left;min-width:150px;"').concat(rs, ">NAME OF PUPIL</th>");
     subjects.forEach((sub)=>{
-        head += isLower ? '<th style="'.concat(thTop, '"').concat(rs, ">").concat(escapeHtml(sub)).concat(lowerSubjectMax(sub) !== 100 ? " /".concat(lowerSubjectMax(sub)) : "", "</th>") : '<th style="'.concat(thTop, '" colspan="4">').concat(escapeHtml(sub), "</th>");
+        head += isLower ? '<th style="'.concat(thTop, '"').concat(rs, ">").concat(escapeHtml(sub)).concat(lowerSubjectMax(sub) !== 100 ? " /".concat(lowerSubjectMax(sub)) : "", "</th>") : '<th style="'.concat(thTop, '" colspan="3">').concat(escapeHtml(sub), "</th>");
     });
     head += '<th style="'.concat(thTop, '"').concat(rs, ">TOT MK</th>");
     if (!isLower) head += '<th style="'.concat(thTop, '"').concat(rs, '>TOT AGG</th><th style="').concat(thTop, '"').concat(rs, ">DIV</th>");
@@ -1358,7 +1358,6 @@ function resultSheetHtmlTable(param) {
     if (!isLower) {
         head += '<tr style="background:#2563eb;color:white;font-size:8pt;">';
         subjects.forEach(()=>{
-            head += '<th style="'.concat(thTop, 'background:#fef9c3;color:#713f12;">CA</th>');
             head += '<th style="'.concat(thTop, 'background:#dcfce7;color:#14532d;">EX</th>');
             head += '<th style="'.concat(thTop, 'background:#dbeafe;color:#1e3a6e;">AV</th>');
             head += '<th style="'.concat(thTop, 'background:#fed7aa;color:#7c2d12;">AG</th>');
@@ -1380,8 +1379,6 @@ function resultSheetHtmlTable(param) {
             });
         } else {
             r.perSub.forEach((p)=>{
-                var _p_ca;
-                body += '<td style="'.concat(td, 'background:#fefce8;">').concat(p.isX ? "X" : (_p_ca = p.ca) !== null && _p_ca !== void 0 ? _p_ca : "-", "</td>");
                 var _p_exam;
                 body += '<td style="'.concat(td, 'background:#f0fdf4;">').concat(p.isX ? "X" : (_p_exam = p.exam) !== null && _p_exam !== void 0 ? _p_exam : "-", "</td>");
                 var _p_av;
@@ -1389,12 +1386,12 @@ function resultSheetHtmlTable(param) {
                 body += '<td style="'.concat(td, 'background:#fff7ed;">').concat(p.isX ? "X" : p.av !== undefined ? p.agg : "-", "</td>");
             });
         }
-        body += '<td style="'.concat(td, 'font-weight:700;background:#ede9fe;">').concat(padTotMk(r.totMk) || "-", "</td>");
+        body += '<td style="'.concat(td, 'font-weight:700;background:#ede9fe;">').concat(r.noMarks ? "X" : padTotMk(r.totMk) || "-", "</td>");
         if (!isLower) {
             body += '<td style="'.concat(td, "background:#ede9fe;").concat(r.hasX ? "color:#dc2626;font-weight:700;" : "", '">').concat(r.hasX ? "X" : r.totAgg || "-", "</td>");
             body += '<td style="'.concat(td, "font-weight:700;color:").concat(r.hasX ? "#dc2626" : "#1e40af", ';">').concat(r.hasX ? "X" : r.totMk ? r.div : "-", "</td>");
         }
-        body += '<td style="'.concat(td, '">').concat(r.pos && r.pos !== "-" ? ordinal(r.pos) : "-", "</td>");
+        body += '<td style="'.concat(td, '">').concat(r.noMarks ? "X" : r.pos && r.pos !== "-" ? ordinal(r.pos) : "-", "</td>");
         body += "</tr>";
     });
     return '<table style="border-collapse:collapse;width:100%;">'.concat(head).concat(body, "</table>");
@@ -2151,7 +2148,7 @@ function resultSheetHeaderRow(isLower, subjects) {
         "NAME OF PUPIL"
     ];
     if (isLower) subjects.forEach((s)=>head.push(s));
-    else subjects.forEach((s)=>head.push("".concat(s, " CA"), "".concat(s, " EXAM"), "".concat(s, " AVG"), "".concat(s, " AGG")));
+    else subjects.forEach((s)=>head.push("".concat(s, " EXAM"), "".concat(s, " AVG"), "".concat(s, " AGG")));
     head.push("TOT MK");
     if (!isLower) head.push("TOT AGG", "DIV");
     head.push("POS");
@@ -2167,8 +2164,6 @@ function resultSheetDataRow(r, i, isLower) {
             var _p_av;
             row.push(p.isX ? "X" : (_p_av = p.av) !== null && _p_av !== void 0 ? _p_av : "-");
         } else {
-            var _p_ca;
-            row.push(p.isX ? "X" : (_p_ca = p.ca) !== null && _p_ca !== void 0 ? _p_ca : "-");
             var _p_exam;
             row.push(p.isX ? "X" : (_p_exam = p.exam) !== null && _p_exam !== void 0 ? _p_exam : "-");
             var _p_av1;
@@ -2176,12 +2171,12 @@ function resultSheetDataRow(r, i, isLower) {
             row.push(p.isX ? "X" : p.av !== undefined ? p.agg : "-");
         }
     });
-    row.push(padTotMk(r.totMk) || "-");
+    row.push(r.noMarks ? "X" : padTotMk(r.totMk) || "-");
     if (!isLower) {
         row.push(r.hasX ? "X" : r.totAgg || "-");
         row.push(r.hasX ? "X" : r.totMk ? r.div : "-");
     }
-    row.push(r.pos !== "-" ? r.pos : "-");
+    row.push(r.noMarks ? "X" : r.pos !== "-" ? r.pos : "-");
     return row;
 }
 function exportResultSheetExcel(param) {
@@ -2205,7 +2200,7 @@ function exportResultSheetExcel(param) {
         ...dataRows,
         [],
         [
-            "Highest: ".concat(best || "-", "    Lowest: ").concat(worst || "-", "    Class Average: ").concat(avg || "-", "    Best Pupil: ").concat(((_sortedRows_ = sortedRows[0]) === null || _sortedRows_ === void 0 ? void 0 : _sortedRows_.s.name) || "-")
+            "Highest: ".concat(best || "-", "    Lowest: ").concat(worst || "-", "    Class Average: ").concat(avg || "-", "    Best Pupil: ").concat(((_sortedRows_ = sortedRows.find((r)=>r.pos !== "-")) === null || _sortedRows_ === void 0 ? void 0 : _sortedRows_.s.name) || "-")
         ]
     ];
     const ws = XLSX.utils.aoa_to_sheet(aoa);
@@ -2306,7 +2301,7 @@ function exportResultSheetWord(param) {
         isLower,
         sortedRows
     });
-    body += "<p><b>Highest:</b> ".concat(escapeHtml(best || "-"), " &nbsp; <b>Lowest:</b> ").concat(escapeHtml(worst || "-"), " &nbsp; <b>Class Average:</b> ").concat(escapeHtml(avg || "-"), " &nbsp; <b>Best Pupil:</b> ").concat(escapeHtml(((_sortedRows_ = sortedRows[0]) === null || _sortedRows_ === void 0 ? void 0 : _sortedRows_.s.name) || "-"), "</p>");
+    body += "<p><b>Highest:</b> ".concat(escapeHtml(best || "-"), " &nbsp; <b>Lowest:</b> ").concat(escapeHtml(worst || "-"), " &nbsp; <b>Class Average:</b> ").concat(escapeHtml(avg || "-"), " &nbsp; <b>Best Pupil:</b> ").concat(escapeHtml(((_sortedRows_ = sortedRows.find((r)=>r.pos !== "-")) === null || _sortedRows_ === void 0 ? void 0 : _sortedRows_.s.name) || "-"), "</p>");
     if (!isLower && (subjectAnalysis === null || subjectAnalysis === void 0 ? void 0 : subjectAnalysis.length)) {
         const aHead = [
             "SUBJECT",
@@ -7159,6 +7154,9 @@ function Students(param) {
     const [showBulk, setShowBulk] = useState(false);
     const [bulkText, setBulkText] = useState("");
     const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+    // Set when the name typed in "Add New Student" already exists in that class;
+    // drives the "Learner already exists. Do you want to replace the learner?" prompt.
+    const [dupPending, setDupPending] = useState(null);
     const confirmDeleteStudent = students.find((s)=>s.id === confirmDeleteId);
     const filtered = useMemo(()=>students.filter((s)=>(filterCls === "All" || s.className === filterCls) && s.className !== "Completed" && (filterGender === "All" || s.gender === filterGender) && s.name.toLowerCase().includes(search.toLowerCase())).sort((a, b)=>a.name.localeCompare(b.name)), [
         students,
@@ -7218,9 +7216,37 @@ function Students(param) {
         "P7": "P6",
         "Completed": "P7"
     };
+    // Case/extra-space-insensitive name key used for duplicate checks.
+    const normName = (v)=>toUpper(v).replace(/\s+/g, " ").trim();
     const handleAdd = ()=>{
         if (!name.trim()) return;
+        const existing = students.find((x)=>x.className === cls && normName(x.name) === normName(name));
+        if (existing) {
+            setDupPending({
+                id: existing.id,
+                name: existing.name,
+                className: cls,
+                gender,
+                lin: lin.trim().toUpperCase()
+            });
+            return;
+        }
         addStudent(name, cls, gender, lin.trim().toUpperCase());
+        setName("");
+        setLin("");
+    };
+    // "Replace" keeps the existing learner's id (so their marks stay linked)
+    // and overwrites class, gender and LIN with what was just entered.
+    const replaceDuplicate = ()=>{
+        if (!dupPending) return;
+        markEditing && markEditing();
+        setStudents((prev)=>prev.map((x)=>x.id === dupPending.id ? {
+                    ...x,
+                    className: dupPending.className,
+                    gender: dupPending.gender,
+                    lin: dupPending.lin || x.lin || ""
+                } : x).sort((a, b)=>a.name.localeCompare(b.name)));
+        setDupPending(null);
         setName("");
         setLin("");
     };
@@ -7243,6 +7269,10 @@ function Students(param) {
         // learners in particular could revert/disappear a few seconds after
         // being saved: every OTHER mutation (add/delete/promote/marks/etc.)
         // calls markEditing(), but a plain rename never did.
+        if (students.some((x)=>x.id !== id && x.className === editCls && normName(x.name) === normName(editName))) {
+            alert("Learner already exists in ".concat(editCls, "."));
+            return;
+        }
         markEditing && markEditing();
         const afterName = toUpper(editName.trim());
         setStudents((prev)=>prev.map((s)=>s.id === id ? {
@@ -7269,7 +7299,18 @@ function Students(param) {
     const confirmBulk = ()=>{
         if (!bulkPreview) return;
         markEditing && markEditing();
-        const toAdd = bulkPreview.filter((r)=>r.keep && r.name.trim());
+        const seen = new Set(students.map((x)=>"".concat(x.className, "|").concat(normName(x.name))));
+        const skipped = [];
+        const toAdd = bulkPreview.filter((r)=>r.keep && r.name.trim()).filter((r)=>{
+            const k = "".concat(r.className, "|").concat(normName(r.name));
+            if (seen.has(k)) {
+                skipped.push(r.name);
+                return false;
+            }
+            seen.add(k);
+            return true;
+        });
+        if (skipped.length) alert("Learner already exists - skipped ".concat(skipped.length, ": ").concat(skipped.join(", ")));
         setStudents((prev)=>[
                 ...prev,
                 ...toAdd.map((r)=>({
@@ -8480,6 +8521,14 @@ function Students(param) {
                         })
                     ]
                 })
+            }),
+            dupPending && /*#__PURE__*/ _jsx(ConfirmModal, {
+                title: "Learner already exists",
+                message: "".concat(dupPending.name, " is already in ").concat(dupPending.className, ". Do you want to replace the learner?"),
+                confirmLabel: "Replace",
+                danger: false,
+                onCancel: ()=>setDupPending(null),
+                onConfirm: replaceDuplicate
             }),
             confirmPromote && /*#__PURE__*/ _jsx(ConfirmModal, {
                 title: "Promote Learners",
@@ -25971,15 +26020,19 @@ function ResultSheets(param) {
             }, 0);
             const totAgg = hasX ? "X" : perSub.reduce((a, p)=>a + (p.agg || 0), 0);
             const div = hasX ? "X" : typeof totAgg === "number" ? divisionOf(totAgg, isLower ? 5 : 4, divisions, hasF9) : "X";
+            // Learners with no exam marks at all stay on the sheet (shown as X)
+            // but are never given a position.
+            const noMarks = perSub.every((p)=>p.isX);
             return {
                 s,
                 perSub,
                 totMk,
                 totAgg,
                 div,
-                hasX
+                hasX,
+                noMarks
             };
-        }).filter((r)=>r.perSub.some((p)=>!p.isX)), [
+        }), [
         classStudents,
         termMarks,
         tk,
@@ -25999,6 +26052,7 @@ function ResultSheets(param) {
         return [
             ...indexed
         ].sort((a, b)=>{
+            if (a.pos === "-" && b.pos === "-") return 0;
             if (a.pos === "-") return 1;
             if (b.pos === "-") return -1;
             return a.pos - b.pos;
@@ -26170,7 +26224,7 @@ function ResultSheets(param) {
                     })
                 ]
             }),
-            classStudents.length > 0 && sortedRows.length === 0 && /*#__PURE__*/ _jsxs("div", {
+            classStudents.length > 0 && sortedRows.every((r)=>r.noMarks) && /*#__PURE__*/ _jsxs("div", {
                 style: {
                     background: "#fffbeb",
                     borderRadius: 12,
@@ -26294,7 +26348,7 @@ function ResultSheets(param) {
                                                         ]
                                                     }, s)) : subjects.map((s)=>/*#__PURE__*/ _jsx("th", {
                                                         style: th,
-                                                        colSpan: 4,
+                                                        colSpan: 3,
                                                         children: s
                                                     }, s)),
                                                 /*#__PURE__*/ _jsx("th", {
@@ -26331,14 +26385,6 @@ function ResultSheets(param) {
                                             },
                                             children: subjects.map((s)=>/*#__PURE__*/ _jsxs(React.Fragment, {
                                                     children: [
-                                                        /*#__PURE__*/ _jsx("th", {
-                                                            style: {
-                                                                ...th,
-                                                                background: "#fef9c3",
-                                                                color: "#713f12"
-                                                            },
-                                                            children: "CA"
-                                                        }),
                                                         /*#__PURE__*/ _jsx("th", {
                                                             style: {
                                                                 ...th,
@@ -26393,16 +26439,9 @@ function ResultSheets(param) {
                                                         children: p.isX ? "X" : (_p_av = p.av) !== null && _p_av !== void 0 ? _p_av : "-"
                                                     }, p.sub);
                                                 }) : r.perSub.map((p)=>/*#__PURE__*/ {
-                                                    var _p_ca, _p_exam, _p_av;
+                                                    var _p_exam, _p_av;
                                                     return _jsxs(React.Fragment, {
                                                         children: [
-                                                            /*#__PURE__*/ _jsx("td", {
-                                                                style: {
-                                                                    ...td,
-                                                                    background: "#fefce8"
-                                                                },
-                                                                children: p.isX ? "X" : (_p_ca = p.ca) !== null && _p_ca !== void 0 ? _p_ca : "-"
-                                                            }),
                                                             /*#__PURE__*/ _jsx("td", {
                                                                 style: {
                                                                     ...td,
@@ -26434,7 +26473,7 @@ function ResultSheets(param) {
                                                         fontWeight: 700,
                                                         background: "#ede9fe"
                                                     },
-                                                    children: padTotMk(r.totMk) || "-"
+                                                    children: r.noMarks ? "X" : padTotMk(r.totMk) || "-"
                                                 }),
                                                 !isLower && /*#__PURE__*/ _jsxs(_Fragment, {
                                                     children: [
@@ -26461,7 +26500,7 @@ function ResultSheets(param) {
                                                     style: {
                                                         ...td
                                                     },
-                                                    children: r.pos !== "-" ? /*#__PURE__*/ _jsx(PositionBadge, {
+                                                    children: r.noMarks ? "X" : r.pos !== "-" ? /*#__PURE__*/ _jsx(PositionBadge, {
                                                         pos: r.pos,
                                                         size: 13
                                                     }) : "-"
@@ -26477,7 +26516,7 @@ function ResultSheets(param) {
                                             fontSize: 12
                                         },
                                         children: /*#__PURE__*/ _jsxs("td", {
-                                            colSpan: isLower ? subjects.length + 4 : subjects.length * 4 + 6,
+                                            colSpan: isLower ? subjects.length + 4 : subjects.length * 3 + 6,
                                             style: {
                                                 ...td,
                                                 textAlign: "left",
@@ -26499,7 +26538,7 @@ function ResultSheets(param) {
                                                 }),
                                                 " \xa0|\xa0 Best Pupil: ",
                                                 /*#__PURE__*/ _jsx("b", {
-                                                    children: ((_sortedRows_ = sortedRows[0]) === null || _sortedRows_ === void 0 ? void 0 : _sortedRows_.s.name) || "-"
+                                                    children: ((_sortedRows_ = sortedRows.find((r)=>r.pos !== "-")) === null || _sortedRows_ === void 0 ? void 0 : _sortedRows_.s.name) || "-"
                                                 })
                                             ]
                                         })
